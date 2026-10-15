@@ -23,8 +23,10 @@ export const recall = (runId: string, session: string): Run | undefined => {
   const r = runs.get(runId);
   return r && fresh(r) && r.session === session ? r : undefined;
 };
-export const latestRun = (session: string, scenario: ScenarioId): Run | undefined =>
-  [...runs.values()].reverse().find((r) => fresh(r) && r.session === session && r.scenario === scenario);
+// The newest fresh run of this session and scenario; with `repo`, the newest one whose report lists that repo (so a
+// pasted guest repo can still be marked after an org run, and vice versa).
+export const latestRun = (session: string, scenario: ScenarioId, repo?: string): Run | undefined =>
+  [...runs.values()].reverse().find((r) => fresh(r) && r.session === session && r.scenario === scenario && (!repo || r.report.exposures.some((x) => x.repo === repo)));
 
 export type ChatFn = (req: ChatReq, provider?: string) => Promise<ChatRes>;
 // Once a tool call happened, stay on that provider: a Gemini raw message must never be echoed to Groq. Per call,

@@ -327,7 +327,7 @@ app.post('/api/remediate', async (c) => {
   if (typeof b.repo !== 'string' || !REPO.test(b.repo)) throw new HttpError(400, 'repo must be owner/name.');
   if (b.action !== 'remediated') throw new HttpError(400, 'Unknown action.');
   const session = c.get('sid');
-  const run = latestRun(session, s);
+  const run = latestRun(session, s, b.repo);
   const e = run?.report.exposures.find((x) => x.repo === b.repo);
   if (!run || !e) throw new HttpError(404, 'Run a triage that lists this repo first.');
   if ((marks.get(session) ?? 0) >= 50) throw new HttpError(429, 'This session has reached its 50 remediation marks.');

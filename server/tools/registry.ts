@@ -73,6 +73,9 @@ export async function incidentExposure(g: Graph, p: { incident: unknown; at: unk
     ...(await c.q(Q.EXPOSURE_LOCKED, params)).map((h) => ({ ...h, tier: 'LOCKED' as const })),
     ...(await c.q(Q.EXPOSURE_ADMITS, params)).map((h) => ({ ...h, tier: 'WOULD_PULL' as const })),
   ];
+  // Same tiers as the triage report: a repo holding the compromised account's packages is MAINTAINER, not CLEAN.
+  const maintainer = (await c.q(Q.INCIDENT, { incident: params.incident }))[0]?.maintainer as string | null | undefined;
+  const blast = new Map((maintainer ? await c.q(Q.MAINTAINER_BLAST_RADIUS, { maintainer }) : []).map((b) => [b.repo as string, b]));
   const rows = repos.map((r): ExposureRow => {
     const own = hits.filter((h) => h.repo === r.repo);
     const locked = own.filter((h) => h.tier === 'LOCKED');
@@ -83,19 +86,20 @@ export async function incidentExposure(g: Graph, p: { incident: unknown; at: unk
     const since = locked.length ? Math.max(...locked.map((h) => h.since)) : Math.min(...admits.map((h) => h.since));
     return {
       repo: r.repo, synthetic: !!r.synthetic, team: r.team ?? null,
-      tier: locked.length ? 'LOCKED' : admits.length ? 'WOULD_PULL' : 'CLEAN',
+      tier: locked.length ? 'LOCKED' : admits.length ? 'WOULD_PULL' : blast.has(r.repo) ? 'MAINTAINER' : 'CLEAN',
       versions: [...new Set(order.map((h) => h.version as string))],
       depth: own.length ? Math.min(...own.map((h) => h.depth)) : 0,
       dev: own.length > 0 && own.every((h) => h.devFlags.every(Boolean)),
       ranges: [...new Set(admits.flatMap((h) => h.ranges as string[]))],
-      packages: [], remediated: null, since: Number.isFinite(since) ? since : null,
+      packages: !locked.length && !admits.length ? ((blast.get(r.repo)?.sample as string[] | undefined) ?? []) : [],
+      remediated: null, since: Number.isFinite(since) ? since : null,
     };
   }).sort((a, b) => RANK[a.tier] - RANK[b.tier] || a.depth - b.depth || a.repo.localeCompare(b.repo));
   const n = (t: Tier) => rows.filter((r) => r.tier === t).length;
   const exposed = rows.filter((r) => r.tier !== 'CLEAN');
-  const summary = `at ${utc(params.at)}: ${n('LOCKED')} LOCKED, ${n('WOULD_PULL')} WOULD_PULL, ${n('CLEAN')} CLEAN of ${plural(rows.length, 'repo')}`
+  const summary = `at ${utc(params.at)}: ${n('LOCKED')} LOCKED, ${n('WOULD_PULL')} WOULD_PULL, ${n('MAINTAINER')} MAINTAINER, ${n('CLEAN')} CLEAN of ${plural(rows.length, 'repo')}`
     + (exposed.length ? `; e.g. ${few(exposed.map((r) => r.repo))}` : '');
-  return c.result('incident_exposure', params, summary, rows, exposed.flatMap((r) => [r.repo, r.team, ...r.versions, ...r.ranges]));
+  return c.result('incident_exposure', params, summary, rows, exposed.flatMap((r) => [r.repo, r.team, ...r.versions, ...r.ranges, ...r.packages]));
 }
 
 export async function maintainerBlastRadius(g: Graph, p: { maintainer: unknown }) {
