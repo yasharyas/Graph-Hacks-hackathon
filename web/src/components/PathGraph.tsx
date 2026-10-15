@@ -1,6 +1,6 @@
-/* PathGraph: the centre pane. Wraps the lazy canvas (PathGraphCanvas) with the legend, an empty state, text-only
- * hover info, a visually-hidden list of chains that mirrors the canvas, and, below 768px, a breadcrumb chain
- * instead of the graph (docs/design.md section 5).
+/* PathGraph: the centre pane. Wraps the lazy canvas (PathGraphCanvas) with the legend, an empty state, a
+ * visually-hidden list of chains that mirrors the canvas, and, below 768px, a breadcrumb chain instead of the graph
+ * (docs/design.md section 5). Hover details are drawn by the canvas itself, never as DOM text.
  * Props:
  *   exposures, paths, incident   graph input; before a triage the parent passes the scrubber's exposures and no paths
  *   selectedRepo                 the table drives selection; keyboard users select rows in the table
@@ -11,7 +11,7 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import type { Exposure, ExposurePath, IncidentMeta } from '../data/types.ts';
 import { EmptyState } from './EmptyState.tsx';
-import { PathChain } from './PathChip.tsx';
+import { PathChain, PathChip } from './PathChip.tsx';
 
 const Canvas = lazy(() => import('./PathGraphCanvas.tsx'));
 
@@ -24,12 +24,23 @@ export interface PathGraphProps {
   onSelectRepo: (repo: string) => void;
 }
 
-const LEGEND: { label: string; shape: ReactNode }[] = [
-  { label: 'Compromised maintainer', shape: <circle cx="8" cy="8" r="6" fill="var(--graph-maintainer)" stroke="var(--graph-maintainer-ring)" strokeWidth="1.5" /> },
-  { label: 'Malicious version', shape: <circle cx="8" cy="8" r="5" fill="var(--graph-bad)" /> },
-  { label: 'Dependency', shape: <circle cx="8" cy="8" r="3.5" fill="var(--graph-dep)" /> },
-  { label: 'Repo', shape: <rect x="2.5" y="2.5" width="11" height="11" rx="2" fill="var(--graph-repo)" /> },
-  { label: 'Team', shape: <path d="M8 1.5 14.5 8 8 14.5 1.5 8Z" fill="var(--graph-team)" /> },
+// Left to right, the order the canvas lays them out; the shapes are the canvas shapes (radii scaled to 16px).
+const LEGEND: { id: 'maintainer' | 'bad' | 'dep' | 'repo' | 'team' | 'locked'; label: string; shape: ReactNode }[] = [
+  { id: 'maintainer', label: 'Compromised maintainer', shape: <circle cx="8" cy="8" r="6" fill="var(--graph-maintainer)" stroke="var(--graph-maintainer-ring)" strokeWidth="1.5" /> },
+  { id: 'bad', label: 'Malicious version', shape: <circle cx="8" cy="8" r="4.5" fill="var(--graph-bad)" /> },
+  { id: 'dep', label: 'Dependency', shape: <circle cx="8" cy="8" r="2.6" fill="var(--graph-dep)" /> },
+  { id: 'repo', label: 'Repo', shape: <rect x="3" y="3" width="10" height="10" rx="1.5" fill="var(--graph-repo)" /> },
+  { id: 'team', label: 'Team', shape: <path d="M8 2 14 8 8 14 2 8Z" fill="var(--graph-team)" /> },
+  {
+    id: 'locked',
+    label: 'Locked repo',
+    shape: (
+      <>
+        <rect x="4" y="4" width="8" height="8" rx="1.2" fill="var(--graph-repo)" />
+        <circle cx="8" cy="8" r="6.3" fill="none" stroke="var(--tier-locked)" strokeWidth="1.5" />
+      </>
+    ),
+  },
 ];
 
 /** Callback ref + state, because the measured box mounts and unmounts (empty state, breadcrumb). */
@@ -59,21 +70,37 @@ function useWide() {
   return wide;
 }
 
+const versionsText = (versions: string[], shown = 3) =>
+  versions.slice(0, shown).join(', ') + (versions.length > shown ? ` and ${versions.length - shown} more` : '');
+
 export function PathGraph({ exposures, paths, incident, selectedRepo, playing, onSelectRepo }: PathGraphProps) {
   const [box, { width, height }] = useSize<HTMLDivElement>();
   const wide = useWide();
-  const [hover, setHover] = useState<string | null>(null);
   const bad = new Set(incident?.versions.map((v) => v.id));
-  const shownPath = paths.find((p) => p.repo === selectedRepo) ?? paths[0];
+  // A repo without a drafted path has none to show: never fall back to another repo's chain.
+  const shownPath = selectedRepo ? paths.find((p) => p.repo === selectedRepo) : paths[0];
+  const selected = exposures.find((e) => e.repo === selectedRepo);
   const label = selectedRepo
-    ? `Path graph. Selected: ${selectedRepo}${shownPath && shownPath.repo === selectedRepo ? `, ${shownPath.chain.join(', then ')}${shownPath.chain.at(-1) === shownPath.version ? '' : `, then ${shownPath.version}`}` : ''}.`
-    : `Path graph of ${exposures.length} exposed repos. Select a repo in the table to highlight its path.`;
+    ? `Path graph. Selected: ${selectedRepo}.${shownPath ? ` Path: ${shownPath.chain.join(', then ')}${shownPath.chain.at(-1) === shownPath.version ? '' : `, then ${shownPath.version}`}.` : selected ? ` Reaches ${versionsText(selected.versions)}.` : ''}`
+    : `Path graph of ${exposures.length} exposed repos. ${paths.length ? 'Select a repo in the table to highlight its path.' : 'Run a triage, then select a repo in the table to highlight its path.'}`;
+  // The canvas draws the 3 most widely shared versions for repos without a drafted path (buildGraph).
+  const capped = exposures.some((e) => e.versions.length > 3 && !paths.some((p) => p.repo === e.repo));
+  // Only the kinds the canvas will draw (the same rules as buildGraph).
+  const shown = {
+    maintainer: !!incident?.maintainer,
+    bad: true,
+    dep: paths.some((p) => p.chain.slice(1).some((id) => id !== p.version)),
+    repo: true,
+    team: exposures.some((e) => e.team),
+    locked: exposures.some((e) => e.tier === 'LOCKED'),
+  };
 
   return (
     <section aria-label="Path graph" className="flex h-full min-h-0 flex-col bg-bg-0">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-line-1 px-3 py-2">
-        <h2 className="sr-only">Path graph</h2>
-        {LEGEND.map((l) => (
+      <h2 className="sr-only">Path graph</h2>
+      {/* The legend keys the canvas, so it goes with it: below 768px the pane is a breadcrumb. */}
+      <div className={`flex-wrap items-center gap-x-4 gap-y-1 border-b border-line-1 px-3 py-2 ${wide ? 'flex' : 'hidden'}`}>
+        {LEGEND.filter((l) => shown[l.id]).map((l) => (
           <span key={l.label} className="inline-flex items-center gap-1.5 text-xs text-fg-1">
             <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden>
               {l.shape}
@@ -81,6 +108,14 @@ export function PathGraph({ exposures, paths, incident, selectedRepo, playing, o
             {l.label}
           </span>
         ))}
+        {/* Always laid out (invisible until a repo is selected) so the legend never changes height and re-fits the canvas. */}
+        <span className={`inline-flex items-center gap-1.5 text-xs text-fg-1 ${selectedRepo ? '' : 'invisible'}`} aria-hidden={!selectedRepo}>
+          <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden>
+            <path d="M1 8h14" stroke="var(--graph-link-active)" strokeWidth="2" />
+          </svg>
+          Selected chain
+        </span>
+        {capped && <span className="text-xs text-fg-2 md:ml-auto">Up to 3 versions per repo shown</span>}
       </div>
 
       {exposures.length === 0 ? (
@@ -98,32 +133,47 @@ export function PathGraph({ exposures, paths, incident, selectedRepo, playing, o
                 width={width}
                 height={height}
                 onSelectRepo={onSelectRepo}
-                onHover={setHover}
               />
             </Suspense>
           )}
-          <p className="pointer-events-none absolute bottom-2 left-3 font-mono text-xs text-fg-1" aria-hidden>
-            {hover}
-          </p>
         </div>
       ) : (
-        <div className="flex flex-col gap-3 p-4">
-          <p className="label-caps">{selectedRepo ? `Path for ${selectedRepo}` : 'Path'}</p>
-          {shownPath ? <PathChain path={shownPath} badVersions={bad} /> : <p className="text-sm text-fg-1">No drafted path for this repo.</p>}
+        <div className="flex flex-col items-start gap-3 p-4">
+          <p className="label-caps">{selectedRepo ? 'Path for the selected repo' : 'Path'}</p>
+          {selectedRepo && <PathChip item={selectedRepo} />}
+          {shownPath ? (
+            <PathChain path={shownPath} badVersions={bad} />
+          ) : selected ? (
+            <div className="flex flex-col items-start gap-2">
+              <p className="text-sm text-fg-1">No drafted path for this repo. It reaches:</p>
+              <div className="flex flex-wrap gap-1">
+                {selected.versions.slice(0, 5).map((v) => (
+                  <PathChip key={v} item={v} bad />
+                ))}
+                {selected.versions.length > 5 && <span className="font-mono text-2xs text-fg-2">+{selected.versions.length - 5}</span>}
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-fg-1">No drafted path yet.</p>
+          )}
           <p className="text-xs text-fg-2">Select a repo in the table to change the path.</p>
         </div>
       )}
 
       {/* Mirrors the canvas for assistive tech (and is the only graph content on touch widths). */}
-      <ul className="sr-only" aria-label="Exposure paths">
-        {paths.map((p) => (
-          <li key={p.id}>
-            {p.id}: {p.chain.join(' to ')}
-            {p.chain.at(-1) === p.version ? '' : ` to ${p.version}`}
-            {p.range ? ` (range ${p.range})` : ''}
-          </li>
-        ))}
+      <ul className="sr-only" aria-label="Exposed repos and their paths">
+        {exposures.map((e) => {
+          const p = paths.find((x) => x.repo === e.repo);
+          const deps = p ? p.chain.slice(1).filter((id) => id !== p.version) : [];
+          return (
+            <li key={e.repo}>
+              {e.repo} ({e.tier}):{' '}
+              {p ? `reaches ${p.version}${deps.length ? ` via ${deps.join(', then ')}` : ', declared directly'}${p.range ? ` (range ${p.range})` : ''}` : `reaches ${versionsText(e.versions)}`}
+            </li>
+          );
+        })}
       </ul>
     </section>
   );
 }
+

@@ -11,6 +11,7 @@ import type { ToolCardState } from '../data/useTriage.ts';
 import { Button } from './Button.tsx';
 import { copyText } from './copy.ts';
 import { EmptyState } from './EmptyState.tsx';
+import { influenceShares } from './ExecSummary.tsx';
 import { Copy } from './icons/Glyphs.tsx';
 
 const TABS = ['Concentration', 'All Cypher used', 'Triage history', 'Graph stats'] as const;
@@ -29,13 +30,13 @@ export function InsightTabs({ report, cards, graph, totalMs }: InsightTabsProps)
   const results = cards.flatMap((c) => (c.result ? [{ card: c, r: c.result }] : []));
   const cypher = results.flatMap(({ r }) => r.cypher.map((q) => `// ${r.tool}\n${q}`)).join('\n\n');
   const history = results.find(({ r }) => r.tool === 'recall_triage')?.r.rows ?? [];
-  const max = Math.max(...report.concentration.map((c) => c.influence), 0.01);
+  const shares = influenceShares(report.concentration);
+  const repos = Object.values(report.counts).reduce((a, b) => a + b, 0);
 
   const onKey = (e: KeyboardEvent, i: number) => {
-    const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
-    if (!step) return;
+    const next = e.key === 'Home' ? 0 : e.key === 'End' ? TABS.length - 1 : e.key === 'ArrowRight' ? (i + 1) % TABS.length : e.key === 'ArrowLeft' ? (i - 1 + TABS.length) % TABS.length : -1;
+    if (next < 0) return;
     e.preventDefault();
-    const next = (i + step + TABS.length) % TABS.length;
     setTab(next);
     refs.current[next]?.focus();
   };
@@ -51,40 +52,57 @@ export function InsightTabs({ report, cards, graph, totalMs }: InsightTabsProps)
             role="tab"
             type="button"
             aria-selected={tab === i}
-            aria-controls={`${base}-p${i}`}
+            aria-controls={tab === i ? `${base}-panel` : undefined} // only the selected tab has a panel in the DOM
             tabIndex={tab === i ? 0 : -1}
             onClick={() => setTab(i)}
             onKeyDown={(e) => onKey(e, i)}
-            className={`-mb-px shrink-0 border-b-2 px-2 py-2.5 text-sm whitespace-nowrap ${tab === i ? 'border-fg-0 text-fg-0' : 'border-transparent text-fg-1 hov:text-fg-0'}`}
+            // The ring sits inside the button: the tablist scrolls horizontally and would clip an outer ring.
+            className={`-mb-px min-h-(--control-h) shrink-0 border-b-2 px-2 text-sm whitespace-nowrap focus-visible:-outline-offset-2 ${tab === i ? 'border-fg-0 text-fg-0' : 'border-transparent text-fg-1 hov:text-fg-0'}`}
           >
             {t}
           </button>
         ))}
       </div>
 
-      <div role="tabpanel" id={`${base}-p${tab}`} aria-labelledby={`${base}-t${tab}`} className="p-3 text-sm">
-        {tab === 0 && (
-          <ul className="flex flex-col gap-2">
-            {report.concentration.map((c) => (
-              <li key={c.maintainer} className="grid grid-cols-[minmax(0,9rem)_1fr_auto] items-center gap-2">
-                <span className="truncate text-fg-0">{c.maintainer}</span>
-                <span className="h-1.5 rounded-xs bg-bg-3" aria-hidden>
-                  <span className="block h-full rounded-xs bg-fg-1" style={{ width: `${(c.influence / max) * 100}%` }} />
-                </span>
-                <span className="font-mono text-xs text-fg-1 tabular-nums">
-                  {c.influence.toFixed(2)} · {c.packages} pkgs · {c.reposReached} repos
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
+      <div
+        role="tabpanel"
+        id={`${base}-panel`}
+        aria-labelledby={`${base}-t${tab}`}
+        tabIndex={tab === 1 ? undefined : 0} // panels without a focusable child are reachable by keyboard themselves
+        className="p-3 text-sm"
+      >
+        {tab === 0 &&
+          (shares.length ? (
+            <>
+              <p className="mb-3 max-w-(--measure) text-fg-1">
+                Who could be the next compromised account: each share is that maintainer&rsquo;s part of the top {shares.length}&rsquo;s combined PageRank
+                across the org&rsquo;s dependency graph.
+              </p>
+              <ul className="flex flex-col gap-3">
+                {shares.map((c) => (
+                  <li key={c.maintainer} className="grid grid-cols-[minmax(0,8rem)_1fr_2.75rem] items-center gap-x-2 gap-y-1">
+                    <span className="truncate text-fg-0">{c.maintainer}</span>
+                    <span className="h-1.5 rounded-xs bg-bg-3" aria-hidden>
+                      <span className="block h-full rounded-xs bg-fg-1" style={{ width: `${c.bar}%` }} />
+                    </span>
+                    <span className="text-right font-sans font-bold text-fg-0 tabular-nums">{c.share}</span>
+                    <span className="col-span-3 text-xs text-fg-1 tabular-nums">
+                      {c.packages} packages · reaches {c.reposReached} of {repos} repos
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <EmptyState className="p-0" title="No concentration data" cause="The concentration_risk tool returned no maintainers for this run." />
+          ))}
         {tab === 1 && (
           <div className="flex flex-col items-start gap-2">
             <Button icon={<Copy size={16} />} onClick={() => void copyText(cypher, 'Cypher')} disabled={!cypher}>
               Copy all
             </Button>
             {cypher ? (
-              <pre className="max-h-72 w-full overflow-auto rounded-xs bg-bg-3 p-2 text-xs leading-[18px] text-fg-0">
+              <pre tabIndex={0} role="region" aria-label="Cypher queries" className="max-h-72 w-full overflow-auto rounded-xs bg-bg-3 p-2 text-xs leading-[18px] text-fg-0">
                 <code>{cypher}</code>
               </pre>
             ) : (
@@ -120,7 +138,7 @@ export function InsightTabs({ report, cards, graph, totalMs }: InsightTabsProps)
               </>
             )}
             <dt className="text-fg-1">Repos analysed</dt>
-            <dd className="font-mono text-xs text-fg-0 tabular-nums">{Object.values(report.counts).reduce((a, b) => a + b, 0)}</dd>
+            <dd className="font-mono text-xs text-fg-0 tabular-nums">{repos}</dd>
             {results.map(({ card, r }) => (
               <div key={card.id} className="contents">
                 <dt className="font-mono text-xs text-fg-2">{r.tool}</dt>
