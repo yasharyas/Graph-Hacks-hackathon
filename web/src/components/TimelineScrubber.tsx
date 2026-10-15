@@ -9,9 +9,14 @@
  *   playing, onPlay, onPause, onSeek(at)
  *   landingEnd         where the first-load autoplay stops; a finished autoplay labels the button "Play the N minutes"
  *   compact            report mode: one row (play, headline, counts, track). Landing mode is the hero band: its counts
- *                      strip carries the tier "?" legend and a plain sublabel under each count (from 640px)
+ *                      strip carries a plain sublabel under each count (from 640px). Both carry the tier "?" legend right
+ *                      after the counts, and a tap or click on the counts opens it too (a phone reader taps "WOULD_PULL 20")
  *   scope, scopeNote, scopeNoteShort   what the numbers are about ("Acme demo org · 21 repos") and what is real in it: the sentence
- *                      in the landing band, a few words after the scope in the compact row
+ *                      in the landing band, a few words on the compact row's second line
+ *   scopeSource        a pasted repo: which lockfile it was judged on ("lockfile at commit 5f8e8a8 from 2025-09-01", or a
+ *                      counterfactual). The compact row's second line, in place of scopeNoteShort. Both compact lines are
+ *                      one line each (truncated, full text in the title), so the band keeps its height when a pasted
+ *                      repo's report replaces the demo org's labels: nothing below it shifts
  *   failed             the triage did not run: no counter, no counts (a stale number beside "did not run" reads as a result)
  *   remediated         repos marked remediated: printed beside the exposed count ("· 2 marked remediated")
  *   trailing           compact row only: the action at its end ("Run again")
@@ -22,6 +27,8 @@
  * are different parents). The first marker is the first exposure, so its label to OSV's is the figure on screen. The scrub
  * bubble is clamped inside the track. Keyboard: left/right = 1 min, Shift+arrows = 10 min, Space = play/pause. Scrubbing is
  * instant. aria-valuetext reads "13:42 UTC, 5 repos exposed" (the timeline's own count at that minute).
+ * Forced colors: the track, its fill and the ticks are drawn in system colours (styles.css, data-scrub-*), not backgrounds
+ * the browser would drop.
  */
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { IncidentMeta, TimelinePoint } from '../data/types.ts';
@@ -49,6 +56,7 @@ export interface TimelineScrubberProps {
   scope?: string | null;
   scopeNote?: string | null;
   scopeNoteShort?: string | null;
+  scopeSource?: string | null;
   failed?: boolean;
   remediated?: number;
   stale?: boolean;
@@ -56,7 +64,7 @@ export interface TimelineScrubberProps {
   trailing?: ReactNode;
 }
 
-export function TimelineScrubber({ incident, points, at, snapshot, playing, onPlay, onPause, onSeek, landingEnd, compact = false, scope = null, scopeNote = null, scopeNoteShort = null, failed = false, remediated = 0, stale = false, trailing }: TimelineScrubberProps) {
+export function TimelineScrubber({ incident, points, at, snapshot, playing, onPlay, onPause, onSeek, landingEnd, compact = false, scope = null, scopeNote = null, scopeNoteShort = null, scopeSource = null, failed = false, remediated = 0, stale = false, trailing }: TimelineScrubberProps) {
   const ready = incident !== null && points.length > 0;
   const start = ready ? points[0]!.at : 0;
   const end = ready ? points.at(-1)!.at : 1;
@@ -71,6 +79,7 @@ export function TimelineScrubber({ incident, points, at, snapshot, playing, onPl
   const bubbleRef = useRef<HTMLSpanElement>(null);
   const [bubbleW, setBubbleW] = useState(0);
   const [placed, setPlaced] = useState<{ left: number; row: number }[]>([]);
+  const [legend, setLegend] = useState(false);
   const wide = trackW >= 520;
   const marks = incident ? markersOf(incident).map((m) => ({ ...m, label: wide ? m.long : m.short })) : [];
   const sig = `${start}|${end}|${marks.map((m) => `${m.t}${m.label}`).join()}`;
@@ -142,48 +151,60 @@ export function TimelineScrubber({ incident, points, at, snapshot, playing, onPl
         <span className="text-sm text-fg-1">{failed ? 'no result: the triage did not run' : `${exposed === 1 ? 'repo' : 'repos'} one install from malware`}</span>
         {remediated > 0 && !failed && <span className="text-sm whitespace-nowrap text-tier-clean">· {remediated} marked remediated</span>}
       </p>
-      {scope && (
-        <p className="text-xs text-fg-1">
-          {scope}
-          {scopeNote && !compact && <span className="text-fg-2"> · {scopeNote}</span>}
-          {scopeNoteShort && compact && <span className="max-sm:hidden"> · {scopeNoteShort}</span>}
-        </p>
-      )}
+      {scope &&
+        (compact ? (
+          <>
+            <p className="truncate text-xs text-fg-1" title={scope}>
+              {scope}
+            </p>
+            <p className="truncate text-xs text-fg-1" title={scopeSource ?? scopeNoteShort ?? undefined}>
+              {scopeSource ?? scopeNoteShort ?? ' '}
+            </p>
+          </>
+        ) : (
+          <p className="text-xs text-fg-1">
+            {scope}
+            {scopeNote && <span className="text-fg-2"> · {scopeNote}</span>}
+          </p>
+        ))}
     </div>
   );
 
-  // Compact: one run of numbers. Landing: a strip with a plain sublabel under each count (from 640px) and the "?" legend.
+  // Compact: one run of numbers. Landing: a strip with a plain sublabel under each count (from 640px). The "?" legend sits
+  // right after the counts in both, and a tap on the counts opens it (the "?" is the keyboard and screen-reader way in).
+  const openLegend = () => setLegend(true);
   const counts = compact ? (
-    <dl className="flex flex-wrap gap-x-5 gap-y-1">
-      {stats.map((s) => (
-        <div key={s.label} className="flex items-baseline gap-1.5">
-          <dt className="font-mono text-2xs text-fg-1">{s.label}</dt>
-          <dd className={`min-w-[1.5ch] text-right text-md font-bold tabular-nums ${s.value && !failed ? s.cls : 'text-fg-2'}`}>{num(s.value)}</dd>
-        </div>
-      ))}
-    </dl>
-  ) : (
-    <div className="flex items-start gap-2 border-y border-line-1 py-1.5">
-      <dl className="flex min-w-0 flex-1 flex-wrap gap-x-5 gap-y-1 sm:grid sm:grid-cols-4 xl:grid-cols-2">
+    <div className="flex items-center gap-2">
+      <dl data-legend-trigger="" onClick={openLegend} className="flex cursor-help flex-wrap gap-x-5 gap-y-1">
         {stats.map((s) => (
-          <div key={s.label} className="grid min-w-0 grid-cols-[auto_1fr] items-baseline gap-x-1.5">
+          <div key={s.label} className="flex items-baseline gap-1.5">
             <dt className="font-mono text-2xs text-fg-1">{s.label}</dt>
-            <dd className={`text-md font-bold tabular-nums ${s.value && !failed ? s.cls : 'text-fg-2'}`}>{num(s.value)}</dd>
-            <dd className="col-span-2 text-xs text-fg-1 max-sm:hidden">{s.sub}</dd>
+            <dd className={`min-w-[1.5ch] text-right text-md font-bold tabular-nums ${s.value && !failed ? s.cls : 'text-fg-2'}`}>{num(s.value)}</dd>
           </div>
         ))}
       </dl>
-      <span className="max-sm:hidden">
-        <TierLegend />
-      </span>
+      <TierLegend open={legend} onOpenChange={setLegend} />
+    </div>
+  ) : (
+    <div className="flex items-start gap-2 border-y border-line-1 py-1.5">
+      <dl data-legend-trigger="" onClick={openLegend} className="flex min-w-0 flex-1 cursor-help flex-wrap gap-x-4 gap-y-1 sm:grid sm:grid-cols-4 sm:gap-x-5 short:grid-cols-2 xl:grid-cols-2 xl:[@media(max-height:800px)]:flex">
+        {stats.map((s) => (
+          <div key={s.label} className="grid min-w-0 grid-cols-[auto_1fr] items-baseline gap-x-1.5">
+            <dt className="font-mono text-2xs whitespace-nowrap text-fg-1">{s.label}</dt>
+            <dd className={`text-md font-bold tabular-nums ${s.value && !failed ? s.cls : 'text-fg-2'}`}>{num(s.value)}</dd>
+            <dd className="col-span-2 text-xs text-fg-1 max-sm:hidden short:hidden lg:[@media(max-height:800px)]:hidden">{s.sub}</dd>
+          </div>
+        ))}
+      </dl>
+      <TierLegend open={legend} onOpenChange={setLegend} />
     </div>
   );
 
   const track = (
     <div className="relative pt-5" style={{ paddingBottom: rows * ROW + 4 }}>
       <div ref={setTrackEl} className="pointer-events-none absolute inset-x-2 top-5 h-6">
-        <div className="absolute inset-x-0 top-1/2 h-0.5 -translate-y-1/2 rounded-full bg-line-3" />
-        {ready && <div className="absolute top-1/2 left-0 h-0.5 -translate-y-1/2 rounded-full bg-fg-1" style={{ width: `${pct(at)}%` }} />}
+        <div data-scrub-track="" className="absolute inset-x-0 top-1/2 h-0.5 -translate-y-1/2 rounded-full bg-line-3" />
+        {ready && <div data-scrub-fill="" className="absolute top-1/2 left-0 h-0.5 -translate-y-1/2 rounded-full bg-fg-1" style={{ width: `${pct(at)}%` }} />}
         <span
           ref={bubbleRef}
           className="absolute -top-5 -translate-x-1/2 rounded-xs bg-bg-2 px-1.5 font-mono text-2xs text-fg-0 tabular-nums"
@@ -193,7 +214,7 @@ export function TimelineScrubber({ incident, points, at, snapshot, playing, onPl
           {ready ? utc(at) : '--:--'}
         </span>
         {marks.map((m) => (
-          <span key={m.key} className={`absolute top-1/2 h-3 w-0.5 -translate-x-1/2 -translate-y-1/2 ${m.bad ? 'bg-infect-400' : 'bg-fg-2'}`} style={{ left: `${pct(m.t)}%` }} />
+          <span key={m.key} data-scrub-tick={m.bad ? 'bad' : ''} className={`absolute top-1/2 h-3 w-0.5 -translate-x-1/2 -translate-y-1/2 ${m.bad ? 'bg-infect-400' : 'bg-fg-2'}`} style={{ left: `${pct(m.t)}%` }} />
         ))}
         {marks.map((m, i) => (
           <span
@@ -240,13 +261,9 @@ export function TimelineScrubber({ incident, points, at, snapshot, playing, onPl
         <>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             {playButton}
-            {/* a phone's legend "?" sits beside Play, where there is room (the counts strip below is full there) */}
-            <span className="ml-auto sm:hidden">
-              <TierLegend />
-            </span>
             {headline}
             {/* a phone shows the time on the track's bubble (and in the header): the band's own chip would only push the actions down */}
-            <p className="ml-auto rounded-xs bg-bg-2 px-2 py-0.5 font-mono text-xs text-fg-0 tabular-nums max-sm:hidden">
+            <p className="ml-auto rounded-xs bg-bg-2 px-2 py-0.5 font-mono text-xs text-fg-0 tabular-nums max-sm:hidden short:hidden lg:[@media(max-height:800px)]:hidden">
               {ready ? <time dateTime={new Date(at).toISOString()}>{utcLabel(at)}</time> : '--:-- UTC'}
             </p>
           </div>

@@ -83,7 +83,7 @@ export function Header(p: HeaderProps) {
         </span>
         {p.mode && (
           // phones: the header is one row (title, clock, paste); the mode and the claim count are in the feed there
-          <span className={`rounded-full border border-line-2 px-2.5 py-0.5 text-xs whitespace-nowrap max-sm:hidden ${MODE_STYLE[p.mode]}`}>
+          <span className={`rounded-full border border-line-2 px-2.5 py-0.5 text-xs whitespace-nowrap max-sm:hidden lg:max-xl:hidden ${MODE_STYLE[p.mode]}`}>
             <span className="sr-only">Narration mode: </span>
             <span className="hidden text-fg-2 sm:inline" aria-hidden>
               LLM{' '}
@@ -91,7 +91,8 @@ export function Header(p: HeaderProps) {
             {p.mode}
           </span>
         )}
-        <div aria-live="polite">
+        {/* not a live region: the feed's completion line already says "N of N claims traced" once */}
+        <div>
           {p.guard &&
             (flagged ? (
               <button
@@ -116,7 +117,7 @@ export function Header(p: HeaderProps) {
         <button
           type="button"
           onClick={p.onOpenStats}
-          className="hidden items-center gap-1.5 rounded-full border border-line-2 px-2.5 py-0.5 text-xs whitespace-nowrap text-fg-0 pointer-coarse:min-h-11 md:inline-flex hov:bg-bg-3"
+          className="hidden items-center gap-1.5 rounded-full border border-line-2 px-2.5 py-0.5 text-xs whitespace-nowrap text-fg-0 pointer-coarse:min-h-11 md:inline-flex short:hidden hov:bg-bg-3"
         >
           Built on FalkorDB
           {/* 1440-1535: the time rides in the pill; from 1536 it is the "N ms in FalkorDB" label beside it; below 1440 there is no room (1280 is tight) */}
@@ -130,9 +131,9 @@ export function Header(p: HeaderProps) {
           icon={<Upload size={16} />}
           aria-haspopup="dialog"
           onClick={p.onOpenPaste}
-          className="whitespace-nowrap max-md:w-(--control-h) max-md:px-0"
+          className="whitespace-nowrap max-md:w-(--control-h) max-md:px-0 short:w-(--control-h) short:px-0 lg:max-xl:w-(--control-h) lg:max-xl:px-0"
         >
-          <span className="max-md:sr-only">Paste your repo</span>
+          <span className="max-md:sr-only short:sr-only lg:max-xl:sr-only">Paste your repo</span>
         </Button>
       </div>
     </header>

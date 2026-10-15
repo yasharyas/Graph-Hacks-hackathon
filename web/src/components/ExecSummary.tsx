@@ -9,6 +9,7 @@
  */
 import type { Concentration, Report } from '../data/types.ts';
 import { signedMin, utcLabel } from '../data/format.ts';
+import { repoLabel } from '../data/repoLabel.ts';
 import { IconButton } from './Button.tsx';
 import { LinkIcon } from './icons/Glyphs.tsx';
 
@@ -36,7 +37,7 @@ export function ExecSummary({ report, onShare, marked = 0 }: { report: Report; o
     <section aria-label="Executive summary" className="animate-enter flex items-center gap-x-3 border-b border-line-1 py-0.5 pr-1 pl-3">
       <h2 className="sr-only">
         {report.incident.maintainer ?? 'Incident'} at {utcLabel(report.at)}
-        {report.scope ? `, ${report.scope.label}` : ''}
+        {report.scope ? `, ${repoLabel(report.scope.label)}` : ''}
       </h2>
       <dl className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-0.5">
         <div className="flex items-center gap-2">

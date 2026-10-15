@@ -10,7 +10,13 @@
  *   trace         { row, nonce }: a claim chip, [E#] tag or the claim map pointed here. The card opens, shows its Cypher,
  *                 scrolls into view, takes focus and flashes the row that holds the claim (row null: the card itself).
  *   onSay         the feed's single live region: what a card wants announced (a plan loaded). No card has its own.
+ *   guest         a pasted repo's run: route_owners has no real team to show, so it says so instead of "Your team"
+ *   cypherHints   parameter values a tool derived inside its run (the incident's maintainer), for the runnable prefix
  * The stable DOM id is cardDomId(card) so anything can link to a card.
+ * Cypher is runnable: each statement shows, and "Copy Cypher" copies, the FalkorDB parameter prefix the tool ran it with
+ * (`CYPHER incident="qix-2025-09-08" at=1757338200000 MATCH ...`, data/cypherParams.ts), so it pastes into FalkorDB
+ * Browser or redis-cli as is. A traced card, an opened plan and the "Show all rows" toggle are scrolled clear of the pinned
+ * Ask bar (components/scrollPane.ts reveal).
  * States: pending (radar + 3 skeleton rows; after 3 s "waiting for FalkorDB... 4 s"), done (collapsed line; open:
  * table, Cypher), error (neutral alert block: red means infected on this screen), cancelled. Radar only while pending.
  * Multi-query cards label every statement ("2/5 . Incident . RESOLVES_TO"). GRAPH.EXPLAIN is matched to the statement
@@ -20,16 +26,18 @@
 import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import { ApiError, getPlan } from '../data/api.ts';
 import { planFor, planLine, statements } from '../data/cypher.ts';
-import { fixFor, plainError } from '../data/errors.ts';
+import { paramPrefix, runnable } from '../data/cypherParams.ts';
+import { plainError } from '../data/errors.ts';
 import { pinTargets } from '../data/export.ts';
-import { fmtMs, utc, utcSec } from '../data/format.ts';
+import { nextStep, requestIdFor } from '../data/failure.ts';
+import { fmtMs, plural, utc, utcSec } from '../data/format.ts';
 import type { ExposurePath, ScenarioId } from '../data/types.ts';
 import type { ToolCardState } from '../data/useTriage.ts';
 import { copyText } from './copy.ts';
 import { ChevronDown, CircleAlert, Copy } from './icons/Glyphs.tsx';
 import { RadarIcon } from './icons/RadarIcon.tsx';
 import { PathChain } from './PathChip.tsx';
-import { scrollPaneTo } from './scrollPane.ts';
+import { reveal } from './scrollPane.ts';
 
 const MAX_ROWS = 5;
 const TIME_KEY = /(At|Time)$|^(at|since|until)$/;
@@ -55,13 +63,13 @@ export const cardDomId = (card: { id: string }) => `tool-${card.id.replace(/[^\w
 export function subject(params: Record<string, unknown>): string | null {
   if (typeof params.repo === 'string') return params.repo;
   if (typeof params.maintainer === 'string') return params.maintainer;
-  if (Array.isArray(params.repos)) return `${params.repos.length} repos`;
+  if (Array.isArray(params.repos)) return plural(params.repos.length, 'repo');
   return null;
 }
 
 function fmtParam(key: string, v: unknown): string {
   if (typeof v === 'number' && TIME_KEY.test(key) && v > 1e11) return `${utc(v)} UTC`;
-  if (Array.isArray(v)) return `${v.length} items`;
+  if (Array.isArray(v)) return key === 'repos' ? plural(v.length, 'repo') : key === 'versions' ? plural(v.length, 'version') : plural(v.length, 'item');
   if (v && typeof v === 'object') return '{...}';
   return String(v);
 }
@@ -71,7 +79,7 @@ function fmtCell(key: string, v: unknown): string {
   if (typeof v === 'number') return Number.isInteger(v) ? String(v) : String(Number(v.toPrecision(3)));
   if (typeof v === 'boolean') return v ? 'yes' : 'no';
   if (v === null || v === undefined) return '–';
-  if (Array.isArray(v)) return key === 'repos' ? `${v.length} repos` : v.join(', ');
+  if (Array.isArray(v)) return key === 'repos' ? plural(v.length, 'repo') : v.join(', ');
   if (typeof v === 'object') return '{...}';
   return String(v);
 }
@@ -100,13 +108,23 @@ function RowsTable({ tool, rows, flash, showAll, onToggleAll }: { tool: string; 
   const shown = showAll ? rows : rows.slice(0, MAX_ROWS);
   const first = rows[0] ?? {};
   const cols = (COLS[tool] ?? Object.keys(first)).filter((k) => k in first && (first[k] === null || typeof first[k] !== 'object' || Array.isArray(first[k]))).slice(0, 3);
+  // The toggle moves (19 rows appear above it, or go away): it keeps the keyboard focus, so it is kept on screen too.
+  const toggle = useRef<HTMLButtonElement>(null);
+  const toggled = useRef(false);
+  useEffect(() => {
+    if (!toggled.current) return;
+    toggled.current = false;
+    const raf = requestAnimationFrame(() => toggle.current && reveal(toggle.current, 'nearest'));
+    return () => cancelAnimationFrame(raf);
+  }, [showAll]);
   if (!shown.length || !cols.length) return null;
   return (
     <table className="mt-2 w-full table-fixed border-collapse text-left text-xs">
       <thead>
         <tr>
           {cols.map((c, j) => (
-            <th key={c} scope="col" className={`label-caps text-xs border-b border-line-1 py-1 pr-2 font-medium ${j === 0 ? 'w-[46%]' : ''}`}>
+            // the tier column fits "WOULD_PULL" in Martian Mono on one line
+            <th key={c} scope="col" className={`label-caps text-xs border-b border-line-1 py-1 pr-2 font-medium ${j === 0 ? 'w-[46%]' : c === 'tier' ? 'w-[6.5rem]' : ''}`}>
               {c.replace(/([A-Z])/g, ' $1').toLowerCase()}
             </th>
           ))}
@@ -126,7 +144,16 @@ function RowsTable({ tool, rows, flash, showAll, onToggleAll }: { tool: string; 
           <tr>
             <td colSpan={cols.length} className="pt-1.5">
               {/* One button that flips its label, so it is never unmounted under the keyboard focus it is holding. */}
-              <button type="button" aria-expanded={showAll} className="inline-flex min-h-6 items-center rounded-xs text-xs text-fg-1 underline underline-offset-2 pointer-coarse:min-h-11 hov:text-fg-0" onClick={onToggleAll}>
+              <button
+                ref={toggle}
+                type="button"
+                aria-expanded={showAll}
+                className="inline-flex min-h-6 items-center rounded-xs text-xs text-fg-1 underline underline-offset-2 pointer-coarse:min-h-11 hov:text-fg-0"
+                onClick={() => {
+                  toggled.current = true;
+                  onToggleAll();
+                }}
+              >
                 {showAll ? `Show the first ${MAX_ROWS} rows` : `Show all ${rows.length} rows`}
               </button>
             </td>
@@ -208,9 +235,11 @@ export interface ToolCardProps {
   onOpenChange?: (open: boolean) => void;
   trace?: Trace | null;
   onSay?: (message: string) => void;
+  guest?: boolean;
+  cypherHints?: Record<string, unknown>;
 }
 
-export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, trace, onSay }: ToolCardProps) {
+export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, trace, onSay, guest = false, cypherHints }: ToolCardProps) {
   const [inner, setInner] = useState(false);
   const open = openProp ?? inner;
   const setOpen = (o: boolean) => (onOpenChange ? onOpenChange(o) : setInner(o));
@@ -228,6 +257,12 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
   const collapsible = card.status === 'done' && !!r;
   const stmts = statements(r?.cypher ?? []);
   const sub = subject(card.params);
+  const named = sub ? `${card.tool} · ${sub}` : card.tool; // distinct names for the query groups of 21 explain_path cards
+  const params = r?.params ?? card.params; // the raw values the queries ran with (epoch ms, arrays), not the display strings
+  const planWanted = useRef<number | null>(null); // a plan was just asked for: bring it into view once it is there
+  // a pasted repo's route_owners can only answer with the placeholder team: say what that means instead of naming "Your team"
+  const noRouting = guest && card.tool === 'route_owners';
+  const summary = noRouting ? 'No team to notify: a pasted repo has no owner in the graph' : r?.summary;
 
   useEffect(() => {
     if (!pending) return;
@@ -242,17 +277,37 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
     if (trace.row !== null && trace.row >= MAX_ROWS) setShowAll(true);
     setFlash({ row: trace.row });
     const t = setTimeout(() => setFlash(null), 2200);
+    // The card's top goes to the top of the visible area (clear of the pinned Ask bar), so its Cypher is below it on screen;
+    // again once the body has finished opening (the pane may not have had the room to scroll that far before). The row that
+    // holds the claim is then brought into view only if it is further down than that.
+    const place = () => {
+      const el = cardRef.current;
+      if (!el) return;
+      reveal(el, 'top');
+      const row = trace.row !== null ? el.querySelector(`[data-row="${trace.row}"]`) : null;
+      if (row) reveal(row, 'nearest');
+    };
     const raf = requestAnimationFrame(() => {
-      if (!cardRef.current) return;
-      scrollPaneTo(cardRef.current);
-      if (trace.row !== null) cardRef.current.querySelector(`[data-row="${trace.row}"]`)?.scrollIntoView({ block: 'nearest' });
+      place();
       headRef.current?.focus({ preventScroll: true });
     });
+    const settle = setTimeout(place, 260); // the body's grid-rows transition is --dur-base (200 ms)
     return () => {
       clearTimeout(t);
+      clearTimeout(settle);
       cancelAnimationFrame(raf);
     };
   }, [trace?.nonce]);
+  useEffect(() => {
+    const i = planWanted.current;
+    if (i === null || plan === 'loading') return;
+    planWanted.current = null;
+    const raf = requestAnimationFrame(() => {
+      const el = document.getElementById(`${bodyId}-s${i}`);
+      if (el) reveal(el, 'nearest');
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [plan, planOpen]);
 
   async function loadPlan(): Promise<Plan | null> {
     if (plan && plan !== 'loading') return plan;
@@ -273,13 +328,18 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
   }
   async function togglePlan(i: number) {
     if (planOpen.has(i)) return setPlanOpen(new Set([...planOpen].filter((x) => x !== i)));
+    planWanted.current = i;
     setPlanOpen(new Set([...planOpen, i]));
     await loadPlan();
   }
-  const showPlan = (i: number) => setPlanOpen((s) => new Set([...s, i]));
+  const showPlan = (i: number) => {
+    planWanted.current = i;
+    setPlanOpen((s) => new Set([...s, i]));
+  };
 
+  // What "Copy Cypher" copies: every statement with its parameter prefix, runnable as pasted.
   const copyCypher = async () => {
-    if (r && !(await copyText(r.cypher.join('\n\n'), 'Cypher'))) setCypherOpen(true); // show it selectable
+    if (r && !(await copyText(r.cypher.map((q) => runnable(q, params, cypherHints)).join('\n\n'), 'Cypher'))) setCypherOpen(true); // show it selectable
   };
 
   // One line: the tool name keeps its width, the subject (a repo, a maintainer) truncates and says the rest in its title.
@@ -327,8 +387,8 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
           )}
         </h3>
         {r && (
-          <p className={`pl-[22px] text-sm text-fg-0 ${open ? '' : 'truncate'}`} title={open ? undefined : r.summary}>
-            {r.summary}
+          <p className={`pl-[22px] text-sm text-fg-0 ${open ? '' : 'truncate'}`} title={open ? undefined : summary}>
+            {summary}
           </p>
         )}
       </div>
@@ -363,8 +423,8 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
             <CircleAlert size={16} className="mt-0.5 shrink-0 text-fg-1" />
             {plainError(card.error)}
           </p>
-          <p className="text-fg-1">{fixFor(card.error, card.round ? 'ask' : 'triage')}</p>
-          {card.error.requestId && (
+          {nextStep(card.error, card.round ? 'ask' : 'triage') && <p className="text-fg-1">{nextStep(card.error, card.round ? 'ask' : 'triage')}</p>}
+          {requestIdFor(card.error) && (
             <p className="mt-1 font-mono text-xs text-fg-2">
               request{' '}
               <button type="button" className="select-all rounded-xs text-fg-1" onClick={() => void copyText(card.error!.requestId!, 'Request id')}>
@@ -389,6 +449,8 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
 
               {card.tool === 'explain_path' ? (
                 <PathRows rows={r.rows} flash={flash?.row ?? null} />
+              ) : noRouting ? (
+                <p className="mt-2 text-xs text-fg-1">Team routing is for the demo org: a pasted repo has no team or channel in the graph, so there is no one to route it to.</p>
               ) : card.tool === 'draft_remediation' ? (
                 <PinRows rows={r.rows} flash={flash?.row ?? null} />
               ) : (
@@ -396,7 +458,7 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
               )}
               {r.truncated ? <p className="mt-1 text-xs text-fg-2">+{r.truncated} rows withheld from the summary</p> : null}
 
-              <div role="group" aria-label="Query" className="mt-2 -ml-1 flex flex-wrap items-center gap-x-3">
+              <div role="group" aria-label={`Cypher for ${named}`} className="mt-2 -ml-1 flex flex-wrap items-center gap-x-3">
                 <button
                   type="button"
                   aria-expanded={cypherOpen}
@@ -417,8 +479,9 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
                     {stmts.map((s, i) => {
                       const id = `${bodyId}-s${i}`;
                       const wanted = planOpen.has(i);
+                      const prefix = paramPrefix(s.text, params, cypherHints);
                       return (
-                        <div key={i} role="group" aria-label={stmts.length > 1 ? `Query ${s.n} of ${s.of}` : 'Query'}>
+                        <div key={i} role="group" aria-label={`${named}, query ${s.n} of ${s.of}`}>
                           <div className="mb-1 flex items-center justify-between gap-2">
                             <p className="label-caps text-xs">{stmts.length > 1 ? `${s.n}/${s.of} · ${s.label}` : s.label}</p>
                             {scenario && (
@@ -435,6 +498,13 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
                             )}
                           </div>
                           <pre className="rounded-xs bg-bg-3 p-2 text-xs leading-[18px] whitespace-pre-wrap text-fg-0 [overflow-wrap:anywhere]">
+                            {/* the parameters it ran with, as FalkorDB's CYPHER prefix: the block is runnable as selected */}
+                            {prefix && (
+                              <code className="text-xs text-fg-1" title="The parameters this query ran with, in FalkorDB's CYPHER prefix form">
+                                {prefix}
+                                {'\n'}
+                              </code>
+                            )}
                             <code className="text-xs">{s.text}</code>
                           </pre>
                           <div id={id}>
@@ -445,7 +515,7 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
                                   <p className="font-mono text-xs text-fg-1">Loading plan&hellip;</p>
                                 ) : 'error' in plan ? (
                                   <p className="text-xs text-fg-0">
-                                    {plan.error} {fixFor({ message: plan.error }, 'plan')}
+                                    {plan.error} {nextStep({ message: plan.error }, 'plan')}
                                   </p>
                                 ) : plan.lines.length === 0 ? (
                                   <p className="text-xs text-fg-1">The server returned no plan lines for this tool.</p>
@@ -458,10 +528,7 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
                                       <button
                                         type="button"
                                         className="rounded-xs text-fg-0 underline underline-offset-2"
-                                        onClick={() => {
-                                          showPlan(plan.at!);
-                                          document.getElementById(`${bodyId}-s${plan.at}`)?.scrollIntoView({ block: 'nearest' });
-                                        }}
+                                        onClick={() => showPlan(plan.at!)}
                                       >
                                         Show that plan
                                       </button>

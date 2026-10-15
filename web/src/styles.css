@@ -1,6 +1,10 @@
 @import 'tailwindcss';
 @import './design/tokens.css';
 
+/* A phone held sideways (or any window under 500px tall below the war-room layout): `short:` packs the landing so the
+   Run triage action is in the first view: one-row header, no purpose line, scrubber and contrast card side by side. */
+@custom-variant short (@media (max-height: 500px) and (max-width: 1023px));
+
 /* Hover only where hovering exists (docs/design.md section 4): use `hov:bg-bg-3`, never plain `hover:`. */
 @custom-variant hov {
   @media (hover: hover) and (pointer: fine) {
@@ -55,6 +59,22 @@
   [role='radio'][aria-checked='true'] *,
   [role='tablist'][aria-label='Details'] [role='tab'][aria-selected='true'] * {
     color: inherit; /* the icon's own text-fg colour would sit pale on the filled segment */
+  }
+  /* The timeline is drawn with backgrounds, which forced colors drop: track, fill and ticks in system colours instead. */
+  [data-scrub-track],
+  [data-scrub-tick] {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+  [data-scrub-fill],
+  [data-scrub-tick='bad'] {
+    forced-color-adjust: none;
+    background: Highlight;
+  }
+  .scrub::-webkit-slider-thumb {
+    forced-color-adjust: none;
+    background: Highlight;
+    border-color: Canvas;
   }
 }
 

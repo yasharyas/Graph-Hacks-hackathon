@@ -1,6 +1,7 @@
 /* EmptyState: empty and error states state cause + next action, never "Something went wrong"
  * (docs/design.md section 5). Left-aligned.
- * Props: kind 'empty' (role=status, default) | 'error' (role=alert), title, cause, fix,
+ * Props: kind 'empty' (default; plain text, not a live region: it changes with the scenario, and an arrow key on the scenario
+ * control must not read two paragraphs out) | 'error' (role=alert), title, cause, fix,
  * requestId (shown in Martian Mono when the server returned one), action / secondary ({ label, onClick }),
  * className.
  * Quiet by design: the title is Satoshi 500 in fg-1 (the data on screen is louder than its absence) and the action
@@ -34,7 +35,7 @@ export interface EmptyStateProps {
 export function EmptyState({ kind = 'empty', title, cause, fix, requestId, action, secondary, className = '' }: EmptyStateProps) {
   const error = kind === 'error';
   return (
-    <div role={error ? 'alert' : 'status'} className={`@container animate-fade flex items-start gap-4 p-4 ${className}`}>
+    <div role={error ? 'alert' : undefined} className={`@container animate-fade flex items-start gap-4 p-4 ${className}`}>
       {!error && action && <Scribble name="empty-lockfile" width={144} height={108} angle={135} className="hidden shrink-0 @min-[400px]:block" />}
       <div className={`flex min-w-0 flex-col items-start gap-2 ${error ? 'w-full rounded-sm border border-line-3 p-3' : ''}`}>
         <h3 className="text-md font-medium text-fg-1">{title}</h3>

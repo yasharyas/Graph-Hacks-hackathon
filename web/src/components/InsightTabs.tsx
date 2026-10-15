@@ -2,7 +2,9 @@
  * Props: report (Report), cards (all ToolCardState of the run), graph (graph name from the start event or null),
  *        totalMs (server-reported run time or null), remediated (repo -> epoch ms of every mark, the server's and this
  *        screen's, so a mark made a second ago is listed).
- * Tabs: Concentration (bars), All Cypher used (one <pre>, Copy all), Triage history (two lists: "Marked remediated",
+ * Tabs: Concentration (bars; for one pasted repo it is collapsed behind a button: "the next compromised account" is an org
+ * question), All Cypher used (one <pre>, Copy all: every statement runnable as pasted, with the FalkorDB parameter prefix it
+ * ran with, data/cypherParams.ts, and an exact repeat listed once), Triage history (two lists: "Marked remediated",
  * each repo with the time in the person's own zone, first; and "Assessed in earlier runs": how many repos, the latest time
  * and their tiers, both from recall_triage rows {repo, tier, action, at}, one row per repo), Graph stats (graph name and
  * the graph's node / edge counts from /api/stats, per-tool queries / rows / FalkorDB ms, and the schema this run's Cypher
@@ -12,7 +14,9 @@
 import { useId, useRef, useState, type KeyboardEvent } from 'react';
 import { localStamp } from '../data/clock.ts';
 import { schemaOf } from '../data/cypher.ts';
+import { runnable } from '../data/cypherParams.ts';
 import { fmtMs, plural } from '../data/format.ts';
+import { repoLabel } from '../data/repoLabel.ts';
 import type { Report } from '../data/types.ts';
 import { useStats } from '../data/useStats.ts';
 import type { ToolCardState } from '../data/useTriage.ts';
@@ -39,7 +43,8 @@ export function InsightTabs({ report, cards, graph, totalMs, remediated }: Insig
   const base = useId();
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   const results = cards.flatMap((c) => (c.result ? [{ card: c, r: c.result }] : []));
-  const cypher = results.flatMap(({ r }) => r.cypher.map((q) => `// ${r.tool}\n${q}`)).join('\n\n');
+  const hints = report.incident.maintainer ? { maintainer: report.incident.maintainer } : {};
+  const cypher = [...new Set(results.flatMap(({ card, r }) => r.cypher.map((q) => `// ${r.tool}\n${runnable(q, r.params ?? card.params, hints)}`)))].join('\n\n');
   const schema = schemaOf(results.flatMap(({ r }) => r.cypher));
   const earlier = (results.find(({ r }) => r.tool === 'recall_triage')?.r.rows ?? []).flatMap((row) =>
     typeof row.repo === 'string' ? [{ repo: row.repo, tier: String(row.tier ?? ''), action: typeof row.action === 'string' ? row.action : null, at: typeof row.at === 'number' ? row.at : 0 }] : [],
@@ -53,6 +58,7 @@ export function InsightTabs({ report, cards, graph, totalMs, remediated }: Insig
   const stats = useStats(report.incident.id, tab === 3 && !guest, retry);
   const shares = influenceShares(report.concentration);
   const repos = Object.values(report.counts).reduce((a, b) => a + b, 0);
+  const [showConcentration, setShowConcentration] = useState(!guest); // one pasted repo: collapsed until asked for
 
   const onKey = (e: KeyboardEvent, i: number) => {
     const next = e.key === 'Home' ? 0 : e.key === 'End' ? TABS.length - 1 : e.key === 'ArrowRight' ? (i + 1) % TABS.length : e.key === 'ArrowLeft' ? (i - 1 + TABS.length) % TABS.length : -1;
@@ -93,7 +99,15 @@ export function InsightTabs({ report, cards, graph, totalMs, remediated }: Insig
         className="p-3 text-sm"
       >
         {tab === 0 &&
-          (shares.length ? (
+          (shares.length && !showConcentration ? (
+            <div className="flex flex-col items-start gap-2">
+              <p className="max-w-(--measure) text-fg-1">
+                Which maintainer account could be the next one hijacked is a question about a whole org&rsquo;s dependencies. For one pasted repo it ranks the
+                maintainers in its own tree.
+              </p>
+              <Button onClick={() => setShowConcentration(true)}>Show the {plural(shares.length, 'maintainer')} in this repo&rsquo;s tree</Button>
+            </div>
+          ) : shares.length ? (
             <>
               <p className="mb-3 max-w-(--measure) text-fg-1">
                 Who could be the next compromised account: each share is that maintainer&rsquo;s part of the top {shares.length}&rsquo;s combined PageRank
@@ -108,13 +122,13 @@ export function InsightTabs({ report, cards, graph, totalMs, remediated }: Insig
                     </span>
                     <span className="text-right font-sans font-bold text-fg-0 tabular-nums">{c.share}</span>
                     <span className="col-span-3 text-xs text-fg-1 tabular-nums">
-                      {c.packages} packages · reaches {c.reposReached} of {repos} repos
+                      {plural(c.packages, 'package')} · reaches {c.reposReached} of {plural(repos, 'repo')}
                     </span>
                   </li>
                 ))}
               </ul>
               <p className="mt-3 max-w-(--measure) text-xs text-fg-2">
-                The scores come from <code className="font-mono text-fg-1">algo.pageRank(&apos;Package&apos;, &apos;PKG_DEPENDS&apos;)</code>, run once when the graph was ingested and stored on each package. The
+                The scores come from <code className="font-mono text-xs text-fg-1">algo.pageRank(&apos;Package&apos;, &apos;PKG_DEPENDS&apos;)</code>, run once when the graph was ingested and stored on each package. The
                 concentration_risk query sums them per maintainer.
               </p>
             </>
@@ -146,7 +160,7 @@ export function InsightTabs({ report, cards, graph, totalMs, remediated }: Insig
                   <ul className="flex flex-col gap-1">
                     {marks.map(([repo, at]) => (
                       <li key={repo} className="flex flex-wrap items-baseline gap-x-2 text-xs">
-                        <span className="font-mono text-fg-0 [overflow-wrap:anywhere]">{repo}</span>
+                        <span className="font-mono text-fg-0 [overflow-wrap:anywhere]">{repoLabel(repo)}</span>
                         <time dateTime={new Date(at).toISOString()} className="text-fg-1">
                           {localStamp(at)}
                         </time>

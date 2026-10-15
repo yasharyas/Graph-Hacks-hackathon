@@ -25,16 +25,19 @@
  * would spend the server's GitHub quota per visitor; a strip asks for one click, then analyses, triages, selects, opens).
  * A dropped lockfile has nothing to reopen, so it says so instead of copying a link that would open the demo org.
  *
- * Screen readers: one polite status region (selections). Nothing is announced while the autoplay runs; what the feed says
- * about the clock moving waits for the scrub to settle (useSettled, 600 ms).
+ * Screen readers: one polite status region (selections). Nothing is announced while the autoplay runs; what the panes say
+ * about the clock moving waits for the scrub to rest (useSettled, 1500 ms: longer than a person's key cadence on the slider,
+ * whose own aria-valuetext speaks each step), and a move the app makes itself (a run aligning the scrubber, "Back to")
+ * settles at once, so nothing ever claims the clock moved when it did not.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { isMock } from './data/api.ts';
 import { DEFAULT_AT, hasClock } from './data/clock.ts';
 import { downloadReport } from './data/export.ts';
-import { fixFor } from './data/errors.ts';
+import { nextStep, requestIdFor } from './data/failure.ts';
 import { isHead, plural, utcLabel } from './data/format.ts';
+import { lockSourceLabel, repoLabel } from './data/repoLabel.ts';
 import type { IncidentMeta, ScenarioId, TimelinePoint } from './data/types.ts';
 import { useAnalyze } from './data/useAnalyze.ts';
 import { useBackClose } from './data/useBackClose.ts';
@@ -139,7 +142,7 @@ export function App() {
       : Math.min(last, Math.max(first + AUTOPLAY_MIN * MIN, Math.floor(timeline.incident.advisoryAt / MIN) * MIN + 3 * MIN));
   const playback = usePlayback(first, autoplayEnd, 12_000, startAt);
   const at = playback.at ?? first;
-  const settledAt = useSettled(at, 600, playback.playing); // what is announced about the clock follows this, not every step
+  const [settledAt, snapSettled] = useSettled(at, 1500, playback.playing); // what is announced about the clock follows this, not every step
   const rawSnapshot = at === null ? null : timeline.snapshot(at);
   const triage = useTriage();
   const analyze = useAnalyze();
@@ -180,7 +183,10 @@ export function App() {
     ? (report?.minutesAhead ?? null)
     : (aheadOf(report?.incident ?? null) ?? report?.minutesAhead ?? aheadOf(timeline.incident) ?? (timeline.incident ? Math.floor((timeline.incident.advisoryAt - timeline.incident.firstPublishAt) / MIN) : null));
   const view = report && { ...report, ...scrubbed, paths: scrubbed ? [] : report.paths, minutesAhead: minutesAhead ?? report.minutesAhead }; // paths describe the run's clock only
-  const liveError = live.error && live.error.at === wantAt ? { message: live.error.message, fix: fixFor(live.error, 'exposure'), requestId: live.error.requestId } : null;
+  const liveError = live.error && live.error.at === wantAt ? { message: live.error.message, fix: nextStep(live.error, 'exposure'), requestId: requestIdFor(live.error) } : null;
+  // The report clock strip is a live region: it is fed the resting clock only, so a scrub changes it once, when it stops.
+  const stripLoading = live.loadingAt !== null && settledWant !== null && sameMinute(live.loadingAt, settledWant);
+  const stripViewAt = view ? (stripLoading || settledWant === null ? view.at : settledWant) : null;
 
   // The numbers in the band are the table's numbers (or, before a report, the scrubber's own sample): never a second source.
   // A run that failed has none: the band says so instead of keeping the timeline's sample as if it were a result.
@@ -193,8 +199,18 @@ export function App() {
       ? { at: view.at, counts: view.counts, scanner: view.scanner.length }
       : rawSnapshot;
   // The label and size come from the report's own scope: the demo org ("Acme demo org · 21 repos") or the pasted repo.
+  // A pasted repo also says which lockfile it was judged on (Report.scope.source): the commit before the incident, or a counterfactual.
   const sc = report?.scope;
-  const scope = isGuest ? `${sc?.label ?? guest?.repo ?? 'Pasted repo'}, pasted repo` : `${sc?.label ?? 'Acme demo org'}${sc ? ` · ${plural(sc.repos, 'repo')}` : ''}`;
+  // Two lines in the compact band: what (the pasted repo, labelled as the file it is) and which lockfile.
+  const guestName = sc?.label ?? guest?.repo ?? 'Pasted repo';
+  const scope = isGuest
+    ? sc?.source?.kind === 'head'
+      ? `${guestName.replace(/@HEAD$/, '')}, pasted repo`
+      : guestName.startsWith('pasted/')
+        ? repoLabel(guestName)
+        : `${repoLabel(guestName)}, pasted repo`
+    : `${sc?.label ?? 'Acme demo org'}${sc ? ` · ${plural(sc.repos, 'repo')}` : ''}`;
+  const scopeSource = isGuest ? lockSourceLabel(sc?.source) : null;
 
   // Scenario change: the previous run no longer describes this incident.
   useEffect(() => {
@@ -215,6 +231,7 @@ export function App() {
       toast({ message: `Scrubber moved from ${utcLabel(at)} to ${utcLabel(triage.at)}, the clock this triage ran at.` });
     }
     playback.seek(triage.at);
+    snapSettled(triage.at); // the app moved it, not a person: no "the clock moved" while the run aligns it
   }, [triage.at]);
   // First exposure is selected when a report lands (or the share link's repo, with its drawer tab): the chain draws on straight away.
   useEffect(() => {
@@ -469,8 +486,10 @@ export function App() {
     'sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-(--z-modal) focus:rounded-sm focus:bg-bg-2 focus:px-3 focus:py-2';
   // The narrative dims a narration whose clock differs from the scrubber's and offers a re-run (ToolFeed hands both to
   // NarrativePanel). A spread, not named props, so this file compiles whichever side of the ToolFeed change it is built on.
-  // `clockAt` is the settled clock: that line is a live region and must not speak on every step of a scrub or the autoplay.
-  const feedExtra = { clockAt: settledAt, onRerun: run, onShowFlagged: showFlagged };
+  // `clockAt` is the resting clock: that line must not change on every step of a scrub or the autoplay, nor while a run aligns it.
+  // `cypherHints`: what a tool derived inside its run (incident_exposure looks up the maintainer), for the runnable Cypher.
+  const maintainer = (report?.incident ?? triage.incident)?.maintainer;
+  const feedExtra = { clockAt: settledAt ?? undefined, onRerun: run, onShowFlagged: showFlagged, guest: isGuest, cypherHints: maintainer ? { maintainer } : undefined };
   const verdictLine =
     triage.narration === null
       ? ''
@@ -525,16 +544,16 @@ export function App() {
 
       <main id="results" tabIndex={-1} className="flex min-h-0 flex-1 flex-col">
         <div className="shrink-0 border-b border-line-1">
-          {!compact && <p className="px-(--gutter) pt-3 text-base text-fg-1">{PURPOSE}</p>}
-          <div className={compact ? '' : 'grid xl:grid-cols-[4fr_6fr] min-[1440px]:grid-cols-[5fr_6fr]'}>
-            <div className={compact ? '' : 'border-b border-line-1 xl:border-r xl:border-b-0'}>
+          {!compact && <p className="px-(--gutter) pt-3 text-base text-fg-1 short:hidden">{PURPOSE}</p>}
+          <div className={compact ? '' : 'grid short:grid-cols-2 xl:grid-cols-[4fr_6fr] min-[1440px]:grid-cols-[5fr_6fr]'}>
+            <div className={compact ? '' : 'border-b border-line-1 short:border-r short:border-b-0 xl:border-r xl:border-b-0'}>
               {timeline.status === 'error' && timeline.error ? (
                 <EmptyState
                   kind="error"
                   title="The timeline did not load"
                   cause={timeline.error.message}
                   fix={scenario === QIX ? 'Reload the page to try again.' : 'Pick the qix scenario to continue.'}
-                  requestId={timeline.error.requestId}
+                  requestId={requestIdFor(timeline.error)}
                   action={scenario === QIX ? { label: 'Reload', onClick: () => location.reload() } : { label: 'Use qix', onClick: () => onScenario(QIX) }}
                 />
               ) : (
@@ -552,6 +571,7 @@ export function App() {
                   scope={scope}
                   scopeNote={isGuest ? null : DEMO_NOTE}
                   scopeNoteShort={isGuest ? null : DEMO_NOTE_SHORT}
+                  scopeSource={scopeSource}
                   failed={failed}
                   remediated={marked}
                   stale={stale}
@@ -582,7 +602,7 @@ export function App() {
           </div>
         </div>
 
-        <div ref={panesRef} className="grid min-h-0 flex-1 lg:grid-cols-[var(--pane-left)_minmax(0,1fr)] lg:grid-rows-[minmax(480px,auto)_auto] xl:grid-cols-[var(--pane-left)_minmax(0,1fr)_var(--pane-right)] xl:grid-rows-[minmax(0,1fr)]">
+        <div ref={panesRef} className="grid min-h-0 flex-1 lg:grid-cols-[var(--pane-left)_minmax(0,1fr)] lg:grid-rows-[minmax(340px,auto)_auto] xl:grid-cols-[var(--pane-left)_minmax(0,1fr)_var(--pane-right)] xl:grid-rows-[minmax(0,1fr)]">
           <section
             ref={feedRef}
             tabIndex={-1}
@@ -627,8 +647,8 @@ export function App() {
             />
           </section>
 
-          <div ref={graphRef} tabIndex={-1} className={`md:min-h-[420px] lg:col-start-2 lg:row-start-1 xl:h-full xl:min-h-0 ${paneClass('graph')}`}>
-            <PathGraph exposures={graphExposures} paths={view?.paths ?? []} incident={incident} selectedRepo={selected} playing={playback.playing} onSelectRepo={pick} ran={report !== null} subject={isGuest ? (report?.scope?.label ?? guest?.repo ?? null) : null} />
+          <div ref={graphRef} tabIndex={-1} className={`md:min-h-[420px] lg:min-h-[340px] lg:col-start-2 lg:row-start-1 xl:h-full xl:min-h-0 ${paneClass('graph')}`}>
+            <PathGraph exposures={graphExposures} paths={view?.paths ?? []} incident={incident} selectedRepo={selected} playing={playback.playing} onSelectRepo={pick} ran={report !== null} subject={isGuest ? repoLabel(guestName) : null} />
           </div>
 
           <section
@@ -644,14 +664,14 @@ export function App() {
                 {showHint && <OnboardingHint onDismiss={() => (dismissHint(), tableRef.current?.focus({ preventScroll: true }))} />}
                 <ReportClock
                   runAt={report.at}
-                  viewAt={view.at}
+                  viewAt={stripViewAt ?? view.at}
                   wantAt={settledWant}
-                  loading={live.loadingAt !== null}
+                  loading={stripLoading}
                   error={liveError}
                   guest={isGuest}
                   head={guest !== null && isHead(guest.repo)}
                   other={other}
-                  onBack={() => (setUserAt(report.at), playback.seek(report.at), tableRef.current?.focus({ preventScroll: true }))} // the strip unmounts: keep focus in the pane
+                  onBack={() => (setUserAt(report.at), playback.seek(report.at), snapSettled(report.at), tableRef.current?.focus({ preventScroll: true }))} // the strip unmounts: keep focus in the pane
                   onRerun={(t) => void runAt(t)}
                   onRetry={() => (setRetry((n) => n + 1), tableRef.current?.focus({ preventScroll: true }))}
                 />

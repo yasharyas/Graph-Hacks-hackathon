@@ -7,10 +7,12 @@
  * Answers arrive as a guarded narration + tool cards in the feed (markdown stripped, coverage line set apart). While
  * one runs the field is read-only (it keeps focus, so a keyboard user lands back where they were) and the button shows
  * the radar; while the triage itself runs the whole box is disabled. Label always visible; "Follow-up N of 4" is
- * polite text beside it.
+ * plain text beside it (not a live region: the feed's one status line says what the follow-up is doing and reads the
+ * answer out when it lands, so this counter would only repeat it).
  */
 import { useEffect, useRef, useState } from 'react';
-import { fixFor, plainError } from '../data/errors.ts';
+import { plainError } from '../data/errors.ts';
+import { nextStep, requestIdFor } from '../data/failure.ts';
 import type { TriageError } from '../data/useTriage.ts';
 import { Button } from './Button.tsx';
 import { CircleAlert } from './icons/Glyphs.tsx';
@@ -60,7 +62,7 @@ export function AskBox({
         <label htmlFor="ask-question" className="text-xs text-fg-1">
           Ask about this triage
         </label>
-        <span role="status" className="text-xs text-fg-1 tabular-nums">
+        <span className="text-xs text-fg-1 tabular-nums">
           {counter}
         </span>
       </div>
@@ -92,10 +94,10 @@ export function AskBox({
             <CircleAlert size={16} className="mt-0.5 shrink-0 text-fg-1" />
             <span>{plainError(error)}</span>
           </p>
-          <p className="text-fg-1">{fixFor(error, 'ask')}</p>
-          {error.requestId && (
+          {nextStep(error, 'ask') && <p className="text-fg-1">{nextStep(error, 'ask')}</p>}
+          {requestIdFor(error) && (
             <p className="font-mono text-xs text-fg-2">
-              request <span className="select-all text-fg-1">{error.requestId}</span>
+              request <span className="select-all text-fg-1">{requestIdFor(error)}</span>
             </p>
           )}
         </div>

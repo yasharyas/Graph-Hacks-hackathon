@@ -44,3 +44,10 @@ export function lockNote(source: LockSource | undefined, repo: string): LockNote
   if (kind === 'pasted') return { text: 'Judged on your pasted lockfile (counterfactual): the tiers say what this file would have done during the window, not what your repo had then.', short: 'your pasted lockfile (counterfactual)', counterfactual: true };
   return null;
 }
+
+/** The same, as a phrase for the hero's scope line: "lockfile at commit abc1234 from 2025-09-01", or a counterfactual. */
+export function lockSourceLabel(s: LockSource | undefined): string | null {
+  if (!s) return null;
+  if (s.kind === 'snapshot') return `lockfile at commit ${s.sha ? s.sha.slice(0, 7) : 'unknown'}${s.date ? ` from ${day(s.date)}` : ''}`;
+  return s.kind === 'head' ? "today's lockfile, a counterfactual" : 'your pasted lockfile, a counterfactual';
+}

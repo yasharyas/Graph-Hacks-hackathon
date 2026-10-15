@@ -76,10 +76,70 @@ export function lines(text: string, guard: GuardClaims | null): { label: string 
 export const LIST_MAX = 4;
 export const crowded = (segs: Segment[]): boolean => segs.filter((s) => s.kind === 'entity' && s.verdict === 'verified' && s.first).length > LIST_MAX;
 
+// The Verdict is one long paragraph: a headline, then one sentence per tier. It is shown as lines by breaking the SAME
+// segments before each tier sentence (presentation only: the text, its chips and the claim checks are unchanged, and the
+// pieces join back to the identical text).
+const VERDICT_BREAK = / (?=LOCKED, |WOULD_PULL, |Marked remediated:)/;
+export function verdictLines(segs: Segment[]): Segment[][] {
+  const out: Segment[][] = [[]];
+  for (const s of segs) {
+    if (s.kind !== 'text') {
+      out.at(-1)!.push(s);
+      continue;
+    }
+    const parts = s.text.split(VERDICT_BREAK);
+    parts.forEach((p, i) => {
+      if (i) out.push([]);
+      const text = i < parts.length - 1 ? `${p} ` : p; // the space the break consumed stays at the end of the line before
+      if (text) out.at(-1)!.push({ kind: 'text', text });
+    });
+  }
+  return out.filter((l) => l.length > 0);
+}
+
+/**
+ * In a roster line ("`QA`: `mochajs/mocha`, ...; `CLI` (`#team-cli`): ..."), the entities that open a team's group: each
+ * starts its own line, so an enumerating answer reads as one row per team instead of a wall of names.
+ */
+export function teamStarts(segs: Segment[]): Set<number> {
+  const out = new Set<number>();
+  const text = (i: number) => {
+    const s = segs[i];
+    return s?.kind === 'text' ? s.text : null;
+  };
+  segs.forEach((s, i) => {
+    if (s.kind !== 'entity') return;
+    if (text(i + 1)?.startsWith(':') || (text(i + 1) === ' (' && segs[i + 2]?.kind === 'entity' && text(i + 3)?.startsWith('):'))) out.add(i);
+  });
+  return out;
+}
+
+/** What the feed's live region says when an Ask answer lands: the answer itself in plain words, cut at a sentence near `max` characters. */
+export function spokenAnswer(text: string, max = 280): string {
+  const plain = stripMarkdown(text)
+    .replace(/\s*\[E\d+(?:\s*,\s*E\d+)*\]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (plain.length <= max) return plain;
+  const cut = plain.slice(0, max);
+  const end = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('; '));
+  return `${end > max / 3 ? cut.slice(0, end + 1) : `${cut.trimEnd()}…`} The full answer is in the feed.`;
+}
+
 /** Above each Ask answer: how it was produced, so a person can tell a graph lookup from a model's words. */
 export function answerLabel(n: { mode: 'live' | 'replay' | 'template'; provider: string | null }): string {
   const by = n.provider ? ` · ${n.provider}` : '';
-  return n.mode === 'template' ? `Answered from the graph${by}` : `${n.mode === 'replay' ? 'Recorded LLM answer' : 'LLM answer'} · names and numbers checked against the graph${by}`;
+  return n.mode === 'template' ? `Answered from the graph${by}` : `${n.mode === 'replay' ? 'Recorded LLM answer' : 'LLM answer'}: the model wrote the words${by}`;
+}
+
+/**
+ * The claim-check line under a narration. A graph answer (template) is checked claim by claim; a model's answer is not
+ * verified prose: the check only found its names and numbers in the graph results, and it says so.
+ */
+export function guardLine(g: { verified: number; total: number }, modelWords: boolean): string {
+  return modelWords
+    ? `${g.verified} of ${g.total} names and numbers found in the graph results; the wording is the model’s`
+    : `${g.verified} of ${g.total === 1 ? '1 claim' : `${g.total} claims`} traced to a graph query`;
 }
 
 /** The server appends a coverage line to enumerating Ask answers ("6 of 14 prod-only repos listed"): split it off so it can be shown on its own. */

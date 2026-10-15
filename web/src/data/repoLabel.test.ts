@@ -1,7 +1,7 @@
 // Run: node --test web/src/data/repoLabel.test.ts
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { GUEST_TEAM, lockNote, realTeam, repoLabel, repoShort } from './repoLabel.ts';
+import { GUEST_TEAM, lockNote, lockSourceLabel, realTeam, repoLabel, repoShort } from './repoLabel.ts';
 
 test('server-made ids read as words', () => {
   assert.equal(repoLabel('mochajs/mocha@HEAD'), "mochajs/mocha (today's lockfile)");
@@ -39,4 +39,11 @@ test('no source: the repo id still tells head and pasted apart; the demo org has
   assert.ok(lockNote(undefined, 'a/b@HEAD')!.counterfactual);
   assert.ok(lockNote(undefined, 'pasted/x')!.counterfactual);
   assert.equal(lockNote(undefined, 'acme/checkout-web'), null);
+});
+
+test('the lockfile source as a phrase: commit and day for a snapshot, a counterfactual otherwise', () => {
+  assert.equal(lockSourceLabel({ kind: 'snapshot', sha: '5f8e8a89fb4cc833290549dcb1974be06514746b', date: 1756742978000 }), 'lockfile at commit 5f8e8a8 from 2025-09-01');
+  assert.equal(lockSourceLabel({ kind: 'head' }), "today's lockfile, a counterfactual");
+  assert.equal(lockSourceLabel({ kind: 'pasted' }), 'your pasted lockfile, a counterfactual');
+  assert.equal(lockSourceLabel(undefined), null);
 });

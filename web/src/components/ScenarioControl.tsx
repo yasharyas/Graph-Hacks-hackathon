@@ -89,7 +89,7 @@ export function ScenarioControl({
             )}
             <span>
               {o.label}
-              {o.tail && <span className="max-sm:hidden">{o.tail}</span>}
+              {o.tail && <span className="max-sm:hidden short:hidden lg:max-xl:hidden">{o.tail}</span>}
             </span>
           </button>
         );

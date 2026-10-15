@@ -1,7 +1,7 @@
 // Run: node --test web/src/data/narration.test.ts
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { answerLabel, claimMap, crowded, lines, LIST_MAX, proofFor, segments, splitCoverage, stripMarkdown, type ProofCard } from './narration.ts';
+import { answerLabel, claimMap, crowded, guardLine, lines, LIST_MAX, proofFor, segments, spokenAnswer, splitCoverage, stripMarkdown, teamStarts, verdictLines, type ProofCard, type Segment } from './narration.ts';
 
 const verdicts = (text: string, g: Parameters<typeof segments>[1]) =>
   segments(text, g).flatMap((s) => (s.kind === 'entity' ? [[s.text, s.verdict]] : s.kind === 'cite' ? [[s.id, s.verdict]] : s.kind === 'struck' ? [[s.text, 'struck']] : []));
@@ -78,8 +78,8 @@ test('a line with more verified names than LIST_MAX is a list (light treatment);
 
 test('each Ask answer says how it was produced, with the provider when there is one', () => {
   assert.equal(answerLabel({ mode: 'template', provider: null }), 'Answered from the graph');
-  assert.equal(answerLabel({ mode: 'live', provider: null }), 'LLM answer · names and numbers checked against the graph');
-  assert.equal(answerLabel({ mode: 'live', provider: 'groq' }), 'LLM answer · names and numbers checked against the graph · groq');
+  assert.equal(answerLabel({ mode: 'live', provider: null }), 'LLM answer: the model wrote the words');
+  assert.equal(answerLabel({ mode: 'live', provider: 'groq' }), 'LLM answer: the model wrote the words · groq');
 });
 
 test('the coverage line is split off only when it is a separate last line that counts something', () => {
@@ -123,4 +123,37 @@ test('claimMap groups verified claims by card in feed order and keeps the rest a
   const m = claimMap([{ text: 'Payments', ok: true }, { text: 'acme/web', ok: true }, { text: 'E2', ok: true }, { text: 'ghost', ok: false }, { text: '99 widgets', ok: true }, { text: 'acme/web', ok: true }], cards);
   assert.deepEqual(m.groups.map((g) => [g.card.tool, g.claims]), [['incident_exposure', ['acme/web']], ['route_owners', ['Payments']], ['explain_path', ['E2']]]);
   assert.deepEqual(m.unmatched, ['99 widgets']);
+});
+
+const join = (ls: Segment[][]) => ls.flat().map((x) => (x.kind === 'text' ? x.text : x.kind === 'entity' ? `\`${x.text}\`` : x.kind === 'cite' ? `[${x.id}]` : x.text)).join('');
+
+test('the verdict splits into a headline and one line per tier, and the lines join back to the identical text', () => {
+  const text = '21 of 21 repos are exposed to the `qix` account compromise. LOCKED, 1 repo (`acme/checkout-web`): rotate secrets. WOULD_PULL, 20 repos (13 prod): safe from the lockfile. Marked remediated: `a/b`.';
+  const g = { claims: [{ text: 'acme/checkout-web', ok: true }], flagged: [] };
+  const ls = verdictLines(segments(text, g));
+  assert.equal(ls.length, 4);
+  assert.equal(join(ls), text);
+  assert.match(join([ls[1]!]), /^LOCKED, 1 repo/);
+  assert.match(join([ls[2]!]), /^WOULD_PULL, 20 repos/);
+  assert.match(join([ls[3]!]), /^Marked remediated:/);
+  assert.equal(ls[1]!.find((x) => x.kind === 'entity')?.kind === 'entity' && (ls[1]!.find((x) => x.kind === 'entity') as { verdict: string }).verdict, 'verified');
+  assert.equal(verdictLines(segments('A pasted repo is safe.', null)).length, 1);
+});
+
+test('a roster line opens a new row at each team (with or without its channel), never at a repo', () => {
+  const segs = segments('Complete list: `Payments`: `acme/checkout-web` (LOCKED); `CLI` (`#team-cli`): `npm/cli`, `x/y` (dev).', null);
+  const starts = [...teamStarts(segs)].map((i) => (segs[i] as { text: string }).text);
+  assert.deepEqual(starts, ['Payments', 'CLI']);
+});
+
+test('the spoken answer is the answer in plain words, cut at a sentence', () => {
+  assert.equal(spokenAnswer('`acme/checkout-web` is LOCKED [E1]. Rotate secrets.'), 'acme/checkout-web is LOCKED. Rotate secrets.');
+  const long = spokenAnswer(`${'Platform owns four repos. '.repeat(20)}`, 120);
+  assert.ok(long.length < 160 && long.endsWith('The full answer is in the feed.'), long);
+});
+
+test('a model answer says its wording is the model’s; a graph answer counts traced claims', () => {
+  assert.equal(guardLine({ verified: 12, total: 12 }, true), '12 of 12 names and numbers found in the graph results; the wording is the model’s');
+  assert.equal(guardLine({ verified: 61, total: 61 }, false), '61 of 61 claims traced to a graph query');
+  assert.equal(guardLine({ verified: 1, total: 1 }, false), '1 of 1 claim traced to a graph query');
 });

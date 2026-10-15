@@ -31,7 +31,7 @@ export interface ContrastCardProps {
 const PEN = { '--pen-x': '62.5%', '--pen-y': '53%', '--pen-from': '282deg', animationDelay: '400ms' } as CSSProperties;
 // Columns from 420px: label 9.5rem (12px caps: "ADVISORY SCANNER" fits) · the arrow's 1.75rem lane · value. Below that the label stacks over the value.
 const ROW = 'grid items-baseline gap-x-3 gap-y-0.5 @min-[420px]:grid-cols-[9.5rem_1.75rem_1fr]';
-const NOTE = 'basis-full text-xs text-fg-1'; // the one plain line under a row's figures
+const NOTE = 'basis-full text-xs text-fg-1 short:hidden lg:[@media(max-height:800px)]:hidden'; // the one plain line under a row's figures (not on a phone held sideways, nor on a 768px laptop, where the graph needs the height)
 const VAL = '@min-[420px]:col-start-3';
 // The loop art is drawn around "74 min" (about 150px wide at 56px) with ~34px of air each side: wider text stretches it.
 const RING_W = 216;
@@ -89,8 +89,8 @@ export function ContrastCard({ snapshot, grepCount, grepName, minutesAhead, reve
     <section aria-label="Scanner versus graph" className="@container p-3 sm:p-4">
       <div className="flex flex-col gap-3 @min-[600px]:flex-row @min-[600px]:items-center @min-[600px]:justify-between">
         <div className="flex min-w-0 flex-col gap-3">
-          {/* On a phone the one primary action sits above the numbers: it is on screen without scrolling. */}
-          <div className="order-2 @min-[420px]:order-3">{actions}</div>
+          {/* On a phone the one primary action sits above the numbers: it is on screen without scrolling (sideways too). */}
+          <div className="order-2 @min-[420px]:order-3 short:order-1">{actions}</div>
           <dl className="relative order-3 flex min-w-0 flex-col gap-2 @min-[420px]:order-2">
             <div className={ROW}>
               <dt className="label-caps">Advisory scanner</dt>
@@ -116,8 +116,8 @@ export function ContrastCard({ snapshot, grepCount, grepName, minutesAhead, reve
                     <span className="font-mono text-2xs text-fg-1">{t.name}</span>
                   </span>
                 ))}
-                <span className="text-sm text-fg-2">paths + owners</span>
-                <span className={NOTE}>Follows the dependency graph from the hijacked account to each repo, so every hit has a path, a tier and a team.</span>
+                {/* its own line, never beside MAINTAINER's count, where it read as that tier's label */}
+                <span className={NOTE}>With paths and owners: it follows the dependency graph from the hijacked account to each repo, so every hit has a path, a tier and a team.</span>
               </dd>
             </div>
             {/* The lane runs from the top of row 1 to the bottom of the first tier count (CSS anchor positioning, so the

@@ -1,22 +1,38 @@
 /* TierLegend: the "?" beside the band's counts. What LOCKED, WOULD_PULL, MAINTAINER and "OSV advisories" mean, as real
  * text in a popover, from the first paint (the table's own "?" only exists after a triage). A button, so keyboard, touch
- * and screen-reader users get it as well as pointers; Esc or leaving it closes the popover and Esc returns focus here.
- * The words are TierChip's own (TIER_SUBTITLE), so the band, the table and the drawer never define a tier two ways.
+ * and screen-reader users get it as well as pointers; Esc, a tap outside or leaving it closes the popover and Esc returns
+ * focus here. The words are TierChip's own (TIER_SUBTITLE), so the band, the table and the drawer never define a tier two ways.
+ * Props (optional, to control it from outside: the band opens it when a count is tapped): open, onOpenChange(open).
+ * Elements marked data-legend-trigger (the counts) do not count as "outside".
  */
-import { useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { TIER_SUBTITLE, TierChip } from './TierChip.tsx';
 
 export const OSV_MEANING = 'The open vulnerability database. A scanner can only flag what already has an OSV record.';
 
-export function TierLegend() {
-  const [open, setOpen] = useState(false);
+export function TierLegend({ open: openProp, onOpenChange }: { open?: boolean; onOpenChange?: (open: boolean) => void }) {
+  const [inner, setInner] = useState(false);
+  const open = openProp ?? inner;
+  const setOpen = (o: boolean) => (onOpenChange ? onOpenChange(o) : setInner(o));
   const id = useId();
   const button = useRef<HTMLButtonElement>(null);
+  const root = useRef<HTMLSpanElement>(null);
+  // a tap outside closes it (iOS does not blur a button on a tap elsewhere)
+  useEffect(() => {
+    if (!open) return;
+    const down = (e: PointerEvent) => {
+      const t = e.target as Element | null;
+      if (t && !root.current?.contains(t) && !t.closest('[data-legend-trigger]')) setOpen(false);
+    };
+    document.addEventListener('pointerdown', down);
+    return () => document.removeEventListener('pointerdown', down);
+  }, [open]);
   return (
     <span
+      ref={root}
       className="relative inline-flex shrink-0"
       onBlur={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget)) setOpen(false);
+        if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget)) setOpen(false);
       }}
       onKeyDown={(e) => {
         if (e.key === 'Escape' && open) {
@@ -31,10 +47,10 @@ export function TierLegend() {
         type="button"
         aria-expanded={open}
         aria-controls={open ? id : undefined}
-        onClick={() => setOpen((o) => !o)}
-        className="group inline-flex size-6 items-center justify-center rounded-full pointer-coarse:size-11 hov:bg-bg-3"
+        onClick={() => setOpen(!open)}
+        className="group inline-flex size-6 items-center justify-center rounded-full pointer-coarse:-m-2.5 pointer-coarse:size-11 hov:bg-bg-3"
       >
-        {/* the circle stays 24px; the button around it is the 44px touch target */}
+        {/* the circle stays 24px; the button around it is the 44px touch target, grown into its margin so the counts keep their room */}
         <span aria-hidden className="inline-flex size-6 items-center justify-center rounded-full border border-line-3 text-xs font-medium text-fg-1 group-aria-expanded:border-fg-0 group-aria-expanded:text-fg-0">
           ?
         </span>
