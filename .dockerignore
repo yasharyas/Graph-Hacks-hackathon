@@ -1,0 +1,9 @@
+node_modules
+.git
+.cache
+.claude
+.env
+.env.*
+web/dist
+qa
+*.log

@@ -57,6 +57,7 @@ export const NARRATION_SYSTEM = [
   'Wrap every package, version, range, repo and team in backticks, for example `debug@4.4.2`, `^4.3.5`, `acme/checkout-web`, `Payments`.',
   'Cite each repo-level claim with its path id in square brackets, like [E2]; if a repo has no path id, do not cite it.',
   'Never write file paths.',
+  'WOULD_PULL means a fresh resolve would have fetched the bad version: say "would fetch", never that a repo uses, installed or was compromised by it. Only LOCKED repos have it installed.',
   'If any exposure is LOCKED, say to rotate secrets and rebuild.',
   'At most 120 words, plain text, three sections in this order: Verdict (one line), Notify (who), Do (what).',
 ].join(' ');

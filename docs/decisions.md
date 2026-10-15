@@ -2,6 +2,16 @@
 
 Short records of arena picks and other non-obvious choices. Newest first.
 
+## Phase 0 gate — spikes S1–S4, 2026-10-15
+
+- **S1 FalkorDB 4.22.1** (`falkordb/falkordb@sha256:b0bdcac…`): `shortestPath` is only allowed in `WITH`/`RETURN` (`WITH shortestPath((root)-[:REQUIRES*0..]->(x)) AS p`); `*0..` handles direct deps natively, so no special case. `allShortestPaths` only in `MATCH`; `algo.SPpaths({…pathCount:3})` gives k-shortest. `CALL algo.pageRank(...) YIELD node, score SET node.pagerank = score` works. Params, list slicing, `metadata` execution time, `GRAPH.EXPLAIN`, `GRAPH.CONSTRAINT` (async, returns PENDING) all work. 20k nodes + 20k edges via UNWIND batches of 400: 435 ms; graph 7 MB; `GRAPH.COPY` 251 ms; 60-hop shortestPath 5.5 ms internal.
+- **S8 verified:** ACL user `pz_ro` (`+GRAPH.RO_QUERY +GRAPH.EXPLAIN +GRAPH.LIST +PING +HELLO +CLIENT +INFO`) reads; `GRAPH.QUERY`/`GRAPH.DELETE` get NOPERM; `RO_QUERY` rejects writes.
+- **S3 single container** (`falkordb/falkordb-server@sha256:2e99eb1…`, Debian trixie, glibc 2.41 + Node from `node:24-trixie-slim`): the base image's ENTRYPOINT (`run.sh`) silently ignores our CMD and starts an open Redis — **override ENTRYPOINT**. No `useradd` in the image: run as numeric `USER 10001:10001`. Under `--memory=512m --cpus=0.1`: 6 graphs × 40k nodes = 165 MB total (Redis 146 MB, Node 91 MB RSS); seeding at boot took 23 s, so bake the RDB. Image 127 MB.
+- **S4 LLMs:** Groq `qwen/qwen3.8-27b` (narration 0.44 s, tool call 0.29 s), `openai/gpt-oss-120b` (needs `max_tokens` ≥ ~600 or reasoning eats the output), Gemini `gemini-3.5-flash-lite` (1.5 s / 1.2 s) — all return correct tool calls through `chat()`. A Flash-Lite narration said mocha was "currently using" the bad version, which the guard can't catch (verbs aren't entities): the system prompt now forbids "uses/installed/compromised" for WOULD_PULL.
+- **Local dev:** a native Windows Redis owns host port 6379, so dev FalkorDB maps **6380**.
+- **Fonts:** Fontshare ITF FFL forbids redistribution via a public repo → Satoshi/Cabinet Grotesk are git-ignored and fetched at build (`npm run fonts`); Martian Mono (OFL) is committed.
+- **Gate:** 58 tests green, `tsc` clean, secret scan clean, history rebuilt to 4 commits as `yasharyas`. All Phase 0 exit criteria met; no fallback needed.
+
 ## Narrative guard (`server/agent/guard.ts`) — arena, 2026-10-15
 
 - **Runners:** A (Opus, 43 lines), B (Sonnet, 53), C (Fable, 39). All 7/7, all linear on 100 KB adversarial input.
