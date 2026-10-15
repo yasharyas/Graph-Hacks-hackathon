@@ -1,0 +1,47 @@
+{
+ "id": "axios-2026-03-31",
+ "title": "axios npm account takeover: 1.14.1 and 0.30.4 depend on the plain-crypto-js@4.2.1 RAT dropper",
+ "compromised": "jasonsaayman",
+ "alertAt": "2026-03-31T02:19:00Z",
+ "removedAt": "2026-03-31T03:15:00Z",
+ "removedAtNote": "approximate; npm unpublished both axios versions at ~03:15 UTC, inferred from the registry modified field 03:15:30Z (https://www.stepsecurity.io/blog/axios-compromised-on-npm-malicious-versions-drop-remote-access-trojan); other reports say 03:00 to 03:40",
+ "versions": [
+  {
+   "id": "axios@1.14.1",
+   "publishedAt": "2026-03-31T00:21:58.168Z",
+   "advisories": [
+    "MAL-2026-2307"
+   ]
+  },
+  {
+   "id": "axios@0.30.4",
+   "publishedAt": "2026-03-31T01:00:57.285Z",
+   "advisories": [
+    "MAL-2026-2307"
+   ]
+  },
+  {
+   "id": "plain-crypto-js@4.2.1",
+   "publishedAt": "2026-03-30T23:59:12.278Z",
+   "advisories": [
+    "MAL-2026-2306"
+   ]
+  }
+ ],
+ "pullsIn": [
+  [
+   "axios@1.14.1",
+   "plain-crypto-js@4.2.1"
+  ],
+  [
+   "axios@0.30.4",
+   "plain-crypto-js@4.2.1"
+  ]
+ ],
+ "sources": [
+  "https://www.stepsecurity.io/blog/axios-compromised-on-npm-malicious-versions-drop-remote-access-trojan",
+  "https://securitylabs.datadoghq.com/articles/axios-npm-supply-chain-compromise",
+  "https://www.endorlabs.com/learn/npm-axios-compromise",
+  "https://tenable.com/blog/faq-about-the-axios-npm-supply-chain-attack-by-north-korea-nexus-threat-actor-unc1069"
+ ]
+}

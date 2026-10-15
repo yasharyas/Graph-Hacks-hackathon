@@ -1,0 +1,183 @@
+{
+ "GHSA-286p-vc9p-p5qv": {
+  "publishedAt": "2025-09-15T21:23:54Z",
+  "affected": [
+   "color-string@2.1.1"
+  ]
+ },
+ "GHSA-4x49-vf9v-38px": {
+  "publishedAt": "2025-09-15T21:30:55Z",
+  "affected": [
+   "debug@4.4.2"
+  ]
+ },
+ "GHSA-53mq-f4w3-f7qv": {
+  "publishedAt": "2025-09-15T21:21:25Z",
+  "affected": [
+   "backslash@0.2.1"
+  ]
+ },
+ "GHSA-5fvm-p68v-5wmh": {
+  "publishedAt": "2025-09-15T22:03:28Z",
+  "affected": [
+   "color-name@2.0.1"
+  ]
+ },
+ "GHSA-6jp5-hh4c-8c5h": {
+  "publishedAt": "2025-09-15T23:58:03Z",
+  "affected": [
+   "error-ex@1.3.3"
+  ]
+ },
+ "GHSA-9g9j-rggx-7fmg": {
+  "publishedAt": "2025-09-15T21:22:55Z",
+  "affected": [
+   "simple-swizzle@0.2.3"
+  ]
+ },
+ "GHSA-frh7-2f84-v9mw": {
+  "publishedAt": "2025-09-15T23:58:46Z",
+  "affected": [
+   "is-arrayish@0.3.3"
+  ]
+ },
+ "GHSA-pxx3-g568-hxr4": {
+  "publishedAt": "2025-09-15T23:32:36Z",
+  "affected": [
+   "color-convert@3.1.1"
+  ]
+ },
+ "GHSA-qrmh-qg46-72pp": {
+  "publishedAt": "2025-09-15T21:29:40Z",
+  "affected": [
+   "color@5.0.1"
+  ]
+ },
+ "MAL-2025-46966": {
+  "publishedAt": "2025-09-08T17:18:30Z",
+  "affected": [
+   "ansi-regex@6.2.1"
+  ]
+ },
+ "MAL-2025-46967": {
+  "publishedAt": "2025-09-08T17:07:44Z",
+  "affected": [
+   "ansi-styles@6.2.2"
+  ]
+ },
+ "MAL-2025-46968": {
+  "publishedAt": "2025-09-08T15:18:29Z",
+  "affected": [
+   "backslash@0.2.1"
+  ]
+ },
+ "MAL-2025-46969": {
+  "publishedAt": "2025-09-08T17:11:19Z",
+  "affected": [
+   "chalk@5.6.1"
+  ]
+ },
+ "MAL-2025-46970": {
+  "publishedAt": "2025-09-08T17:24:43Z",
+  "affected": [
+   "chalk-template@1.1.1"
+  ]
+ },
+ "MAL-2025-46971": {
+  "publishedAt": "2025-09-08T15:20:15Z",
+  "affected": [
+   "color-convert@3.1.1"
+  ]
+ },
+ "MAL-2025-46972": {
+  "publishedAt": "2025-09-08T15:05:16Z",
+  "affected": [
+   "color-name@2.0.1"
+  ]
+ },
+ "MAL-2025-46973": {
+  "publishedAt": "2025-09-08T15:19:21Z",
+  "affected": [
+   "color-string@2.1.1"
+  ]
+ },
+ "MAL-2025-46974": {
+  "publishedAt": "2025-09-08T14:26:51Z",
+  "affected": [
+   "debug@4.4.2"
+  ]
+ },
+ "MAL-2025-46975": {
+  "publishedAt": "2025-09-08T15:02:53Z",
+  "affected": [
+   "error-ex@1.3.3"
+  ]
+ },
+ "MAL-2025-46976": {
+  "publishedAt": "2025-09-08T17:22:03Z",
+  "affected": [
+   "has-ansi@6.0.1"
+  ]
+ },
+ "MAL-2025-46977": {
+  "publishedAt": "2025-09-08T15:17:54Z",
+  "affected": [
+   "is-arrayish@0.3.3"
+  ]
+ },
+ "MAL-2025-46978": {
+  "publishedAt": "2025-09-08T15:16:05Z",
+  "affected": [
+   "simple-swizzle@0.2.3"
+  ]
+ },
+ "MAL-2025-46979": {
+  "publishedAt": "2025-09-08T17:20:52Z",
+  "affected": [
+   "slice-ansi@7.1.1"
+  ]
+ },
+ "MAL-2025-46980": {
+  "publishedAt": "2025-09-08T17:14:19Z",
+  "affected": [
+   "strip-ansi@7.1.1"
+  ]
+ },
+ "MAL-2025-46981": {
+  "publishedAt": "2025-09-08T17:16:42Z",
+  "affected": [
+   "supports-color@10.2.1"
+  ]
+ },
+ "MAL-2025-46982": {
+  "publishedAt": "2025-09-08T17:23:14Z",
+  "affected": [
+   "supports-hyperlinks@4.1.1"
+  ]
+ },
+ "MAL-2025-46983": {
+  "publishedAt": "2025-09-08T17:19:41Z",
+  "affected": [
+   "wrap-ansi@9.0.1"
+  ]
+ },
+ "MAL-2025-46985": {
+  "publishedAt": "2025-09-08T20:48:50Z",
+  "affected": [
+   "color@5.0.1"
+  ]
+ },
+ "MAL-2026-2306": {
+  "publishedAt": "2026-03-31T02:07:58Z",
+  "affected": [
+   "plain-crypto-js@4.2.1"
+  ]
+ },
+ "MAL-2026-2307": {
+  "publishedAt": "2026-03-31T03:15:49Z",
+  "affected": [
+   "axios@0.30.4",
+   "axios@1.14.1"
+  ]
+ }
+}

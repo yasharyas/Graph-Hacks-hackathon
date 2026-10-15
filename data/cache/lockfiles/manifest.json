@@ -1,0 +1,286 @@
+{
+ "qix-2025-09-08": {
+  "github/docs": {
+   "sha": "6669cda29c356b1b0f133d3bd07b311da9f61624",
+   "committedAt": "2025-09-03T17:17:59Z",
+   "file": "github__docs__6669cda.json",
+   "deps": 1326,
+   "unresolved": 0
+  },
+  "swagger-api/swagger-ui": {
+   "sha": "4dea377ca41ca88aaec3939ac7b720b99c17c10e",
+   "committedAt": "2025-09-03T06:12:58Z",
+   "file": "swagger-api__swagger-ui__4dea377.json",
+   "deps": 2274,
+   "unresolved": 0
+  },
+  "mozilla/pdf.js": {
+   "sha": "4dcfc967036223f714210ec6ecfd9eba8376d54b",
+   "committedAt": "2025-08-30T16:38:25Z",
+   "file": "mozilla__pdf.js__4dcfc96.json",
+   "deps": 949,
+   "unresolved": 0
+  },
+  "npm/cli": {
+   "sha": "3b30e0b1f1ee9c7119d352dc4f9a27d53f24b988",
+   "committedAt": "2025-09-03T19:48:47Z",
+   "file": "npm__cli__3b30e0b.json",
+   "deps": 1366,
+   "unresolved": 0
+  },
+  "microsoft/TypeScript": {
+   "sha": "73c0bc8bc84f398990b4a79d732bbd00ca453cd5",
+   "committedAt": "2025-08-14T19:17:24Z",
+   "file": "microsoft__TypeScript__73c0bc8.json",
+   "deps": 421,
+   "unresolved": 0
+  },
+  "nestjs/nest-cli": {
+   "sha": "58af4edeb2200a5da73f02da06aaff53f4013c2a",
+   "committedAt": "2025-09-05T21:54:12Z",
+   "file": "nestjs__nest-cli__58af4ed.json",
+   "deps": 1082,
+   "unresolved": 0
+  },
+  "http-party/http-server": {
+   "sha": "8ca8c7a2e30116a6b88b79c2dad2c53860e5eded",
+   "committedAt": "2024-09-20T20:43:18Z",
+   "file": "http-party__http-server__8ca8c7a.json",
+   "deps": 732,
+   "unresolved": 0
+  },
+  "nestjs/nest": {
+   "sha": "7a6073cc9c271ecc583e8957afd7d36a6a4a8b1f",
+   "committedAt": "2025-09-08T00:02:41Z",
+   "file": "nestjs__nest__7a6073c.json",
+   "deps": 2789,
+   "unresolved": 0
+  },
+  "socketio/socket.io": {
+   "sha": "c7144920e373f2f9bb7f7c8a4ac0efe08adbb2de",
+   "committedAt": "2025-09-04T07:30:26Z",
+   "file": "socketio__socket.io__c714492.json",
+   "deps": 1308,
+   "unresolved": 0
+  },
+  "appium/appium": {
+   "sha": "2edd325fb4ddc1cdf3c0c83c1030c1ca6c0b985d",
+   "committedAt": "2025-09-06T06:16:52Z",
+   "file": "appium__appium__2edd325.json",
+   "deps": 1706,
+   "unresolved": 0
+  },
+  "mochajs/mocha": {
+   "sha": "5f8e8a89fb4cc833290549dcb1974be06514746b",
+   "committedAt": "2025-09-01T16:09:38Z",
+   "file": "mochajs__mocha__5f8e8a8.json",
+   "deps": 1455,
+   "unresolved": 0
+  },
+  "remy/nodemon": {
+   "sha": "533ad9ccde0beb864c64d86dc62f6f54fb60769c",
+   "committedAt": "2023-12-01T18:39:17Z",
+   "file": "remy__nodemon__533ad9c.json",
+   "deps": 803,
+   "unresolved": 0
+  },
+  "puppeteer/puppeteer": {
+   "sha": "0c7962b473976be4c9849a756a99d51887924be5",
+   "committedAt": "2025-09-04T13:00:01Z",
+   "file": "puppeteer__puppeteer__0c7962b.json",
+   "deps": 2262,
+   "unresolved": 0
+  },
+  "nightwatchjs/nightwatch": {
+   "sha": "a30d660efb745bce98abb9fb904bd1b19f066b6f",
+   "committedAt": "2025-06-06T10:32:00Z",
+   "file": "nightwatchjs__nightwatch__a30d660.json",
+   "deps": 844,
+   "unresolved": 0
+  },
+  "postmanlabs/newman": {
+   "sha": "dd64129cdccbcae65adb6290a29cfe04193ad529",
+   "committedAt": "2024-08-20T10:27:57Z",
+   "file": "postmanlabs__newman__dd64129.json",
+   "deps": 614,
+   "unresolved": 0
+  },
+  "twbs/bootstrap": {
+   "sha": "07b3816da566b9ed03943b4081180fdd8623355e",
+   "committedAt": "2025-09-07T17:31:30Z",
+   "file": "twbs__bootstrap__07b3816.json",
+   "deps": 1348,
+   "unresolved": 0
+  },
+  "jquery/jquery": {
+   "sha": "9c84195b9445645ba22f1c88d464d0b7d5ba22dd",
+   "committedAt": "2025-08-12T20:04:38Z",
+   "file": "jquery__jquery__9c84195.json",
+   "deps": 828,
+   "unresolved": 0
+  },
+  "netlify/cli": {
+   "sha": "c14d564f3aef14827e07e63de861fd8a09fdd591",
+   "committedAt": "2025-09-08T03:48:13Z",
+   "file": "netlify__cli__c14d564.json",
+   "deps": 1608,
+   "unresolved": 3
+  },
+  "louislam/uptime-kuma": {
+   "sha": "cd9f83c54f3f4364208ea028be7fcb393a02124e",
+   "committedAt": "2025-08-30T17:39:46Z",
+   "file": "louislam__uptime-kuma__cd9f83c.json",
+   "deps": 1375,
+   "unresolved": 0
+  },
+  "Kong/insomnia": {
+   "sha": "0aa90e31d0e221c1bcff8de5eab3e9bd73249ca3",
+   "committedAt": "2025-09-05T07:42:11Z",
+   "file": "Kong__insomnia__0aa90e3.json",
+   "deps": 2253,
+   "unresolved": 0
+  }
+ },
+ "axios-2026-03-31": {
+  "github/docs": {
+   "sha": "b0cbab77f8e0328e807aa8386375f194d773e88f",
+   "committedAt": "2026-03-30T17:52:34Z",
+   "file": "github__docs__b0cbab7.json",
+   "deps": 1535,
+   "unresolved": 0
+  },
+  "swagger-api/swagger-ui": {
+   "sha": "b339e559ac986506d41728054ec8d07cf8c1046f",
+   "committedAt": "2026-03-30T10:15:27Z",
+   "file": "swagger-api__swagger-ui__b339e55.json",
+   "deps": 2236,
+   "unresolved": 0
+  },
+  "mozilla/pdf.js": {
+   "sha": "90fe6c70ffa4b2c5a9f70d95edba4718eea70026",
+   "committedAt": "2026-03-30T11:45:13Z",
+   "file": "mozilla__pdf.js__90fe6c7.json",
+   "deps": 937,
+   "unresolved": 0
+  },
+  "npm/cli": {
+   "sha": "63b9a7c1a65361eb2e082d5f4aff267df52ba817",
+   "committedAt": "2026-03-26T18:45:12Z",
+   "file": "npm__cli__63b9a7c.json",
+   "deps": 1185,
+   "unresolved": 0
+  },
+  "microsoft/TypeScript": {
+   "sha": "77ddb5b443ae3479b91bcaff0920d9f1ef0d31bc",
+   "committedAt": "2026-03-25T16:03:18Z",
+   "file": "microsoft__TypeScript__77ddb5b.json",
+   "deps": 395,
+   "unresolved": 0
+  },
+  "nestjs/nest-cli": {
+   "sha": "62eb0bc88d4def508650074cb55938c155bbeaa0",
+   "committedAt": "2026-03-13T10:38:20Z",
+   "file": "nestjs__nest-cli__62eb0bc.json",
+   "deps": 1012,
+   "unresolved": 0
+  },
+  "http-party/http-server": {
+   "sha": "8dbde7d797a38509c0681879e6058d8786270126",
+   "committedAt": "2025-12-16T20:31:53Z",
+   "file": "http-party__http-server__8dbde7d.json",
+   "deps": 735,
+   "unresolved": 0
+  },
+  "nestjs/nest": {
+   "sha": "3d7d5c00064f5364d20efef813192d9df9a22692",
+   "committedAt": "2026-03-30T21:49:53Z",
+   "file": "nestjs__nest__3d7d5c0.json",
+   "deps": 2100,
+   "unresolved": 0
+  },
+  "socketio/socket.io": {
+   "sha": "07cbe1510ded7e5460cb82e026e2533e50e30eaf",
+   "committedAt": "2026-03-04T08:54:58Z",
+   "file": "socketio__socket.io__07cbe15.json",
+   "deps": 1301,
+   "unresolved": 0
+  },
+  "appium/appium": {
+   "sha": "aca8f72ee59f74227869930945480bb0ecdc8ecf",
+   "committedAt": "2026-03-30T11:46:34Z",
+   "file": "appium__appium__aca8f72.json",
+   "deps": 1655,
+   "unresolved": 0
+  },
+  "mochajs/mocha": {
+   "sha": "661f349ac29e4dbc32c9532ce25fdfd8ba996f01",
+   "committedAt": "2026-03-29T14:08:51Z",
+   "file": "mochajs__mocha__661f349.json",
+   "deps": 883,
+   "unresolved": 0
+  },
+  "remy/nodemon": {
+   "sha": "2c458de9b5d5600e18afb4f11fad6077a384a4d1",
+   "committedAt": "2026-02-19T22:20:02Z",
+   "file": "remy__nodemon__2c458de.json",
+   "deps": 807,
+   "unresolved": 0
+  },
+  "puppeteer/puppeteer": {
+   "sha": "ee81786a8285e20afdee70e4fb8660df4d6748b0",
+   "committedAt": "2026-03-30T16:17:43Z",
+   "file": "puppeteer__puppeteer__ee81786.json",
+   "deps": 3278,
+   "unresolved": 0
+  },
+  "nightwatchjs/nightwatch": {
+   "sha": "f4402713aae384de8c773ceedac1b426b0a61692",
+   "committedAt": "2026-01-21T16:24:49Z",
+   "file": "nightwatchjs__nightwatch__f440271.json",
+   "deps": 846,
+   "unresolved": 0
+  },
+  "postmanlabs/newman": {
+   "sha": "90d50ae4a7383ac0391d76f0ed3be072250207b4",
+   "committedAt": "2026-01-16T20:17:40Z",
+   "file": "postmanlabs__newman__90d50ae.json",
+   "deps": 629,
+   "unresolved": 0
+  },
+  "twbs/bootstrap": {
+   "sha": "3e784f3ffb023fe6eece63efe440770c0b22bcce",
+   "committedAt": "2026-03-23T18:58:03Z",
+   "file": "twbs__bootstrap__3e784f3.json",
+   "deps": 1466,
+   "unresolved": 0
+  },
+  "jquery/jquery": {
+   "sha": "1f14d2415dcff2ca629c66c43141d1b51b244b10",
+   "committedAt": "2026-03-26T15:04:29Z",
+   "file": "jquery__jquery__1f14d24.json",
+   "deps": 834,
+   "unresolved": 0
+  },
+  "netlify/cli": {
+   "sha": "5d18836405931d30c27d8abad11b8a3d8e7542ba",
+   "committedAt": "2026-03-30T13:02:18Z",
+   "file": "netlify__cli__5d18836.json",
+   "deps": 1691,
+   "unresolved": 0
+  },
+  "louislam/uptime-kuma": {
+   "sha": "df23942f6556e54566f92612c9dbc63809bf5955",
+   "committedAt": "2026-03-06T14:35:46Z",
+   "file": "louislam__uptime-kuma__df23942.json",
+   "deps": 1250,
+   "unresolved": 1
+  },
+  "Kong/insomnia": {
+   "sha": "8f6bf2af2f2528eb07b6ec3aa575cd0a7e013182",
+   "committedAt": "2026-03-26T02:32:17Z",
+   "file": "Kong__insomnia__8f6bf2a.json",
+   "deps": 2433,
+   "unresolved": 5
+  }
+ }
+}

@@ -1,0 +1,157 @@
+{
+ "id": "acme",
+ "name": "Acme Corp (simulated)",
+ "teams": [
+  {
+   "id": "docs",
+   "name": "Docs",
+   "channel": "#team-docs"
+  },
+  {
+   "id": "cli",
+   "name": "CLI",
+   "channel": "#team-cli"
+  },
+  {
+   "id": "platform",
+   "name": "Platform",
+   "channel": "#team-platform"
+  },
+  {
+   "id": "qa",
+   "name": "QA",
+   "channel": "#team-qa"
+  },
+  {
+   "id": "api-clients",
+   "name": "API Clients",
+   "channel": "#team-api-clients"
+  },
+  {
+   "id": "web",
+   "name": "Web",
+   "channel": "#team-web"
+  },
+  {
+   "id": "payments",
+   "name": "Payments",
+   "channel": "#team-payments"
+  }
+ ],
+ "repos": [
+  {
+   "id": "github/docs",
+   "team": "docs",
+   "synthetic": false
+  },
+  {
+   "id": "swagger-api/swagger-ui",
+   "team": "docs",
+   "synthetic": false
+  },
+  {
+   "id": "mozilla/pdf.js",
+   "team": "docs",
+   "synthetic": false
+  },
+  {
+   "id": "npm/cli",
+   "team": "cli",
+   "synthetic": false
+  },
+  {
+   "id": "microsoft/TypeScript",
+   "team": "cli",
+   "synthetic": false
+  },
+  {
+   "id": "nestjs/nest-cli",
+   "team": "cli",
+   "synthetic": false
+  },
+  {
+   "id": "http-party/http-server",
+   "team": "cli",
+   "synthetic": false
+  },
+  {
+   "id": "nestjs/nest",
+   "team": "platform",
+   "synthetic": false
+  },
+  {
+   "id": "socketio/socket.io",
+   "team": "platform",
+   "synthetic": false
+  },
+  {
+   "id": "appium/appium",
+   "team": "platform",
+   "synthetic": false
+  },
+  {
+   "id": "mochajs/mocha",
+   "team": "qa",
+   "synthetic": false
+  },
+  {
+   "id": "remy/nodemon",
+   "team": "qa",
+   "synthetic": false
+  },
+  {
+   "id": "puppeteer/puppeteer",
+   "team": "qa",
+   "synthetic": false
+  },
+  {
+   "id": "nightwatchjs/nightwatch",
+   "team": "qa",
+   "synthetic": false
+  },
+  {
+   "id": "postmanlabs/newman",
+   "team": "api-clients",
+   "synthetic": false
+  },
+  {
+   "id": "twbs/bootstrap",
+   "team": "web",
+   "synthetic": false
+  },
+  {
+   "id": "jquery/jquery",
+   "team": "web",
+   "synthetic": false
+  },
+  {
+   "id": "netlify/cli",
+   "team": "cli",
+   "synthetic": false
+  },
+  {
+   "id": "louislam/uptime-kuma",
+   "team": "platform",
+   "synthetic": false
+  },
+  {
+   "id": "Kong/insomnia",
+   "team": "api-clients",
+   "synthetic": false
+  },
+  {
+   "id": "acme/checkout-web",
+   "team": "payments",
+   "synthetic": true
+  },
+  {
+   "id": "acme/billing-api",
+   "team": "payments",
+   "synthetic": true
+  }
+ ],
+ "scenarios": {
+  "qix-2025-09-08": "2025-09-08T13:00:00Z",
+  "axios-2026-03-31": "2026-03-31T00:00:00Z"
+ }
+}

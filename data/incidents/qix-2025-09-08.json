@@ -1,0 +1,158 @@
+{
+ "id": "qix-2025-09-08",
+ "title": "qix npm account takeover: 19 malicious versions of chalk, debug, ansi-styles and 16 other packages",
+ "compromised": "qix",
+ "alertAt": "2025-09-08T13:16:00Z",
+ "removedAt": "2025-09-08T15:15:00Z",
+ "removedAtNote": "approximate; the maintainer acknowledged the compromise and began removing versions at 15:15 UTC (https://www.aikido.dev/blog/npm-debug-and-chalk-packages-compromised); Wiz gives the exposure window as 13:16 to ~15:15 UTC (https://www.wiz.io/blog/widespread-npm-supply-chain-attack-breaking-down-impact-scope-across-debug-chalk)",
+ "versions": [
+  {
+   "id": "ansi-styles@6.2.2",
+   "publishedAt": "2025-09-08T13:12:10.343Z",
+   "advisories": [
+    "MAL-2025-46967"
+   ]
+  },
+  {
+   "id": "debug@4.4.2",
+   "publishedAt": "2025-09-08T13:12:39.973Z",
+   "advisories": [
+    "GHSA-4x49-vf9v-38px",
+    "MAL-2025-46974"
+   ]
+  },
+  {
+   "id": "chalk@5.6.1",
+   "publishedAt": "2025-09-08T13:13:05.239Z",
+   "advisories": [
+    "MAL-2025-46969"
+   ]
+  },
+  {
+   "id": "supports-color@10.2.1",
+   "publishedAt": "2025-09-08T13:13:28.154Z",
+   "advisories": [
+    "MAL-2025-46981"
+   ]
+  },
+  {
+   "id": "strip-ansi@7.1.1",
+   "publishedAt": "2025-09-08T13:13:50.431Z",
+   "advisories": [
+    "MAL-2025-46980"
+   ]
+  },
+  {
+   "id": "ansi-regex@6.2.1",
+   "publishedAt": "2025-09-08T13:14:15.663Z",
+   "advisories": [
+    "MAL-2025-46966"
+   ]
+  },
+  {
+   "id": "wrap-ansi@9.0.1",
+   "publishedAt": "2025-09-08T13:14:36.637Z",
+   "advisories": [
+    "MAL-2025-46983"
+   ]
+  },
+  {
+   "id": "color-convert@3.1.1",
+   "publishedAt": "2025-09-08T13:14:53.099Z",
+   "advisories": [
+    "GHSA-pxx3-g568-hxr4",
+    "MAL-2025-46971"
+   ]
+  },
+  {
+   "id": "color-name@2.0.1",
+   "publishedAt": "2025-09-08T13:15:12.330Z",
+   "advisories": [
+    "GHSA-5fvm-p68v-5wmh",
+    "MAL-2025-46972"
+   ]
+  },
+  {
+   "id": "is-arrayish@0.3.3",
+   "publishedAt": "2025-09-08T13:15:29.824Z",
+   "advisories": [
+    "GHSA-frh7-2f84-v9mw",
+    "MAL-2025-46977"
+   ]
+  },
+  {
+   "id": "color@5.0.1",
+   "publishedAt": "2025-09-08T13:16:24.320Z",
+   "advisories": [
+    "GHSA-qrmh-qg46-72pp",
+    "MAL-2025-46985"
+   ]
+  },
+  {
+   "id": "slice-ansi@7.1.1",
+   "publishedAt": "2025-09-08T13:15:47.971Z",
+   "advisories": [
+    "MAL-2025-46979"
+   ]
+  },
+  {
+   "id": "error-ex@1.3.3",
+   "publishedAt": "2025-09-08T13:16:05.782Z",
+   "advisories": [
+    "GHSA-6jp5-hh4c-8c5h",
+    "MAL-2025-46975"
+   ]
+  },
+  {
+   "id": "color-string@2.1.1",
+   "publishedAt": "2025-09-08T13:18:07.889Z",
+   "advisories": [
+    "GHSA-286p-vc9p-p5qv",
+    "MAL-2025-46973"
+   ]
+  },
+  {
+   "id": "simple-swizzle@0.2.3",
+   "publishedAt": "2025-09-08T13:19:05.292Z",
+   "advisories": [
+    "GHSA-9g9j-rggx-7fmg",
+    "MAL-2025-46978"
+   ]
+  },
+  {
+   "id": "supports-hyperlinks@4.1.1",
+   "publishedAt": "2025-09-08T13:19:28.952Z",
+   "advisories": [
+    "MAL-2025-46982"
+   ]
+  },
+  {
+   "id": "has-ansi@6.0.1",
+   "publishedAt": "2025-09-08T13:19:46.490Z",
+   "advisories": [
+    "MAL-2025-46976"
+   ]
+  },
+  {
+   "id": "chalk-template@1.1.1",
+   "publishedAt": "2025-09-08T13:20:09.339Z",
+   "advisories": [
+    "MAL-2025-46970"
+   ]
+  },
+  {
+   "id": "backslash@0.2.1",
+   "publishedAt": "2025-09-08T13:20:31.923Z",
+   "advisories": [
+    "GHSA-53mq-f4w3-f7qv",
+    "MAL-2025-46968"
+   ]
+  }
+ ],
+ "pullsIn": [],
+ "sources": [
+  "https://www.aikido.dev/blog/npm-debug-and-chalk-packages-compromised",
+  "https://www.wiz.io/blog/widespread-npm-supply-chain-attack-breaking-down-impact-scope-across-debug-chalk",
+  "https://osv.dev/vulnerability/MAL-2025-46974"
+ ]
+}

@@ -1,0 +1,22 @@
+# Proof points
+
+The only numbers the README, video, blog and posts may quote. Each line names its source. Recompute with
+`node scripts/exposure-oracle.ts <scenario> <atISO>` (graph-free) and, once the graph is up, the matching Cypher.
+
+## Advisory timing (source: npm packument `time` map in `data/cache/npm/packuments.json`, OSV `published` in `data/cache/osv.json`)
+
+- qix, 2025-09-08: first malicious publish `ansi-styles@6.2.2` at 13:12:10Z; `debug@4.4.2` at 13:12:39Z. First OSV record (MAL-2025-46974, debug) published 14:26:51Z. **74 minutes** with no advisory-based signal.
+- axios, 2026-03-31: `axios@1.14.1` published 00:21:58Z; its own OSV record (MAL-2026-2307) at 03:15:49Z: **2 h 54 min**. The campaign's first OSV record was for the dropped dependency `plain-crypto-js@4.2.1` (MAL-2026-2306) at 02:07:58Z, 2 h 09 min after that package was published (23:59:12Z on 03-30). Say "axios@1.14.1 had no OSV record for 2 h 54 min", not "the campaign had none".
+- Vendor detection was fast (Aikido flagged qix at ~13:16Z). We are a triage layer, not a detector.
+
+## Acme exposure (source: `scripts/exposure-oracle.ts`, historical lockfiles in `data/cache/lockfiles/`)
+
+- qix at 13:30Z: **20 of 20** real repos would fetch at least one malicious version on a fresh resolve; **13** through production dependencies.
+- Declared directly in the repo's own package.json at the qix snapshot: `npm/cli` (`chalk ^5.4.1`, `supports-color ^10.0.0`), `mochajs/mocha` (`debug ^4.3.5`), `remy/nodemon` (`debug ^4`), `github/docs` (`chalk ^5.0.1`).
+- axios at 01:30Z: **9 of 20** repos; `louislam/uptime-kuma` declares `axios ~0.30.3` directly, which resolved to the malicious 0.30.4.
+- Wording rule: "would have fetched on a fresh resolve", never "was compromised". `npm ci` with a committed lockfile was safe.
+
+## Data scope
+
+- 20 real public repos + 2 synthetic (badged), lockfiles as of 2025-09-08T13:00Z and 2026-03-31T00:00Z.
+- 5,739 package names, maintainers as usernames only (no emails). 92 packuments with full version timelines.
