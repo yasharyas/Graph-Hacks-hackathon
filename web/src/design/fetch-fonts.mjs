@@ -37,6 +37,11 @@ const FONTS = [
 
 const exists = (p) => access(p).then(() => true, () => false);
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
+const PINNED = {
+  'Satoshi-Variable.woff2': 'e739aff9b4d02c264341d6d4872edcda28e79373aeda936f659566a1cd3eb47f',
+  'CabinetGrotesk-Variable.woff2': 'f71103771c9e32406026b6ea46c7e57cb977d5884e70d0f1beeab91ab2c7abb6',
+  'FFL.txt': '145e7fe2429a3336ba215c070ef722000e01348a3e1baaa127e871bb5012f554',
+};
 
 /** Minimal zip reader (stored + deflate, no zip64). Returns Map<entryName, Buffer>. */
 function unzip(buf) {
@@ -92,6 +97,8 @@ async function main() {
       if (!key) throw new Error(`${font.slug}: ${suffix} not found in download`);
       const data = entries.get(key);
       if (out.endsWith('.woff2') && data.toString('latin1', 0, 4) !== 'wOF2') throw new Error(`${out}: not a woff2 file`);
+      // S9: the build fetches over the network, so pin the exact bytes; a changed upstream file fails the build.
+      if (PINNED[out] && sha256(data) !== PINNED[out]) throw new Error(`${out}: sha256 ${sha256(data)} does not match the pinned hash`);
       await writeFile(path.join(outDir, out), data);
       console.log(`${out}  ${data.length} bytes  sha256 ${sha256(data)}`);
       fetched++;

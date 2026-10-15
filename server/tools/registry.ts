@@ -184,6 +184,7 @@ export async function scannerView(g: Graph, p: { incident: unknown; at: unknown 
 
 export async function recallTriage(g: Graph, p: { session: unknown; incident: unknown }) {
   const params = { session: str(p.session, 64), incident: str(p.incident) };
+  if (!params.session) throw new Error('recall_triage needs the server-side session');
   const c = call(g);
   const seen = new Set<string>();
   const rows = (await c.q(Q.RECALL_TRIAGE, params)).filter((r) => !seen.has(r.repo) && seen.add(r.repo)); // latest per repo
@@ -192,10 +193,19 @@ export async function recallTriage(g: Graph, p: { session: unknown; incident: un
   return c.result('recall_triage', { incident: params.incident }, summary, rows, rows.map((r) => r.repo)); // the session id stays server-side
 }
 
+const TIERS = new Set<string>(['LOCKED', 'WOULD_PULL', 'MAINTAINER', 'CLEAN']);
+export const ACTIONS = new Set<string>(['remediated', 'notified', 'accepted-risk']);
+
 // Server only (S10): triage memory and "mark remediated", scoped to the caller's anonymous session id.
 export async function recordTriage(graphName: string, t: { session: string; incident: string; at: number; summary: string; assessed: { repo: string; tier: Tier; action: string | null }[] }) {
   const id = randomUUID();
-  await write(graphName, Q.RECORD_TRIAGE, { id, session: str(t.session, 64), incident: str(t.incident), at: t.at, summary: str(t.summary, 500), assessed: t.assessed.slice(0, 200) });
+  // Rebuild each row from allowlisted fields: never pass caller objects into a query as maps (S3/S10).
+  const assessed = t.assessed.slice(0, 200).map((a) => ({
+    repo: str(a.repo, 140),
+    tier: TIERS.has(a.tier) ? a.tier : 'CLEAN',
+    action: a.action !== null && ACTIONS.has(a.action) ? a.action : null,
+  }));
+  await write(graphName, Q.RECORD_TRIAGE, { id, session: str(t.session, 64), incident: str(t.incident), at: time(t.at), summary: str(t.summary, 500), assessed });
   return id;
 }
 
@@ -209,5 +219,6 @@ export const TOOLS: Record<ToolName, ToolDef<any>> = {
   concentration_risk: { name: 'concentration_risk', description: 'Maintainers whose packages carry the most PageRank across the org dependency graph: who could be the next compromised account.', parameters: obj({ top: { type: 'integer', minimum: 1, maximum: 10, description: 'How many maintainers' } }, []), run: concentrationRisk },
   draft_remediation: { name: 'draft_remediation', description: 'Safe "overrides" pins (highest clean version live at the time that every affected range accepts) and steps for one repo.', parameters: obj({ repo: S('owner/name'), versions: LIST('malicious name@version ids in this repo'), at: AT }, ['repo', 'versions', 'at']), run: draftRemediation },
   scanner_view: { name: 'scanner_view', description: 'What an advisory-based scanner reports at a moment (lockfile x published OSV records), plus a plain name grep.', parameters: obj({ incident: S('Incident id'), at: AT }, ['incident', 'at']), run: async (g, p) => (await scannerView(g, p)).result },
-  recall_triage: { name: 'recall_triage', description: 'Earlier assessments and remediation marks for this incident in the current session.', parameters: obj({ session: S('Session id (supplied by the server)'), incident: S('Incident id') }, ['session', 'incident']), run: recallTriage },
+  // The session is never an LLM argument (S10): the dispatcher must overwrite p.session with the caller's cookie session.
+  recall_triage: { name: 'recall_triage', description: 'Earlier assessments and remediation marks for this incident in the current session.', parameters: obj({ incident: S('Incident id') }, ['incident']), run: recallTriage },
 };

@@ -40,7 +40,8 @@ until [ "$(rcli PING 2>/dev/null)" = PONG ]; do
 done
 
 # S8: tools run as pz_ro (reads only); ingest and triage memory run as pz_rw. `reset` makes this idempotent.
-RO='-@all +GRAPH.RO_QUERY +GRAPH.EXPLAIN +GRAPH.LIST +PING +HELLO +CLIENT +INFO'
+# Only the handshake subcommands the client needs (no CLIENT KILL/PAUSE); it hangs without INFO.
+RO='-@all +GRAPH.RO_QUERY +GRAPH.EXPLAIN +GRAPH.LIST +PING +HELLO +client|setinfo +client|setname +INFO'
 rcli >/dev/null <<EOF
 ACL SETUSER pz_ro reset on #$(sha "$PZ_RO_PASSWORD") ~* &* $RO
 ACL SETUSER pz_rw reset on #$(sha "$PZ_RW_PASSWORD") ~* &* $RO +GRAPH.QUERY +GRAPH.DELETE +GRAPH.COPY +GRAPH.CONSTRAINT +GRAPH.MEMORY +SAVE
@@ -49,10 +50,15 @@ EOF
 [ "$(REDISCLI_AUTH="$PZ_RO_PASSWORD" rcli --user pz_ro PING)" = PONG ] || { echo "start.sh: ACL user pz_ro not usable" >&2; exit 1; }
 [ "$(REDISCLI_AUTH="$PZ_RW_PASSWORD" rcli --user pz_rw PING)" = PONG ] || { echo "start.sh: ACL user pz_rw not usable" >&2; exit 1; }
 
-# No baked RDB (or an empty server): rebuild from the committed data/.
-rcli GRAPH.LIST | grep -qx pz_acme_qix || node server/ingest/build.ts
+# From here Node only ever uses the ACL users: reads as pz_ro, writes as pz_rw (server/graph/client.ts), and the
+# default-user password is removed from its environment so even a compromised process can't escalate.
+export FALKOR_ACL=1
+app() { env -u REDIS_PASSWORD -u REDISCLI_AUTH "$@"; }
 
-node --max-old-space-size=160 server/index.ts &
+# No baked RDB (or an empty server): rebuild from the committed data/.
+rcli GRAPH.LIST | grep -qx pz_acme_qix || app node server/ingest/build.ts
+
+app node --max-old-space-size=160 server/index.ts &
 pids="$pids $!"
 wait -n # either child exiting ends the container so the platform restarts it
 exit 1

@@ -38,15 +38,34 @@ export function forPrompt(s: unknown, max = 80): string {
   return String(s ?? '').replace(/[^A-Za-z0-9@/._~^<>=|*+ :-]/g, '').slice(0, max);
 }
 
-// S7: fixed-window limiter, in memory only (no IPs persisted).
+// S7: sliding-window limiter, in memory only (no IPs persisted).
 const hits = new Map<string, number[]>();
+const WINDOW_MAX = 10 * 60_000; // longest window any route uses
 export function limited(key: string, max: number, windowMs: number, now = Date.now()): boolean {
-  if (hits.size > 10_000) hits.clear(); // ponytail: crude bound; a real store if this ever runs multi-instance
+  if (hits.size > 50_000) {
+    // Evict stale keys, then the least recent; never reset everyone's counters at once. 50k distinct clients
+    // (IPv6 already grouped by /64) is a few MB.
+    for (const [k, ts] of hits) if (!ts.length || now - ts[ts.length - 1] > WINDOW_MAX) hits.delete(k);
+    for (const k of hits.keys()) if (hits.size > 45_000) hits.delete(k); // Map iterates least-recent first
+  }
   const recent = (hits.get(key) ?? []).filter((t) => now - t < windowMs);
   const over = recent.length >= max;
   if (!over) recent.push(now);
+  hits.delete(key); // re-insert so insertion order tracks recency
   hits.set(key, recent);
   return over;
+}
+
+// One limiter key per client: IPv4 as is, IPv6 by its /64 (a single host can rotate within it).
+export function clientKey(ip: string | undefined): string {
+  const a = (ip ?? '').trim().replace(/^::ffff:/i, '');
+  if (!a.includes(':')) return a || 'unknown';
+  const [head] = a.split('%');
+  const parts = head.split('::');
+  const left = parts[0] ? parts[0].split(':') : [];
+  const right = parts[1] ? parts[1].split(':') : [];
+  const full = parts.length > 1 ? [...left, ...Array(8 - left.length - right.length).fill('0'), ...right] : left;
+  return full.slice(0, 4).map((x) => x.toLowerCase().replace(/^0+(?=.)/, '')).join(':') + '::/64';
 }
 
 // S2: outbound allowlist; redirects are refused so a hop can't leave the list.
@@ -60,8 +79,9 @@ const OUTBOUND = new Set([
 ]);
 
 export function safeFetch(url: string, init: RequestInit = {}): Promise<Response> {
-  const host = new URL(url).hostname;
-  if (!OUTBOUND.has(host)) throw new Error(`Outbound host not allowed: ${host}`);
+  const u = new URL(url);
+  if (u.protocol !== 'https:' || u.port !== '' || u.username || u.password) throw new Error('Outbound URL must be plain https');
+  if (!OUTBOUND.has(u.hostname)) throw new Error(`Outbound host not allowed: ${u.hostname}`);
   return fetch(url, { ...init, redirect: 'error', signal: init.signal ?? AbortSignal.timeout(20_000) });
 }
 

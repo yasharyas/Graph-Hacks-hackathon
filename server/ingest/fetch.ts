@@ -83,7 +83,8 @@ async function writeJson(p: string, v: unknown, indent?: number) {
   await writeFile(p, JSON.stringify(v, null, indent) + '\n');
 }
 const encodeName = (name: string) => name.replace('/', '%2F'); // @scope/name -> @scope%2Fname
-const username = (m: unknown): string | null => (typeof m === 'string' ? m.replace(/\s*<.*$/, '') : (m as Json | null)?.name ?? null); // never keep an email
+// "name <email> (url)" -> "name"; split, not a backtracking regex, and never keep an email.
+const username = (m: unknown): string | null => (typeof m === 'string' ? m.slice(0, 256).split('<')[0].trim() : (m as Json | null)?.name ?? null);
 const usernames = (list: unknown) => (Array.isArray(list) ? list.map(username).filter((x): x is string => !!x) : []);
 
 type Org = { repos: { id: string; team: string; synthetic: boolean }[]; scenarios: Record<string, string> };

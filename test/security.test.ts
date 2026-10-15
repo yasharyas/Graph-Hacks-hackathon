@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseRepo, safeJson, forPrompt, limited, safeFetch, errorBody, HttpError } from '../server/security.ts';
+import { parseRepo, safeJson, forPrompt, limited, safeFetch, errorBody, HttpError, clientKey } from '../server/security.ts';
+import { assertSafeParams } from '../server/graph/client.ts';
+import { parseLockfile } from '../server/ingest/lockfile.ts';
 import { app } from '../server/index.ts';
 
 test('S1/S2 repo parsing accepts only github owner/repo', () => {
@@ -44,9 +46,23 @@ test('S7 limiter blocks after max within window', () => {
   assert.equal(limited(k, 2, 1000, 1500), false);
 });
 
-test('S2 outbound fetch refuses hosts off the allowlist', () => {
+test('S2 outbound fetch refuses hosts off the allowlist, plain http, ports and credentials', () => {
   assert.throws(() => safeFetch('https://evil.example.com/x'), /not allowed/);
-  assert.throws(() => safeFetch('http://169.254.169.254/'), /not allowed/);
+  assert.throws(() => safeFetch('http://169.254.169.254/'), /plain https/);
+  assert.throws(() => safeFetch('http://registry.npmjs.org/x'), /plain https/);
+  assert.throws(() => safeFetch('https://registry.npmjs.org:8443/x'), /plain https/);
+  assert.throws(() => safeFetch('https://u:p@registry.npmjs.org/x'), /plain https/);
+});
+
+test('S7 limiter keys IPv6 by /64 and never resets everyone at once', () => {
+  assert.equal(clientKey('2001:db8:aa:bb:1:2:3:4'), clientKey('2001:db8:aa:bb:ffff::9'));
+  assert.notEqual(clientKey('2001:db8:aa:bb::1'), clientKey('2001:db8:aa:bc::1'));
+  assert.equal(clientKey('::ffff:203.0.113.7'), '203.0.113.7');
+  assert.equal(clientKey(undefined), 'unknown');
+  const victim = `victim${Math.random()}`;
+  limited(victim, 1, 600_000, 1_000);
+  for (let i = 0; i < 10_050; i++) limited(`flood${i}`, 1, 600_000, 2_000);
+  assert.equal(limited(victim, 1, 600_000, 3_000), true, 'a flood of new keys must not wipe the victim limit');
 });
 
 test('S12 errors never leak internals', () => {
@@ -60,6 +76,29 @@ test('S12 errors never leak internals', () => {
     console.error = orig;
   }
   assert.deepEqual(errorBody(new HttpError(429, 'Slow down'), 'r').body, { error: 'Slow down', requestId: 'r' });
+});
+
+test('S3 query params: identifier keys and plain leaves only (the client inlines params unescaped keys)', () => {
+  assert.doesNotThrow(() => assertSafeParams({ rows: [{ id: 'a|b', name: "o'brien \" x", n: 1, ok: true, z: null }], at: 1757338200000 }));
+  assert.throws(() => assertSafeParams({ rows: [{ name: { 'x:1}}] MATCH (n) DETACH DELETE n //': 1 } }] }), /bad key/);
+  assert.throws(() => assertSafeParams({ 'a b': 1 }), /bad key/);
+  assert.throws(() => assertSafeParams({ n: Infinity }), /bad value/);
+  assert.throws(() => assertSafeParams({ d: new Date() }), /bad value/);
+  assert.throws(() => assertSafeParams({ f: () => 1 }), /bad value/);
+});
+
+test('S1/S7 hostile lockfiles: object names are stringified, bombs are refused fast', () => {
+  const r = parseLockfile({ lockfileVersion: 3, packages: { '': { dependencies: { a: '^1' } }, 'node_modules/a': { name: { 'x:1}': 1 }, version: { y: 2 } } } });
+  assert.equal(typeof r.deps.find((d) => d.path === 'node_modules/a')!.name, 'string');
+  assert.equal(typeof r.deps.find((d) => d.path === 'node_modules/a')!.version, 'string');
+  const deep = 'node_modules/x/'.repeat(800) + 'node_modules/y';
+  const deps = Object.fromEntries(Array.from({ length: 20_000 }, (_, i) => [`p${i}`, '^1']));
+  const t = performance.now();
+  assert.throws(() => parseLockfile({ lockfileVersion: 3, packages: { '': {}, [deep]: { version: '1.0.0', dependencies: deps } } }), /^Error: Lockfile too large/);
+  assert.throws(() => parseLockfile({ lockfileVersion: 3, packages: { '': { dependencies: deps } } }), /^Error: Lockfile too large/);
+  const many = Object.fromEntries(Array.from({ length: 6_001 }, (_, i) => [`node_modules/p${i}`, { version: '1.0.0' }]));
+  assert.throws(() => parseLockfile({ lockfileVersion: 3, packages: { '': {}, ...many } }), /^Error: Lockfile too large/);
+  assert.ok(performance.now() - t < 500, 'rejections are fast');
 });
 
 test('S5/S8 security headers present, body limit enforced', async () => {

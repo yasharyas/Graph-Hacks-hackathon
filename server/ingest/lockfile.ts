@@ -27,11 +27,16 @@ const keyName = (k: string) => {
   return k.slice(i >= 0 ? i + NM.length : k.lastIndexOf('/') + 1);
 };
 
+export const LIMITS = { entries: 6000, segments: 40, depsPerEntry: 1000, edges: 50_000, range: 128 };
+
 export function parseLockfile(lock: unknown): { deps: Dep[]; edges: Edge[]; unresolved: number } {
   const l = lock as { name?: string; lockfileVersion?: unknown; packages?: Record<string, unknown> } | null;
   if ((l?.lockfileVersion !== 2 && l?.lockfileVersion !== 3) || typeof l.packages !== 'object' || !l.packages)
     throw new Error('Unsupported lockfile: expected an npm package-lock.json with lockfileVersion 2 or 3 (npm 7+)');
   const pkgs = new Map(Object.entries(l.packages).filter((kv): kv is [string, Entry] => !!kv[1] && typeof kv[1] === 'object'));
+  // S7: hostile lockfiles (huge key depth x many deps) can make resolution quadratic; real ones sit far below these.
+  if (pkgs.size > LIMITS.entries) throw new Error(`Lockfile too large: ${pkgs.size} entries (max ${LIMITS.entries})`);
+  for (const k of pkgs.keys()) if (k.split('/').length > LIMITS.segments) throw new Error('Lockfile too large: path nested too deep');
   // Only a root that declares `workspaces` has them; a `file:` dep is also outside node_modules but is not one.
   const isWorkspace = (k: string) => !!pkgs.get('')?.workspaces && k !== '' && isTop(k);
   // npm omits `name` on workspace entries; the node_modules link pointing at the folder carries it.
@@ -53,20 +58,23 @@ export function parseLockfile(lock: unknown): { deps: Dep[]; edges: Edge[]; unre
   let unresolved = 0;
   for (const [path, e] of pkgs) {
     if (e.link) continue; // a symlink, not a package: resolve() follows it to the target
-    const name = e.name ?? linked.get(path) ?? (path ? keyName(path) : l.name ?? '');
-    deps.push({ path, name, version: e.version ?? '', dev: e.dev === true, optional: e.optional === true, depth: -1 });
+    // String() so a hostile object in `name`/`version` can never reach a query as a map (S3).
+    const name = String(e.name ?? linked.get(path) ?? (path ? keyName(path) : l.name ?? '')).slice(0, 214);
+    deps.push({ path, name, version: String(e.version ?? '').slice(0, 64), dev: e.dev === true, optional: e.optional === true, depth: -1 });
 
     // Same order as npm's arborist: a later dep type overrides an earlier one for the same name.
     const want = new Map<string, { range: string; kind: Kind; optional: boolean }>();
     const add = (m: Deps | undefined, kind: Kind) => {
       for (const [n, range] of Object.entries(m ?? {}))
-        want.set(n, { range: String(range), kind, optional: kind === 'optional' || (kind === 'peer' && !!e.peerDependenciesMeta?.[n]?.optional) });
+        want.set(n, { range: String(range).slice(0, LIMITS.range), kind, optional: kind === 'optional' || (kind === 'peer' && !!e.peerDependenciesMeta?.[n]?.optional) });
     };
     add(e.peerDependencies, 'peer');
     add(e.dependencies, 'prod');
     add(e.optionalDependencies, 'optional');
     if (isTop(path)) add(e.devDependencies, 'dev');
 
+    if (want.size > LIMITS.depsPerEntry) throw new Error(`Lockfile too large: ${want.size} dependencies on one entry`);
+    if (edges.length + want.size > LIMITS.edges) throw new Error(`Lockfile too large: over ${LIMITS.edges} edges`);
     for (const [n, { range, kind, optional }] of want) {
       const to = resolve(path, n);
       if (to !== undefined) edges.push({ from: path, to, range: range.replace(/^npm:@?[^@]+@/, ''), kind });

@@ -14,15 +14,15 @@ RUN npx vite build && npm prune --omit=dev --ignore-scripts
 FROM falkordb/falkordb-server@sha256:2e99eb1cfa3309ce338beebe24b5e9f44f9eb8ead6d6ef63dcaca436afbbaeec
 COPY --from=build /usr/local/bin/node /usr/local/bin/node
 # The base image has no useradd: run as a bare numeric uid. Only /app is read, only the data dir is written.
-RUN mkdir -p /app /var/lib/falkordb/data && chown 10001:10001 /app /var/lib/falkordb/data
+RUN mkdir -p /app /var/lib/falkordb/data && chown 10001:10001 /var/lib/falkordb/data
 WORKDIR /app
-COPY --chown=10001:10001 package.json start.sh ./
-COPY --from=build --chown=10001:10001 /app/node_modules ./node_modules
-COPY --from=build --chown=10001:10001 /app/web/dist ./web/dist
-COPY --chown=10001:10001 server ./server
-COPY --chown=10001:10001 shared ./shared
-COPY --chown=10001:10001 data ./data
-COPY --chown=10001:10001 fixtures/synthetic ./fixtures/synthetic
+COPY package.json start.sh ./
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/web/dist ./web/dist
+COPY server ./server
+COPY shared ./shared
+COPY data ./data
+COPY fixtures/synthetic ./fixtures/synthetic
 # Baked graphs (scripts/bake.sh). The glob makes this optional: without it start.sh rebuilds at boot (~25 s).
 COPY --chown=10001:10001 deploy/dump.rd[b] /var/lib/falkordb/data/
 

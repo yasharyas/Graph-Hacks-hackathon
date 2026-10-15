@@ -121,7 +121,7 @@ export async function* triage({ graph: g, scenario, at, alert, session }: { grap
     }
     const checked = guard(narration.text, ev);
     yield { type: 'narration', ...narration };
-    yield { type: 'guard', verified: checked.verified, total: checked.total, flagged: checked.flagged };
+    yield { type: 'guard', verified: checked.verified, total: checked.total, flagged: checked.flagged, claims: checked.claims.map((c) => ({ text: c.text, ok: c.ok })) };
     yield { type: 'done', ms: Math.round(performance.now() - t0) };
   } catch (err) {
     console.error(`[${runId}]`, err); // S12: details in the server log, a generic message to the client

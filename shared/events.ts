@@ -93,7 +93,8 @@ export type TriageEvent =
   | { type: 'tool_result'; id: string; result: ToolResult }
   | { type: 'report'; report: Report }
   | { type: 'narration'; mode: LlmMode; provider: string | null; text: string }
-  | { type: 'guard'; verified: number; total: number; flagged: string[] }
+  // `claims`: every claim the server checked; the UI marks a span verified only if it appears here with ok=true.
+  | { type: 'guard'; verified: number; total: number; flagged: string[]; claims?: { text: string; ok: boolean }[] }
   | { type: 'error'; message: string; requestId: string }
   | { type: 'done'; ms: number };
 

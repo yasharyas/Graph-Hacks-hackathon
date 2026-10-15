@@ -2,6 +2,17 @@
 
 Short records of arena picks and other non-obvious choices. Newest first.
 
+## Security gate after Phase 1 — 2026-10-15
+
+Opus reviewer, read-only, against rules S1–S13: **fail** (3 high, 3 medium) → fixed and re-verified in the real container.
+- **H S3** the falkordb client inlines params as Cypher text and escapes strings but not map keys → `assertSafeParams` in `client.ts` (identifier keys, plain leaves only) on every read and write; lockfile names/versions stringified; `recordTriage` rebuilds rows from allowlisted fields. Container check: the reviewer's payload is rejected ("bad key").
+- **H S7** lockfile bomb (deep key × 20k deps = 73 s event-loop block) → `LIMITS` in `lockfile.ts` (6k entries, 40 segments, 1k deps/entry, 50k edges, 128-char ranges), rejected in < 500 ms.
+- **H S7 (latent)** unbounded guest fetch → handed to the API route: stream with a 5 MB cap, no disk cache, no GH_TOKEN, ≤ 60 s.
+- **M S10** `recall_triage` exposed `session` to the LLM → removed from the schema; the dispatcher injects the cookie session.
+- **M S7** limiter `clear()` reset everyone; per-IP keys let IPv6 rotate → least-recent eviction at 50k keys, `clientKey()` groups IPv6 by /64.
+- **M S8** writes ran as `default` with a `devpass` fallback → `FALKOR_ACL=1` (exported by start.sh) makes reads `pz_ro` and writes `pz_rw`; the fallback is dev-only; start.sh strips `REDIS_PASSWORD`/`REDISCLI_AUTH` from Node's env (verified via /proc).
+- **Lows fixed:** pz_ro `+CLIENT` narrowed to `+client|setinfo +client|setname` (the client hangs without `+INFO`, so it stays); safeFetch requires plain https; app code root-owned (runtime uid can't write it); Fontshare downloads pinned by sha256; quadratic username regex replaced; guard event now carries `claims` so the UI can't mark an unchecked span verified.
+
 ## Phase 0 gate — spikes S1–S4, 2026-10-15
 
 - **S1 FalkorDB 4.22.1** (`falkordb/falkordb@sha256:b0bdcac…`): `shortestPath` is only allowed in `WITH`/`RETURN` (`WITH shortestPath((root)-[:REQUIRES*0..]->(x)) AS p`); `*0..` handles direct deps natively, so no special case. `allShortestPaths` only in `MATCH`; `algo.SPpaths({…pathCount:3})` gives k-shortest. `CALL algo.pageRank(...) YIELD node, score SET node.pagerank = score` works. Params, list slicing, `metadata` execution time, `GRAPH.EXPLAIN`, `GRAPH.CONSTRAINT` (async, returns PENDING) all work. 20k nodes + 20k edges via UNWIND batches of 400: 435 ms; graph 7 MB; `GRAPH.COPY` 251 ms; 60-hop shortestPath 5.5 ms internal.
