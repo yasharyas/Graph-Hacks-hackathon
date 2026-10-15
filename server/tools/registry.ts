@@ -226,8 +226,9 @@ export async function draftRemediation(g: Graph, p: { repo: unknown; versions: u
   const c = call(g);
   const versions = await c.q(Q.REMEDIATION_VERSIONS, params);
   const ranges = await c.q(Q.REMEDIATION_RANGES, params);
-  // Override keys are version-qualified ("debug@4.4.2": "4.4.1"): npm then replaces only the malicious version, so a
-  // dependent on another major (log-symbols on chalk ^4) is never forced onto an incompatible one.
+  // Override keys are version-qualified ("debug@4.4.2": "4.4.1"): npm applies them to every dependent whose range admits
+  // the malicious version (pinning it to the clean release), so a dependent on another major (log-symbols on chalk ^4)
+  // is never forced onto an incompatible one.
   const overrides: Record<string, string> = {};
   const direct: Record<string, string> = {};
   const devDirect: Record<string, string> = {}; // declared in devDependencies: the pin goes there, not into dependencies
