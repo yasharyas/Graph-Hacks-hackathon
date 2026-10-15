@@ -27,3 +27,14 @@ The only numbers the README, video, blog and posts may quote. Each line names it
 
 - 20 real public repos + 2 synthetic (badged), lockfiles as of 2025-09-08T13:00Z and 2026-03-31T00:00Z.
 - 5,739 package names, maintainers as usernames only (no emails). 92 packuments with full version timelines.
+
+## Agent behaviour (source: live runs against the dev graphs, 2026-10-15/16; `test/api.test.ts`, `test/narrate.test.ts`)
+
+- Ask "which exposures are prod-only and who owns them?" at qix 13:30Z: **14 repos across 6 teams**, answered from the graph (`filter_exposures`), never in a model's words.
+- Analyst pick at qix 13:30Z: the LLM chose, from graph-built observations, "**4 repos get a malicious version through the same dependency, `@babel/core`**" (socket.io, jquery, pdf.js and 1 more). At axios 01:30Z it picked "2 repos … through `nx`" (appium, nest).
+- Every claim in the narrative is checked against the run's evidence: a typical qix run shows **58–60 of 58–60 claims traced**.
+
+## Free-tier speed (source: `docker run --cpus=0.1 --memory=512m` of the production image, 2026-10-16)
+
+- Cold boot to healthy: **~28–30 s** (baked 11.6 MB RDB loads in ~12.6 s). Memory in use: **~219 MB of 512 MB**.
+- qix triage (49 tool calls) at the default clock: **2.3 s** end to end, first tool result in **~0.2 s** (path/fix lookups memoized on the immutable demo graphs, warmed at boot). At a scrubbed clock, uncached: ~20 s on 0.1 CPU, ~3 s on a laptop.
