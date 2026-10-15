@@ -2,7 +2,7 @@
 // scrubber and re-fetches the exposure list only when the tier counts change (so autoplay at 60 fps costs a
 // handful of requests, not hundreds). Counts for the scrubber itself are instant: see snapshotAt().
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ApiError, getExposure, getTimeline } from './api.ts';
+import { ApiError, getExposure, getTimeline, type ExposureResponse } from './api.ts';
 import { countsKey, snapshotAt } from './snapshot.ts';
 import type { Exposure, IncidentMeta, ScenarioId, TimelinePoint } from './types.ts';
 
@@ -68,4 +68,44 @@ export function useExposureAt(scenario: ScenarioId, point: TimelinePoint | null)
   }, [scenario, key]);
 
   return value;
+}
+
+export interface ExposureQuery {
+  /** The last answer received, true at `data.at` (which can lag the scrubber while a request is in flight). */
+  data: ExposureResponse | null;
+  /** The scrubber position a request is pending for, or null when the answer is current. */
+  loadingAt: number | null;
+  error: { message: string; status?: number; requestId?: string; at: number } | null;
+}
+
+/**
+ * Re-queries /api/exposure whenever the scrubber settles on a new time (debounced 250 ms, the previous request is
+ * aborted). Used after a triage report: every number on screen must be true at a clock the UI can name, so the
+ * caller labels the data with `data.at`, never with the scrubber position. `at` null disables it; bump `retry`
+ * to re-ask the same time after an error.
+ */
+export function useExposureQuery(scenario: ScenarioId, at: number | null, retry = 0): ExposureQuery {
+  const [state, setState] = useState<ExposureQuery>({ data: null, loadingAt: null, error: null });
+
+  useEffect(() => {
+    if (at === null) return setState({ data: null, loadingAt: null, error: null });
+    setState((s) => ({ ...s, loadingAt: at, error: null }));
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => {
+      getExposure(scenario, at, ctrl.signal).then(
+        (data) => ctrl.signal.aborted || setState({ data, loadingAt: null, error: null }),
+        (err: unknown) => {
+          if (ctrl.signal.aborted) return;
+          const e = err instanceof ApiError ? { message: err.message, status: err.status, requestId: err.requestId } : { message: 'Could not update the exposure list' };
+          setState((s) => ({ ...s, loadingAt: null, error: { ...e, at } }));
+        },
+      );
+    }, 250);
+    return () => {
+      clearTimeout(timer);
+      ctrl.abort();
+    };
+  }, [scenario, at, retry]);
+
+  return state;
 }

@@ -9,7 +9,7 @@
  *   onShowFlagged  opens the flagged-claims list
  *   pasteOpen, onTogglePaste   the "Paste your repo" button (opens the PasteBox row under the header)
  *   mock           true in ?mock mode: adds a "mock data" tag so fixture replays are never mistaken for results
- * Landmarks: <header>; the skip link jumps to #results.
+ * Landmarks: <header>. The skip link and the autoplay pause live in App, before this header, in that tab order.
  */
 import type { LlmMode } from '../data/types.ts';
 import type { Guard } from '../data/useTriage.ts';
@@ -45,12 +45,6 @@ export function Header(p: HeaderProps) {
   const flagged = p.guard ? p.guard.flagged.length > 0 : false;
   return (
     <header className="flex min-h-(--header-h) shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-line-1 bg-bg-0 px-(--gutter) py-2">
-      <a
-        href="#results"
-        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-(--z-modal) focus:rounded-sm focus:bg-bg-2 focus:px-3 focus:py-2"
-      >
-        Skip to results
-      </a>
       <h1 className="mr-1 text-md font-bold text-fg-0">Patient Zero</h1>
 
       <div className="order-last -mx-(--gutter) w-[calc(100%+2*var(--gutter))] overflow-x-auto px-(--gutter) [scrollbar-width:none] md:order-none md:mx-0 md:w-auto md:overflow-visible md:px-0">
@@ -72,7 +66,7 @@ export function Header(p: HeaderProps) {
           </span>
         )}
         {p.clockAt !== null && (
-          <span className="rounded-xs bg-bg-2 px-2 py-0.5 font-mono text-xs text-fg-0" title="Scenario clock: every number on screen is true at this time">
+          <span className="rounded-xs bg-bg-2 px-2 py-0.5 font-mono text-xs text-fg-0" title="The clock the exposure table and counts are true at (the timeline can be ahead of it while a query loads)">
             <time>at {utcLabel(p.clockAt)}</time>
           </span>
         )}

@@ -28,9 +28,11 @@ The dev server exposes `POST /__export?name=<slug>&fmt=png|webp` (body = image b
 | Slug | Status | Canvas (1×) | Placement | Reveal |
 |---|---|---|---|---|
 | `seventy-four-min-arrow`, `seventy-four-min-loop` (+ combined) | done (Phase 0) | 480×300 | contrast-card footer / landing timeline, loop ≈ 216×100 around the 56px "74 min" centred at (300,160); arrow from below the caption to the loop's upper-left shoulder | arrow `.scribble-wipe` 400ms, then loop `.scribble-sweep` from `--pen-x: 62.5%; --pen-y: 53%; --pen-from: 282deg`, delay 350ms |
-| `contrast-arrow` | Phase 3 | 320×160 | contrast card, from "Advisory scanner: 0" to the Patient Zero column | wipe left→right 400ms |
-| `empty-lockfile` | Phase 3 | 480×360 | empty / error state: magnifier over a lockfile sheet, grey ink with one red mark | fade only |
-| `coach-hint` | Phase 3 | 160×120 | the single inline onboarding hint under the scenario chips | wipe |
-| `tagline-underline` | Phase 3, optional | 640×48 | under the landing tagline; never on screen together with the 74-min loop | wipe 500ms |
+| `contrast-arrow` | done (Phase 3) | 28×100 | contrast card: the 1.75rem lane between the labels and the numbers, from the scanner's "0" (row 1) down to the first Patient Zero count (row 3); shown only while scanner = 0 and the graph found something, and only from a 420px container (below that the rows stack and there is no lane). The lane's bottom is CSS-anchored to the first tier count, so the stroke stretches when the name-grep row wraps | mask top→bottom 600ms |
+| `empty-lockfile` | done (Phase 3) | 144×108 | `EmptyState`, left of the copy, only for empty states that have a next action and only in a ≥ 400px container (the table pane, never the feed, never phones). Grey ink (`fg-1`) for the sheet, its entries, the glass and the handle; the one entry under the lens is `red-400` | mask diagonal 600ms |
+| `coach-hint` | done (Phase 3) | 96×32 | `OnboardingHint`: underline under "Click a row" (step 1), then a hook that curls down out of the card toward the panes; ink `fg-0` (red would mean infected); hidden under 1024px where the steps can wrap under the hook | mask left→right 400ms |
+| `tagline-underline` | dropped | — | the app has no tagline (the wordmark stands alone), so there is nothing to underline | — |
+
+The Phase 3 sketches share `lib.mjs` (bootstrap, snapshot, recolour, composite, export). Their reveal is the `Scribble` component (`web/src/components/Scribble.tsx`): a CSS mask slid along the stroke's direction with the Web Animations API, once per asset per session, ease-out, nothing under `prefers-reduced-motion`. The 74-min pair keeps the CSS-class primitives above.
 
 Details, placements and reduced-motion behaviour are in `docs/design.md` → "Scribbles".

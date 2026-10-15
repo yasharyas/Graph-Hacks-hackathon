@@ -50,7 +50,7 @@ export function ScenarioControl({
   };
 
   return (
-    <div role="radiogroup" aria-label="Scenario" className="inline-flex h-8 shrink-0 rounded-sm border border-line-2 p-px">
+    <div role="radiogroup" aria-label="Scenario" className="inline-flex h-8 shrink-0 rounded-sm border border-line-2 p-px pointer-coarse:h-11">
       {OPTIONS.map((o, i) => {
         const selected = o.id === value;
         return (

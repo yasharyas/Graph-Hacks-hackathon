@@ -1,21 +1,29 @@
-/* PasteBox: analyze a public GitHub repo URL or a dropped package-lock.json (docs/design.md section 5).
+/* PasteBox: analyze a public GitHub repo URL, or a package-lock.json dropped, chosen or pasted (docs/design.md
+ * section 5).
  * Props:
  *   analyze   AnalyzeState from useAnalyze() (status, stage, repo, error), drives progress and errors
  *   onAnalyze({ url } | { lockfile })   called only after client-side validation passes
  *   onClose
- * States: idle, dragover (dashed outline), invalid URL (inline error, button disabled), too large (> 5 MB),
- * unsupported (yarn / pnpm / lockfile v1 -> friendly error + sample repos), rate-limited (429, 20 s countdown),
- * analyzing (staged progress from AnalyzeEvent; announced politely on stage change only).
- * Server-side validation (S1) is authoritative; these checks only save a round trip.
+ * States: idle, dragover (dashed outline), invalid URL (inline error, button disabled), unsupported (yarn / pnpm /
+ * lockfile v1, too large: the server's own words + "try a sample repo"), rate-limited (429, 20 s countdown),
+ * analyzing (fetch -> parse -> write -> enrich -> admits, announced politely on stage change only).
+ * Server-side validation (S1) is authoritative; the client checks only save a round trip (data/lockfile.ts).
  */
-import { useEffect, useId, useRef, useState, type DragEvent } from 'react';
+import { useEffect, useId, useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
+import { fixFor } from '../data/errors.ts';
+import { lockfileProblem, looksLikeLockfile, MAX_LOCKFILE_BYTES, TOO_BIG } from '../data/lockfile.ts';
 import type { AnalyzeState } from '../data/useAnalyze.ts';
 import { Button } from './Button.tsx';
-import { CircleAlert, Close, Upload } from './icons/Glyphs.tsx';
+import { Check, CircleAlert, Close, Upload } from './icons/Glyphs.tsx';
 
 const URL_RE = /^https:\/\/github\.com\/[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}\/?$/;
-const MAX_BYTES = 5 * 1024 * 1024;
-const STAGES = ['fetch', 'parse', 'write', 'enrich', 'admits'] as const;
+const STAGES = [
+  { id: 'fetch', label: 'Fetch lockfile' },
+  { id: 'parse', label: 'Parse' },
+  { id: 'write', label: 'Write graph' },
+  { id: 'enrich', label: 'Enrich' },
+  { id: 'admits', label: 'Check ranges' },
+] as const;
 const SAMPLES = ['mochajs/mocha', 'remy/nodemon'];
 
 export type PasteRequest = { url: string } | { lockfile: string };
@@ -32,7 +40,8 @@ export function PasteBox({
   const id = useId();
   const [url, setUrl] = useState('');
   const [touched, setTouched] = useState(false);
-  const [fileError, setFileError] = useState<string | null>(null);
+  const [local, setLocal] = useState<string | null>(null); // a problem found before any request
+  const [kind, setKind] = useState<'url' | 'lockfile'>('url');
   const [drag, setDrag] = useState(false);
   const [retryIn, setRetryIn] = useState(0);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -49,31 +58,47 @@ export function PasteBox({
     const t = setInterval(() => setRetryIn((n) => Math.max(0, n - 1)), 1000);
     return () => clearInterval(t);
   }, [rateLimited]);
+  const blocked = running || retryIn > 0;
 
+  const submit = (req: PasteRequest) => {
+    setLocal(null);
+    setKind('url' in req ? 'url' : 'lockfile');
+    onAnalyze(req);
+  };
+  const submitLockfile = (name: string, text: string, bytes?: number) => {
+    const problem = lockfileProblem(name, text, bytes);
+    if (problem) setLocal(problem);
+    else submit({ lockfile: text });
+  };
   async function readFile(file: File) {
-    setFileError(null);
-    if (/yarn\.lock$|pnpm-lock\.ya?ml$/i.test(file.name)) {
-      return setFileError('yarn and pnpm lockfiles are not supported yet. Drop a package-lock.json (npm v2 or v3).');
-    }
-    if (file.size > MAX_BYTES) return setFileError('That file is over 5 MB. Lockfiles up to 5 MB and 6,000 entries are supported.');
-    const text = await file.text();
-    const version = /"lockfileVersion"\s*:\s*(\d)/.exec(text)?.[1];
-    if (!version || Number(version) < 2) {
-      return setFileError('Only package-lock.json with lockfileVersion 2 or 3 is supported. Run npm install with npm 7 or newer to upgrade it.');
-    }
-    onAnalyze({ lockfile: text });
+    if (file.size > MAX_LOCKFILE_BYTES) return setLocal(TOO_BIG); // never read a huge file into memory
+    submitLockfile(file.name, await file.text(), file.size);
   }
+  const trySample = (repo: string) => {
+    setUrl(`https://github.com/${repo}`);
+    setTouched(true);
+    if (!blocked) submit({ url: `https://github.com/${repo}` });
+  };
 
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
     setDrag(false);
     const file = e.dataTransfer.files[0];
-    if (file) void readFile(file);
+    if (file && !blocked) void readFile(file);
+  };
+  // A multi-line paste is a lockfile, not a URL: take it instead of letting the one-line field flatten it.
+  const onPaste = (e: ClipboardEvent) => {
+    const text = e.clipboardData.getData('text');
+    if (!looksLikeLockfile(text)) return;
+    e.preventDefault();
+    if (!blocked) submitLockfile('pasted lockfile', text);
   };
 
-  const stageIndex = analyze.stage ? STAGES.indexOf(analyze.stage.stage) : -1;
-  const progress = analyze.stage ? (stageIndex + analyze.stage.done / Math.max(1, analyze.stage.total)) / STAGES.length : 0;
-  const error = fileError ? { message: fileError, requestId: undefined } : analyze.status === 'error' ? analyze.error : null;
+  const step = analyze.stage ? STAGES.findIndex((s) => s.id === analyze.stage!.stage) : -1;
+  const stages = kind === 'url' ? STAGES : STAGES.slice(1); // a pasted lockfile has nothing to fetch
+  const at = stages.findIndex((s) => s.id === analyze.stage?.stage);
+  const progress = analyze.stage ? (at + analyze.stage.done / Math.max(1, analyze.stage.total)) / stages.length : 0;
+  const error = local ? { message: local, fix: '' } : analyze.status === 'error' && analyze.error ? { ...analyze.error, fix: fixFor(analyze.error, 'analyze') } : null;
 
   return (
     <section
@@ -82,13 +107,14 @@ export function PasteBox({
       onDragOver={(e) => (e.preventDefault(), setDrag(true))}
       onDragLeave={() => setDrag(false)}
       onDrop={onDrop}
+      onPaste={onPaste}
       className={`border-b border-line-1 bg-bg-1 px-(--gutter) py-4 ${drag ? 'outline-2 -outline-offset-4 outline-dashed outline-fg-0' : ''}`}
     >
       <form
         className="flex flex-col gap-2 sm:flex-row sm:items-end"
         onSubmit={(e) => {
           e.preventDefault();
-          if (valid && !running && retryIn === 0) onAnalyze({ url: url.trim() });
+          if (valid && !blocked) submit({ url: url.trim() });
         }}
       >
         <div className="min-w-0 flex-1 sm:max-w-xl">
@@ -101,18 +127,19 @@ export function PasteBox({
             type="url"
             inputMode="url"
             autoComplete="off"
+            autoFocus
             value={url}
             placeholder="https://github.com/owner/name"
             aria-invalid={urlError ? true : undefined}
             aria-describedby={`${id}-help`}
-            onChange={(e) => setUrl(e.target.value)}
+            onChange={(e) => (setUrl(e.target.value), setLocal(null))}
             onBlur={() => setTouched(true)}
           />
         </div>
         <Button type="submit" variant="primary" loading={running} disabled={!valid || retryIn > 0}>
           {retryIn > 0 ? `Retry in ${retryIn} s` : 'Analyze'}
         </Button>
-        <Button icon={<Upload size={16} />} onClick={() => fileRef.current?.click()} disabled={running}>
+        <Button icon={<Upload size={16} />} onClick={() => fileRef.current?.click()} disabled={blocked}>
           Choose package-lock.json
         </Button>
         <input
@@ -133,8 +160,9 @@ export function PasteBox({
         </Button>
       </form>
 
-      <p id={`${id}-help`} className="mt-2 text-xs text-fg-2">
-        Or drop a package-lock.json anywhere on this panel. Public repos only; nothing is stored beyond one hour.
+      <p id={`${id}-help`} className="mt-2 max-w-xl text-xs text-fg-2">
+        Or paste or drop a package-lock.json on this panel. Public repos only; nothing is stored beyond one hour. If no pre-incident snapshot exists, the
+        current lockfile is used and labelled as such.
       </p>
 
       {urlError && (
@@ -143,28 +171,26 @@ export function PasteBox({
         </p>
       )}
       {error && (
-        <div role="alert" className="mt-2 flex flex-col gap-2 text-sm">
-          <p className="flex items-start gap-2 text-infect-400">
+        <div role="alert" className="mt-2 flex flex-col gap-1.5 text-sm">
+          <p className="flex max-w-xl items-start gap-2 text-infect-400">
             <CircleAlert size={16} className="mt-0.5 shrink-0" />
-            {rateLimited ? 'One analysis per 20 s. Wait for the countdown, then try again.' : error.message}
+            {error.message}
           </p>
-          {error.requestId && (
+          {error.fix && <p className="max-w-xl text-fg-1">{error.fix}</p>}
+          {'requestId' in error && error.requestId && (
             <p className="font-mono text-xs text-fg-2">
               request <span className="select-all text-fg-1">{error.requestId}</span>
             </p>
           )}
           <p className="flex flex-wrap items-center gap-2 text-fg-1">
-            Or try a sample repo:
+            Try a sample repo:
             {SAMPLES.map((s) => (
               <button
                 key={s}
                 type="button"
-                className="rounded-xs bg-bg-2 px-1.5 py-0.5 font-mono text-xs text-link"
-                onClick={() => {
-                  setUrl(`https://github.com/${s}`);
-                  setFileError(null);
-                  setTouched(true);
-                }}
+                disabled={blocked}
+                className="min-h-(--control-h) rounded-xs bg-bg-2 px-2 font-mono text-xs text-link disabled:opacity-(--opacity-disabled)"
+                onClick={() => trySample(s)}
               >
                 {s}
               </button>
@@ -175,15 +201,22 @@ export function PasteBox({
       {running && (
         <div className="mt-3 max-w-xl">
           <div className="h-1 overflow-hidden rounded-xs bg-bg-3" aria-hidden>
-            <div
-              className="h-full origin-left bg-fg-0 transition-transform duration-(--dur-base) ease-out"
-              style={{ transform: `scaleX(${progress})` }}
-            />
+            <div className="h-full origin-left bg-fg-0 transition-transform duration-(--dur-base) ease-out" style={{ transform: `scaleX(${progress})` }} />
           </div>
-          {/* announced on stage changes only: the done/total counter is aria-hidden */}
+          <ol className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+            {stages.map((s) => {
+              const state = at < 0 ? 'todo' : stages.indexOf(s) < at ? 'done' : stages.indexOf(s) === at ? 'now' : 'todo';
+              return (
+                <li key={s.id} aria-current={state === 'now' ? 'step' : undefined} className={`inline-flex items-center gap-1 ${state === 'now' ? 'text-fg-0' : state === 'done' ? 'text-tier-clean' : 'text-fg-2'}`}>
+                  {state === 'done' ? <Check size={12} /> : <span aria-hidden className={`size-1.5 rounded-full ${state === 'now' ? 'bg-fg-0' : 'bg-line-3'}`} />}
+                  {s.label}
+                </li>
+              );
+            })}
+          </ol>
+          {/* announced on stage changes only: the counter is aria-hidden */}
           <p role="status" className="mt-1 font-mono text-xs text-fg-1">
-            {analyze.stage?.stage ?? 'starting'}
-            {analyze.stage && <span aria-hidden> {analyze.stage.done}/{analyze.stage.total}</span>}
+            {step < 0 ? 'Starting' : `Step ${at + 1} of ${stages.length}: ${STAGES[step]!.label.toLowerCase()}`}
           </p>
         </div>
       )}

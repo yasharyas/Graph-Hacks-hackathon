@@ -4,13 +4,17 @@
  *                   timeline loads: skeleton rows). Numbers follow the scrubber instantly.
  *   grepCount, grepName   name grep: "debug in 15 repos" (no path, no owner); null until known
  *   minutesAhead    Report.minutesAhead, or advisoryAt - firstPublishAt derived from the incident
- *   scribble        true = draw the 74-min scribble once (arrow wipe, then loop sweep); the parent latches it
- *                   when the scrubber passes the OSV marker. Reduced motion shows it whole.
+ *   scribble        kept for the parent's wiring; the 74-min scribble now shows whenever the figure does
  *   actions         ReactNode rendered under the rows (the landing buttons: Run triage, Try axios, Paste)
- * One <dl>; the scribble images are aria-hidden and the sentence is real text. Left-aligned except the 74 min.
+ * Two scribbles live here: the 74-min loop + arrow around the figure (drawn once, on first paint, sized with the
+ * number), and `contrast-arrow`, which runs down the lane between the labels and the numbers from the scanner's 0 to
+ * the first Patient Zero count, only while that contrast is true (scanner 0, graph > 0) and only when the rows are
+ * wide enough to have a lane. One <dl>; every scribble is aria-hidden and the sentence is real text. Left-aligned
+ * except the 74 min.
  */
 import type { CSSProperties, ReactNode } from 'react';
 import type { TimelinePoint } from '../data/types.ts';
+import { Scribble } from './Scribble.tsx';
 
 export interface ContrastCardProps {
   snapshot: TimelinePoint | null;
@@ -22,13 +26,15 @@ export interface ContrastCardProps {
 }
 
 const PEN = { '--pen-x': '62.5%', '--pen-y': '53%', '--pen-from': '282deg', animationDelay: '400ms' } as CSSProperties;
-const ROW = 'grid items-baseline gap-x-3 gap-y-0.5 @min-[420px]:grid-cols-[8.5rem_1fr]';
+// Columns from 420px: label 8.5rem · the arrow's 1.75rem lane · value. Below that the label stacks over the value.
+const ROW = 'grid items-baseline gap-x-3 gap-y-0.5 @min-[420px]:grid-cols-[8.5rem_1.75rem_1fr]';
+const VAL = '@min-[420px]:col-start-3';
 
 function Num({ n, cls }: { n: number; cls: string }) {
   return <span className={`text-xl font-bold tabular-nums ${n === 0 ? 'text-fg-2' : cls}`}>{n}</span>;
 }
 
-export function ContrastCard({ snapshot, grepCount, grepName, minutesAhead, scribble, actions }: ContrastCardProps) {
+export function ContrastCard({ snapshot, grepCount, grepName, minutesAhead, actions }: ContrastCardProps) {
   const c = snapshot?.counts;
   const tiers = c
     ? ([
@@ -37,25 +43,27 @@ export function ContrastCard({ snapshot, grepCount, grepName, minutesAhead, scri
         ['MAINTAINER', c.MAINTAINER, 'text-tier-maintainer'],
       ] as const)
     : [];
+  const found = tiers.reduce((n, [, k]) => n + k, 0);
+  const arrow = snapshot !== null && snapshot.scanner === 0 && found > 0;
   return (
     <section aria-label="Scanner versus graph" className="@container p-4">
       <div className="flex flex-col gap-3 @min-[600px]:flex-row @min-[600px]:items-center @min-[600px]:justify-between">
         <div className="flex min-w-0 flex-col gap-3">
-          <dl className="flex min-w-0 flex-col gap-2">
+          <dl className="relative flex min-w-0 flex-col gap-2">
             {!snapshot ? (
               [0, 1, 2].map((i) => <div key={i} className="skeleton h-7 w-64" aria-hidden />)
             ) : (
               <>
                 <div className={ROW}>
                   <dt className="label-caps">Advisory scanner</dt>
-                  <dd className="flex items-baseline gap-2">
+                  <dd className={`flex items-baseline gap-2 ${VAL}`}>
                     <Num n={snapshot.scanner} cls="text-fg-0" />
                     <span className="text-sm text-fg-1">OSV advisories</span>
                   </dd>
                 </div>
                 <div className={ROW}>
                   <dt className="label-caps">Name grep</dt>
-                  <dd className="flex flex-wrap items-baseline gap-x-2 text-sm text-fg-1">
+                  <dd className={`flex flex-wrap items-baseline gap-x-2 text-sm text-fg-1 ${VAL}`}>
                     {grepCount === null ? (
                       <span className="skeleton inline-block h-5 w-40" aria-hidden />
                     ) : (
@@ -69,9 +77,9 @@ export function ContrastCard({ snapshot, grepCount, grepName, minutesAhead, scri
                 </div>
                 <div className={ROW}>
                   <dt className="label-caps">Patient Zero</dt>
-                  <dd className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                    {tiers.map(([name, n, cls]) => (
-                      <span key={name} className="inline-flex items-baseline gap-1.5">
+                  <dd className={`flex flex-wrap items-baseline gap-x-3 gap-y-1 ${VAL}`}>
+                    {tiers.map(([name, n, cls], i) => (
+                      <span key={name} className={`inline-flex items-baseline gap-1.5 ${i === 0 ? '[anchor-name:--pz1]' : ''}`}>
                         <Num n={n} cls={cls} />
                         <span className="font-mono text-2xs text-fg-1">{name}</span>
                       </span>
@@ -79,6 +87,18 @@ export function ContrastCard({ snapshot, grepCount, grepName, minutesAhead, scri
                     <span className="text-sm text-fg-2">paths + owners</span>
                   </dd>
                 </div>
+                {/* The lane runs from the top of row 1 to the bottom of the first tier count (CSS anchor positioning, so the
+                    tip still lands on the number when the name-grep row wraps); the 28x100 stroke stretches to fit. Browsers
+                    without anchor() get the 100px box, which is exact while nothing wraps. */}
+                {arrow && (
+                  <Scribble
+                    name="contrast-arrow"
+                    width={28}
+                    height={100}
+                    angle={180}
+                    className="absolute top-0 left-[calc(8.5rem+0.75rem)] hidden h-[100px] [bottom:anchor(--pz1_bottom)] supports-[bottom:anchor(--a_bottom)]:h-auto @min-[420px]:block"
+                  />
+                )}
               </>
             )}
           </dl>
@@ -93,18 +113,14 @@ export function ContrastCard({ snapshot, grepCount, grepName, minutesAhead, scri
               <strong className="absolute top-[160px] left-[300px] -translate-x-1/2 -translate-y-1/2 font-display text-4xl font-extrabold whitespace-nowrap text-fg-0">
                 {minutesAhead} min
               </strong>
-              {scribble && (
-                <>
-                  <picture aria-hidden>
-                    <source srcSet="/scribbles/seventy-four-min-arrow.webp" type="image/webp" />
-                    <img src="/scribbles/seventy-four-min-arrow.png" alt="" width={480} height={300} className="scribble scribble-wipe" />
-                  </picture>
-                  <picture aria-hidden>
-                    <source srcSet="/scribbles/seventy-four-min-loop.webp" type="image/webp" />
-                    <img src="/scribbles/seventy-four-min-loop.png" alt="" width={480} height={300} className="scribble scribble-sweep" style={PEN} />
-                  </picture>
-                </>
-              )}
+              <picture aria-hidden>
+                <source srcSet="/scribbles/seventy-four-min-arrow.webp" type="image/webp" />
+                <img src="/scribbles/seventy-four-min-arrow.png" alt="" width={480} height={300} className="scribble scribble-wipe" />
+              </picture>
+              <picture aria-hidden>
+                <source srcSet="/scribbles/seventy-four-min-loop.webp" type="image/webp" />
+                <img src="/scribbles/seventy-four-min-loop.png" alt="" width={480} height={300} className="scribble scribble-sweep" style={PEN} />
+              </picture>
             </div>
             <span className="absolute top-1 left-[6%] max-w-[110px] text-xs text-fg-1">before the OSV record existed</span>
           </div>

@@ -16,6 +16,7 @@ const MAX_BYTES = 8 * 1024 * 1024;
 
 export default defineConfig({
   root: here,
+  cacheDir: path.join(repoRoot, 'node_modules', '.vite-scribbles'), // own optimizer cache: p5 deps must not invalidate the app's
   publicDir: path.join(repoRoot, 'web', 'public'), // serves /fonts/* and /scribbles/* like the app
   resolve: { alias: { '@design': path.join(repoRoot, 'web', 'src', 'design') } },
   server: { port: 5190, strictPort: true, fs: { allow: [repoRoot] } },

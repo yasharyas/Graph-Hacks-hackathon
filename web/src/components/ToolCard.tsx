@@ -9,8 +9,9 @@
  * cancelled. The radar sweeps only while this card is pending.
  * Rows are untrusted data: everything renders as text.
  */
-import { useEffect, useState } from 'react';
-import { getPlan } from '../data/api.ts';
+import { useEffect, useId, useState } from 'react';
+import { ApiError, getPlan } from '../data/api.ts';
+import { fixFor } from '../data/errors.ts';
 import { fmtMs, utc, utcSec } from '../data/format.ts';
 import type { ScenarioId } from '../data/types.ts';
 import type { ToolCardState } from '../data/useTriage.ts';
@@ -47,11 +48,11 @@ function RowsTable({ rows }: { rows: Record<string, unknown>[] }) {
     .slice(0, MAX_COLS);
   if (!shown.length || !cols.length) return null;
   return (
-    <table className="mt-2 w-full border-collapse text-left text-xs">
+    <table className="mt-2 w-full table-fixed border-collapse text-left text-xs">
       <thead>
         <tr>
-          {cols.map((c) => (
-            <th key={c} scope="col" className="label-caps border-b border-line-1 py-1 pr-2 font-medium">
+          {cols.map((c, j) => (
+            <th key={c} scope="col" className={`label-caps border-b border-line-1 py-1 pr-2 font-medium ${j === 0 ? 'w-[46%]' : ''}`}>
               {c.replace(/([A-Z])/g, ' $1').toLowerCase()}
             </th>
           ))}
@@ -64,7 +65,7 @@ function RowsTable({ rows }: { rows: Record<string, unknown>[] }) {
               <td
                 key={c}
                 data-num={typeof row[c] === 'number' ? '' : undefined}
-                className={`py-1 pr-2 align-top break-words ${typeof row[c] === 'number' ? 'tabular-nums' : 'font-mono'} text-fg-0`}
+                className={`py-1 pr-2 align-top [overflow-wrap:anywhere] ${typeof row[c] === 'number' ? 'tabular-nums' : 'font-mono'} text-fg-0`}
               >
                 {fmtCell(c, row[c])}
               </td>
@@ -84,7 +85,8 @@ export interface ToolCardProps {
 
 export function ToolCard({ card, scenario, index }: ToolCardProps) {
   const [cypherOpen, setCypherOpen] = useState(false);
-  const [plan, setPlan] = useState<{ lines: string[] } | 'loading' | 'error' | null>(null);
+  const [plan, setPlan] = useState<{ lines: string[] } | { error: string } | 'loading' | null>(null);
+  const planId = useId();
   const [elapsed, setElapsed] = useState(0);
   const pending = card.status === 'pending';
   const r = card.result;
@@ -101,8 +103,8 @@ export function ToolCard({ card, scenario, index }: ToolCardProps) {
     setPlan('loading');
     try {
       setPlan({ lines: (await getPlan(scenario, card.tool)).plan });
-    } catch {
-      setPlan('error');
+    } catch (err) {
+      setPlan({ error: err instanceof ApiError ? err.message : 'Could not load the plan.' });
     }
   }
 
@@ -132,6 +134,7 @@ export function ToolCard({ card, scenario, index }: ToolCardProps) {
               label={plan ? 'Hide plan' : 'Show plan'}
               icon={<ListTree size={16} />}
               aria-pressed={plan !== null}
+              aria-controls={planId}
               disabled={!scenario}
               onClick={togglePlan}
             />
@@ -168,7 +171,7 @@ export function ToolCard({ card, scenario, index }: ToolCardProps) {
             <CircleAlert size={16} className="mt-0.5 shrink-0" />
             {card.error.message}
           </p>
-          <p className="text-fg-1">Run the triage again; if it keeps failing, share the request id below.</p>
+          <p className="text-fg-1">{fixFor(card.error, card.round ? 'ask' : 'triage')}</p>
           {card.error.requestId && (
             <p className="mt-1 font-mono text-xs text-fg-2">
               request{' '}
@@ -192,23 +195,28 @@ export function ToolCard({ card, scenario, index }: ToolCardProps) {
             </p>
           )}
 
-          {plan && (
-            <pre className="mt-2 max-h-48 overflow-auto rounded-xs bg-bg-3 p-2 font-mono text-xs whitespace-pre-wrap text-fg-1">
-              {plan === 'loading'
-                ? 'Loading plan…'
-                : plan === 'error'
-                  ? 'Could not load the plan. Try again in a moment.'
-                  : plan.lines.length
-                    ? plan.lines.join('\n')
-                    : 'The plan is not available in mock mode.'}
-            </pre>
-          )}
+          <div id={planId} aria-live="polite">
+            {plan && (
+              <>
+                <p className="label-caps mt-2">GRAPH.EXPLAIN</p>
+                <pre tabIndex={0} aria-label="Query plan" className="mt-1 max-h-48 overflow-auto rounded-xs bg-bg-3 p-2 font-mono text-xs leading-[18px] whitespace-pre text-fg-1">
+                  {plan === 'loading'
+                    ? 'Loading plan…'
+                    : 'error' in plan
+                      ? `${plan.error} ${fixFor({ message: plan.error }, 'plan')}`
+                      : plan.lines.length
+                        ? plan.lines.join('\n')
+                        : 'The server returned no plan lines for this tool.'}
+                </pre>
+              </>
+            )}
+          </div>
 
           <button
             type="button"
             aria-expanded={cypherOpen}
             onClick={() => setCypherOpen((o) => !o)}
-            className="mt-2 -ml-1 inline-flex items-center gap-1 rounded-xs px-1 text-xs text-fg-1 hov:text-fg-0"
+            className="mt-2 -ml-1 inline-flex items-center gap-1 rounded-xs px-1 text-xs text-fg-1 pointer-coarse:min-h-11 hov:text-fg-0"
           >
             <ChevronDown size={14} className={`transition-transform duration-(--dur-base) ease-out ${cypherOpen ? 'rotate-180' : ''}`} />
             Cypher

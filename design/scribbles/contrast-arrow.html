@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scribble: contrast arrow</title>
+  <link rel="stylesheet" href="/bench.css">
+  <style>
+    main { padding: 24px; display: grid; gap: 16px; justify-items: start; }
+    .stage { position: relative; background: var(--bg-1); outline: 1px solid var(--line-2); }
+    .stage canvas { display: block; }
+    /* Stand-in of the contrast card's <dl>: label column 8.5rem, the 1.75rem lane this arrow lives in, then the numbers.
+       The stage (the canvas) is the lane; the text around it is not exported. */
+    .standin { position: relative; display: grid; grid-template-columns: 8.5rem 1.75rem 1fr; column-gap: 12px; row-gap: 8px; align-items: baseline; width: 420px; }
+    .standin .lane { grid-column: 2; grid-row: 1 / span 3; align-self: start; }
+    .standin dt { font-size: 11px; line-height: 16px; letter-spacing: .08em; text-transform: uppercase; color: var(--fg-1); font-weight: 500; }
+    .standin dd { grid-column: 3; margin: 0; font-size: 13px; color: var(--fg-1); display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+    .standin b { font-size: 22px; line-height: 28px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--fg-0); }
+    .standin .zero { color: var(--fg-2); }
+    .standin .mono { font-family: var(--font-mono); font-size: 11px; }
+    output { font-family: var(--font-mono); font-size: 12px; color: var(--fg-1); white-space: pre; }
+  </style>
+</head>
+<body>
+<main>
+  <dl class="standin" id="standin">
+    <div class="lane stage" id="stage"></div>
+    <dt>Advisory scanner</dt><dd><b class="zero">0</b> OSV advisories</dd>
+    <dt>Name grep</dt><dd><span class="mono text-fg-0">debug</span> in <b>15</b> repos <span class="text-fg-2">(no path, no owner)</span></dd>
+    <dt>Patient Zero</dt><dd><b class="text-tier-locked">1</b><span class="mono">LOCKED</span> <b class="text-tier-would-pull">4</b><span class="mono">WOULD_PULL</span> <b class="text-tier-maintainer">1</b><span class="mono">MAINTAINER</span></dd>
+  </dl>
+  <div class="flex gap-2 items-center">
+    <button class="btn btn-secondary" id="export" type="button">Export contrast-arrow (PNG + WebP)</button>
+  </div>
+  <output id="log"></output>
+</main>
+
+<script type="module">
+  import { brush, mount, compose, post, wire } from './lib.mjs';
+
+  // The lane between the contrast card's label column and its numbers: the pen leaves the scanner's "0" (row 1),
+  // swings down the lane and lands pointing at the first Patient Zero count (row 3). 28x100 at 1x = three 28px rows
+  // with 8px gaps; exported at 2x.
+  const NAME = 'contrast-arrow';
+  const W = 28, H = 100, DPR = 2;
+  const SEED = 1757341611;   // same edition seed as the 74-min scribble
+  const INK = '#ff5a4f';     // --red-400
+
+  const { render } = mount({
+    W, H, DPR, stage: document.getElementById('stage'),
+    sketch(p) {
+      p.setup = () => {
+        p.createCanvas(W, H, p.WEBGL);
+        p.pixelDensity(DPR);
+        p.angleMode(p.DEGREES);
+        brush.scaleBrushes(2.4);   // same pen scale as the 74-min scribble, so the two read as one hand
+        p.noLoop();
+      };
+      p.draw = () => {
+        p.randomSeed(SEED); p.noiseSeed(SEED);
+        p.clear();
+        p.translate(-W / 2, -H / 2);
+        // Stem: firm where the pen lands under the 0, lighter through the bend, firm again into the tip.
+        const stem = [
+          [23, 16, 1.2],
+          [11, 33, 1.1],
+          [6, 54, 1.0],
+          [9, 71, 1.05],
+          [17, 80, 1.1],
+          [25, 85, 1.1],
+        ];
+        brush.set('pen', INK, 1.4);
+        brush.spline(stem, 0.55);
+        // Two solid barbs trailing back from the tip along the last segment.
+        const [tx, ty] = stem.at(-1), [px, py] = stem.at(-2);
+        const heading = Math.atan2(ty - py, tx - px);
+        brush.set('pen', INK, 1.55);
+        for (const s of [-1, 1]) {
+          const a = heading + Math.PI + s * 0.5;
+          brush.line(tx, ty, tx + Math.cos(a) * 7.5, ty + Math.sin(a) * 7.5);
+        }
+      };
+    },
+  });
+
+  wire(async () => {
+    post(await compose(render, [['all', INK]]), NAME);
+    document.title = 'Scribble: contrast arrow — exported';
+  });
+</script>
+</body>
+</html>

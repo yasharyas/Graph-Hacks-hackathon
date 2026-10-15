@@ -22,5 +22,10 @@ export const signedMin = (m: number): string => `${m < 0 ? '−' : '+'}${Math.ab
 /** "4.7 ms" */
 export const fmtMs = (n: number): string => `${n.toFixed(1)} ms`;
 
+/** A pasted repo with no pre-incident snapshot is read at HEAD and comes back as "owner/repo@HEAD". */
+export const isHead = (repo: string): boolean => repo.endsWith('@HEAD');
+export const HEAD_NOTE =
+  'This is the current lockfile (fetched at HEAD): no snapshot from before the incident was available. Read the tiers as a counterfactual, what today’s lockfile would have done during the window.';
+
 /** "1 repo" / "5 repos" */
 export const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;

@@ -1,6 +1,6 @@
 // Report export (Markdown or JSON). Untrusted strings (repo ids, package names) only ever go inside code
 // spans or fenced blocks, with backticks neutralised, so a hostile lockfile name cannot inject Markdown (S5).
-import { utcLabel } from './format.ts';
+import { utc, utcLabel } from './format.ts';
 import type { Report } from './types.ts';
 
 const code = (s: string) => `\`${s.replaceAll('`', "'").replace(/\s+/g, ' ')}\``;
@@ -17,7 +17,7 @@ export function reportToMarkdown(r: Report): string {
     '',
     ...r.exposures.map((e) => {
       const path = r.paths.find((p) => p.repo === e.repo);
-      return `- ${code(e.repo)} ${e.tier}${e.team ? `, team ${code(e.team)}` : ''}${path ? `, path ${path.chain.map(code).join(' → ')}${path.range ? ` (range ${code(path.range)})` : ''}` : ''}`;
+      return `- ${code(e.repo)} ${e.tier}${e.remediated ? ` (remediated ${utc(e.remediated.at)})` : ''}${e.team ? `, team ${code(e.team)}` : ''}${path ? `, path ${path.chain.map(code).join(' → ')}${path.range ? ` (range ${code(path.range)})` : ''}` : ''}`;
     }),
     '',
     '## Fixes',
@@ -31,12 +31,14 @@ export function reportToMarkdown(r: Report): string {
   return lines.join('\n');
 }
 
-export function downloadReport(r: Report, format: 'md' | 'json'): void {
+/** Downloads the report and returns the file name. */
+export function downloadReport(r: Report, format: 'md' | 'json'): string {
   const body = format === 'md' ? reportToMarkdown(r) : JSON.stringify(r, null, 2);
   const url = URL.createObjectURL(new Blob([body], { type: format === 'md' ? 'text/markdown' : 'application/json' }));
   const a = document.createElement('a');
   a.href = url;
-  a.download = `patient-zero-${r.incident.id}.${format}`;
+  a.download = `patient-zero-${r.incident.id}-${utc(r.at).replace(':', '')}z.${format}`;
   a.click();
   URL.revokeObjectURL(url);
+  return a.download;
 }

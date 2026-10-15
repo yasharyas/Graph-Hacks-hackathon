@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scribble: coach hint</title>
+  <link rel="stylesheet" href="/bench.css">
+  <style>
+    main { padding: 24px; display: grid; gap: 16px; justify-items: start; }
+    .stage { position: absolute; left: 0; top: 16px; background: transparent; outline: 1px dashed var(--line-2); }
+    .stage canvas { display: block; }
+    /* Stand-in of the onboarding hint card (13px Satoshi, 20px line). The image hangs from the baseline of "Click a row":
+       underline under the words, then a short hook down out of the card toward the panes below. */
+    .card { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 720px; height: 50px; padding: 0 16px; border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: var(--bg-2); font-size: 13px; line-height: 20px; }
+    .card .words { position: relative; display: inline-block; }
+    .panes { width: 720px; height: 48px; margin-top: 12px; background: var(--bg-1); border-top: 1px solid var(--line-1); }
+    output { font-family: var(--font-mono); font-size: 12px; color: var(--fg-1); white-space: pre; }
+  </style>
+</head>
+<body>
+<main>
+  <div id="standin">
+    <div class="card">
+      <p><span class="words">Click a row<span class="stage" id="stage"></span></span> to see its path <span class="text-fg-2">·</span> Show Cypher on any card <span class="text-fg-2">·</span> Paste your own repo</p>
+      <button class="btn btn-ghost" type="button">Got it</button>
+    </div>
+    <div class="panes"></div>
+  </div>
+  <div class="flex gap-2 items-center">
+    <button class="btn btn-secondary" id="export" type="button">Export coach-hint (PNG + WebP)</button>
+  </div>
+  <output id="log"></output>
+</main>
+
+<script type="module">
+  import { brush, mount, compose, post, wire } from './lib.mjs';
+
+  // Coach mark for the single onboarding hint: an underline under "Click a row" (63px at 13px Satoshi) and a small
+  // hook arrow that leaves the underline and curls down, out of the card, toward the panes where the rows are.
+  // 96x32 at 1x, top edge = the text baseline + 1px; exported at 2x. Ink is fg-0: red would mean "infected".
+  const NAME = 'coach-hint';
+  const W = 96, H = 32, DPR = 2;
+  const SEED = 1757341611;
+  const INK = '#eceae6';     // --fg-0
+
+  const { render } = mount({
+    W, H, DPR, stage: document.getElementById('stage'),
+    sketch(p) {
+      p.setup = () => {
+        p.createCanvas(W, H, p.WEBGL);
+        p.pixelDensity(DPR);
+        p.angleMode(p.DEGREES);
+        brush.scaleBrushes(2.4);
+        p.noLoop();
+      };
+      p.draw = () => {
+        p.randomSeed(SEED); p.noiseSeed(SEED);
+        p.clear();
+        p.translate(-W / 2, -H / 2);
+        // 1. Underline: one quick stroke with the slight rise-and-dip of a hand moving left to right.
+        brush.set('pen', INK, 1.25);
+        brush.spline([[1, 3.5, 1.0], [18, 5, 1.15], [40, 3, 1.15], [64, 4.5, 0.9]], 0.5);
+        // 2. Hook: pen down just past the underline, curls right and down; the tip points at the panes.
+        const hook = [[69, 3, 0.95], [79, 4.5, 1.05], [86, 10, 1.1], [88.5, 18, 1.1], [88, 26, 1.1]];
+        brush.set('pen', INK, 1.3);
+        brush.spline(hook, 0.55);
+        const [tx, ty] = hook.at(-1), [px, py] = hook.at(-2);
+        const heading = Math.atan2(ty - py, tx - px);
+        brush.set('pen', INK, 1.4);
+        for (const s of [-1, 1]) {
+          const a = heading + Math.PI + s * 0.5;
+          brush.line(tx, ty, tx + Math.cos(a) * 6.5, ty + Math.sin(a) * 6.5);
+        }
+      };
+    },
+  });
+
+  wire(async () => {
+    post(await compose(render, [['all', INK]]), NAME);
+    document.title = 'Scribble: coach hint — exported';
+  });
+</script>
+</body>
+</html>

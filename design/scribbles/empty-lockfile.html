@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scribble: empty lockfile</title>
+  <link rel="stylesheet" href="/bench.css">
+  <style>
+    main { padding: 24px; display: grid; gap: 16px; justify-items: start; }
+    .stage { position: relative; background: transparent; outline: 1px dashed var(--line-2); flex: none; }
+    .stage canvas { display: block; }
+    /* Stand-in of an EmptyState in the 480px table pane: illustration left of the copy. */
+    .pane { display: flex; align-items: flex-start; gap: 16px; width: 448px; padding: 16px; background: var(--bg-1); border: 1px solid var(--line-2); }
+    .copy { display: grid; gap: 8px; }
+    .copy h3 { font-family: var(--font-display); font-weight: 800; font-size: 22px; line-height: 28px; letter-spacing: -.01em; margin: 0; }
+    .copy p { margin: 0; font-size: 14px; line-height: 22px; color: var(--fg-1); }
+    output { font-family: var(--font-mono); font-size: 12px; color: var(--fg-1); white-space: pre; }
+  </style>
+</head>
+<body>
+<main>
+  <div class="pane" id="standin">
+    <div class="stage" id="stage"></div>
+    <div class="copy">
+      <h3>No exposures to show yet</h3>
+      <p>The table lists every repo that reaches a malicious version, with its tier, path and owner.</p>
+      <p>Run the triage to fill it.</p>
+      <div><button class="btn btn-primary" type="button">Run triage</button></div>
+    </div>
+  </div>
+  <div class="flex gap-2 items-center">
+    <button class="btn btn-secondary" id="export" type="button">Export empty-lockfile (PNG + WebP)</button>
+  </div>
+  <output id="log"></output>
+</main>
+
+<script type="module">
+  import { brush, mount, compose, post, wire } from './lib.mjs';
+
+  // Empty / error illustration: a magnifier held over a lockfile sheet. Grey ink (fg-1) for the sheet, its entries
+  // and the glass; exactly one entry under the lens is red-400, the pinned malicious version an analyst would circle.
+  // 144x108 at 1x, shown 1:1 left of the copy; exported at 2x as two recoloured layers composited.
+  const NAME = 'empty-lockfile';
+  const W = 144, H = 108, DPR = 2;
+  const SEED = 1757341611;
+  const GREY = '#a8a6a0';    // --fg-1
+  const RED = '#ff5a4f';     // --red-400
+  const LENS = { x: 90, y: 56, r: 23 };
+  const LINES = [22, 33, 44, 55, 66, 77, 88];   // entry baselines; 55 sits under the lens centre
+  const ENDS = [70, 78, 66, 80, 74, 62, 72];    // value lengths vary like real "name": "version" pairs
+
+  const { render } = mount({
+    W, H, DPR, stage: document.getElementById('stage'),
+    sketch(p, state) {
+      p.setup = () => {
+        p.createCanvas(W, H, p.WEBGL);
+        p.pixelDensity(DPR);
+        p.angleMode(p.DEGREES);
+        brush.scaleBrushes(2.4);
+        p.noLoop();
+      };
+      p.draw = () => {
+        p.randomSeed(SEED); p.noiseSeed(SEED);
+        p.clear();
+        p.translate(-W / 2, -H / 2);
+        const grey = state.layer !== 'mark', red = state.layer !== 'sheet';
+
+        if (grey) {
+          // 1. The sheet: four strokes, corners not quite meeting, a hair of tilt.
+          brush.set('pen', GREY, 1.3);
+          const c = [[25, 9], [93, 6], [96, 99], [22, 103]];
+          for (let i = 0; i < 4; i++) {
+            const [ax, ay] = c[i], [bx, by] = c[(i + 1) % 4];
+            brush.spline([[ax, ay, 1.0], [(ax + bx) / 2 + p.random(-1.2, 1.2), (ay + by) / 2 + p.random(-1.2, 1.2), 1.1], [bx, by, 0.95]], 0.4);
+          }
+          // 2. Entries: a short key stroke, a gap, a longer value stroke.
+          brush.set('pen', GREY, 1.0);
+          LINES.forEach((y, i) => {
+            const wob = p.random(-0.6, 0.6);
+            brush.line(34, y + wob, 47, y + wob + p.random(-0.5, 0.5));
+            if (y !== 55) brush.line(52, y - wob, ENDS[i], y - wob + p.random(-0.6, 0.6));
+          });
+          // 3. The glass and its handle, drawn over the sheet.
+          brush.set('pen', GREY, 1.5);
+          brush.circle(LENS.x, LENS.y, LENS.r, 0.08);
+          const a = (42 * Math.PI) / 180;
+          brush.set('pen', GREY, 2.3);
+          brush.line(LENS.x + Math.cos(a) * (LENS.r + 1), LENS.y + Math.sin(a) * (LENS.r + 1), 131, 96);
+        }
+        if (red) {
+          // 4. The one red mark: the value under the lens.
+          brush.set('pen', RED, 1.35);
+          brush.line(52, 55.4, 82, 54.8);
+        }
+      };
+    },
+  });
+
+  wire(async () => {
+    post(await compose(render, [['sheet', GREY], ['mark', RED]]), NAME);
+    document.title = 'Scribble: empty lockfile — exported';
+  });
+</script>
+</body>
+</html>

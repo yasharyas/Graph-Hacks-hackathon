@@ -75,7 +75,7 @@ export function TimelineScrubber({ incident, points, at, snapshot, playing, onPl
           {playing ? 'Pause' : at >= landingEnd ? 'Play the 90 minutes' : 'Play'}
         </Button>
         <p className="flex min-w-0 items-baseline gap-2">
-          <span className="text-3xl font-bold text-fg-0 tabular-nums" aria-hidden>
+          <span className="text-3xl font-bold text-fg-0 tabular-nums">
             {exposed}
           </span>
           <span className="text-sm text-fg-1">repos one install from malware</span>
@@ -122,7 +122,7 @@ export function TimelineScrubber({ incident, points, at, snapshot, playing, onPl
         </div>
         <input
           type="range"
-          className="scrub relative"
+          className="scrub relative pointer-coarse:-my-2.5 pointer-coarse:h-11"
           aria-label="Scenario time, UTC"
           min={start}
           max={end}

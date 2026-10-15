@@ -44,7 +44,7 @@
       color var(--dur-fast) var(--ease-out);
   }
   /* Press scale: pointer-down on buttons and chips only (never rows). */
-  .btn:active:not(:disabled):not([aria-disabled='true']) {
+  .btn:active:not(:disabled):not([aria-disabled='true']):not(:focus-visible) {
     transform: scale(var(--press-scale));
   }
   .btn-primary {
@@ -84,7 +84,7 @@
       background-color var(--dur-fast) var(--ease-out),
       color var(--dur-fast) var(--ease-out);
   }
-  .icon-btn:active:not(:disabled) {
+  .icon-btn:active:not(:disabled):not(:focus-visible) {
     transform: scale(var(--press-scale));
   }
   @media (hover: hover) and (pointer: fine) {

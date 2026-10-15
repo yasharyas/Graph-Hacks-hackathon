@@ -120,6 +120,7 @@ export async function remediate(body: { scenario: ScenarioId; repo: string; acti
   if (isMock) return;
   await request('/api/remediate', {
     method: 'POST',
+    keepalive: true, // survives a page close inside the Undo window
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });

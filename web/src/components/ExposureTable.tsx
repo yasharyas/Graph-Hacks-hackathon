@@ -7,13 +7,14 @@
  *   selectedRepo        drives the left bar and, through the parent, the graph; null = none
  *   remediated          repo -> epoch ms of a local or server remediation
  *   undoable            repos still inside the 10 s Undo window
+ *   fixable             repos the triage run drafted for (a table scrubbed to another clock can list repos it did not); omit = all
  *   onSelect(repo), onOpenFix(repo), onUndo(repo)
  * WOULD_PULL rows always carry the honest-semantics line (table caption + tier title on fine pointers, printed in
  * the card on touch). Repo names are buttons (the accessible name of the row); the row click is a convenience.
  * Untrusted strings (repo, team, package names) render as text only.
  */
 import { useMemo, useState } from 'react';
-import { utc } from '../data/format.ts';
+import { HEAD_NOTE, isHead, utc } from '../data/format.ts';
 import type { Exposure, ExposurePath, Tier } from '../data/types.ts';
 import { Button } from './Button.tsx';
 import { EmptyState } from './EmptyState.tsx';
@@ -38,12 +39,13 @@ export interface ExposureTableProps {
   selectedRepo: string | null;
   remediated: Record<string, number>;
   undoable: ReadonlySet<string>;
+  fixable?: ReadonlySet<string>;
   onSelect: (repo: string) => void;
   onOpenFix: (repo: string) => void;
   onUndo: (repo: string) => void;
 }
 
-export function ExposureTable({ exposures, paths, badVersions, selectedRepo, remediated, undoable, onSelect, onOpenFix, onUndo }: ExposureTableProps) {
+export function ExposureTable({ exposures, paths, badVersions, selectedRepo, remediated, undoable, fixable, onSelect, onOpenFix, onUndo }: ExposureTableProps) {
   const [prodOnly, setProdOnly] = useState(false);
   const [tier, setTier] = useState<Tier | 'ALL'>('ALL');
   const [query, setQuery] = useState('');
@@ -98,11 +100,16 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
           type="button"
           aria-current={selectedRepo === e.repo ? 'true' : undefined}
           onClick={(ev) => (ev.stopPropagation(), onSelect(e.repo))}
-          className={`max-w-full rounded-xs text-left text-sm break-words ${done ? 'text-fg-2 line-through' : 'text-link'} hov:text-fg-0`}
+          className={`max-w-full rounded-xs text-left text-sm break-words pointer-coarse:min-h-11 pointer-coarse:py-2 ${done ? 'text-fg-2 line-through' : 'text-link'} hov:text-fg-0`}
         >
           {e.repo}
         </button>
         {e.synthetic && <span className="text-2xs text-fg-1">sample repo</span>}
+        {isHead(e.repo) && (
+          <span className="text-2xs text-fg-1" title={HEAD_NOTE}>
+            current lockfile, counterfactual
+          </span>
+        )}
         {showTeam && e.team && <span className="text-xs text-fg-1 md:max-xl:hidden">{e.team}</span>}
       </span>
     );
@@ -116,7 +123,7 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
         <Check size={14} />
         remediated {utc(done)}
         {undoable.has(e.repo) && (
-          <button type="button" className="inline-flex items-center gap-1 rounded-xs text-link underline underline-offset-2" onClick={(ev) => (ev.stopPropagation(), onUndo(e.repo))}>
+          <button type="button" className="inline-flex items-center gap-1 rounded-xs text-link underline underline-offset-2 pointer-coarse:min-h-11" onClick={(ev) => (ev.stopPropagation(), onUndo(e.repo))}>
             <Undo size={12} /> Undo
           </button>
         )}
@@ -125,7 +132,13 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
   };
 
   const fixButton = (e: Exposure) => (
-    <Button variant="secondary" onClick={(ev) => (ev.stopPropagation(), onOpenFix(e.repo))} aria-label={`Fix ${e.repo}`}>
+    <Button
+      variant="secondary"
+      disabled={fixable !== undefined && !fixable.has(e.repo)}
+      title={fixable && !fixable.has(e.repo) ? 'The triage run did not cover this repo at this clock. Run the triage at this time first.' : undefined}
+      onClick={(ev) => (ev.stopPropagation(), onOpenFix(e.repo))}
+      aria-label={`Fix ${e.repo}`}
+    >
       Fix
     </Button>
   );
@@ -165,8 +178,14 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
 
       {rows.length === 0 ? (
         <EmptyState
-          title={prodOnly && devOnly ? 'No prod exposures' : 'No matching repos'}
-          cause={prodOnly && devOnly ? 'Every exposed repo here reaches the bad version through dev dependencies only.' : 'No repo matches these filters.'}
+          title={exposures.length === 0 ? 'No exposed repos' : prodOnly && devOnly ? 'No prod exposures' : 'No matching repos'}
+          cause={
+            exposures.length === 0
+              ? 'At this clock, no repo reaches a malicious version, and none depends on the compromised account’s packages.'
+              : prodOnly && devOnly
+                ? 'Every exposed repo here reaches the bad version through dev dependencies only.'
+                : 'No repo matches these filters.'
+          }
           action={prodOnly && devOnly ? { label: `Show dev-only (${devOnly})`, onClick: () => setProdOnly(false) } : undefined}
         />
       ) : (

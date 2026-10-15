@@ -7,6 +7,8 @@ import type { IncidentMeta, LlmMode, Report, ToolName, ToolResult, TriageEvent }
 export interface TriageError {
   message: string;
   requestId?: string;
+  /** HTTP status when the failure was a response (0 = network down); absent for stream events. */
+  status?: number;
 }
 export interface ToolCardState {
   /** `${round}:${event id}`: unique across the triage (round 0) and its Ask follow-ups. */
@@ -30,6 +32,8 @@ export interface Guard {
   verified: number;
   total: number;
   flagged: string[];
+  /** Every claim the server checked. The UI marks a span verified only if it is listed here with ok=true. */
+  claims: { text: string; ok: boolean }[];
 }
 export interface FollowUp {
   question: string;
@@ -133,7 +137,7 @@ function fold(s: TriageState, e: TriageEvent): TriageState {
       return asking(s) ? { ...s, followUps: patchLast(s, { narration }) } : { ...s, narration, mode: e.mode };
     }
     case 'guard': {
-      const guard = { verified: e.verified, total: e.total, flagged: e.flagged };
+      const guard = { verified: e.verified, total: e.total, flagged: e.flagged, claims: e.claims ?? [] };
       return asking(s) ? { ...s, followUps: patchLast(s, { guard }) } : { ...s, guard };
     }
     case 'error':
@@ -145,7 +149,7 @@ function fold(s: TriageState, e: TriageEvent): TriageState {
 
 const toError = (err: unknown): TriageError =>
   err instanceof ApiError
-    ? { message: err.message, requestId: err.requestId }
+    ? { message: err.message, requestId: err.requestId, status: err.status }
     : { message: err instanceof Error ? err.message : 'Unexpected error' };
 
 export function useTriage() {

@@ -7,7 +7,18 @@ import { countsKey, snapshotAt } from './snapshot.ts';
 import type { AnalyzeEvent, Exposure, IncidentMeta, Report, ScenarioId, TimelinePoint, Tier, TriageEvent } from './types.ts';
 
 // The JSON loader widens string literals ("LOCKED" becomes string), so the contract types are asserted once here.
-const events = triageFixture.events as unknown as TriageEvent[];
+const events = claimed(triageFixture.events as unknown as TriageEvent[]);
+
+/** The fixtures predate guard `claims`: derive them from the narration's backticks and [E1] ids so mock mode exercises the verified-only path. */
+function claimed(list: TriageEvent[]): TriageEvent[] {
+  let text = '';
+  return list.map((e) => {
+    if (e.type === 'narration') text = e.text;
+    if (e.type !== 'guard' || e.claims) return e;
+    const spans = [...text.matchAll(/`([^`\n]+)`|\[(E\d+)\]/g)].map((m) => (m[1] ?? m[2])!.trim());
+    return { ...e, claims: spans.map((t) => ({ text: t, ok: !e.flagged.includes(t) })) };
+  });
+}
 const timeline = timelineFixture as unknown as { incident: IncidentMeta; points: TimelinePoint[] };
 const report = events.find((e): e is Extract<TriageEvent, { type: 'report' }> => e.type === 'report')!.report;
 
@@ -75,7 +86,7 @@ export function mockTriage(input: TriageRequest, signal: AbortSignal): AsyncGene
 /** A canned follow-up built from the fixture's explain_path tool call. The text is mock-only. */
 export function mockAsk(signal: AbortSignal): AsyncGenerator<TriageEvent> {
   const explain = events.filter((e) => 'id' in e && e.id === 't4');
-  const answer: TriageEvent[] = [
+  const answer: TriageEvent[] = claimed([
     ...explain,
     {
       type: 'narration',
@@ -85,7 +96,7 @@ export function mockAsk(signal: AbortSignal): AsyncGenerator<TriageEvent> {
     },
     { type: 'guard', verified: 3, total: 3, flagged: [] },
     { type: 'done', ms: 410 },
-  ];
+  ]);
   return replay(answer, signal);
 }
 

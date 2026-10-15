@@ -7,13 +7,16 @@
  *   tab, onTab       'fix' | 'notice'
  *   onClose
  *   remediatedAt     epoch ms when this repo was marked remediated, or null
+ *   canUndo, onUndo(repo)   the mark is still inside its 10 s Undo window
  *   onRemediate(repo)
  *   running, onCancelRun   "Cancel run" appears only while a triage is running
- *   onExport('md' | 'json'), onShare
- * Footer: Copy (the active tab), Export, Share link, Mark remediated, Cancel run. Untrusted text renders as text.
+ *   onExport('md' | 'json') -> the downloaded file name; onShare() -> whether the link was copied
+ * Footer: Copy (the active tab), Export report, Share link, Mark remediated (+ Undo), Cancel run. The dialog is modal,
+ * so page toasts would sit dimmed and inert under its scrim: every outcome (copied, exported, marked, undone) is
+ * reported by the polite status line inside it. Untrusted text renders as text.
  */
-import { useEffect, useId, useRef } from 'react';
-import { utc } from '../data/format.ts';
+import { useEffect, useId, useRef, useState } from 'react';
+import { HEAD_NOTE, isHead, utc } from '../data/format.ts';
 import type { Report } from '../data/types.ts';
 import { Button, IconButton } from './Button.tsx';
 import { copyText } from './copy.ts';
@@ -30,21 +33,26 @@ export interface FixDrawerProps {
   onTab: (t: DrawerTab) => void;
   onClose: () => void;
   remediatedAt: number | null;
+  canUndo: boolean;
+  onUndo: (repo: string) => void;
   onRemediate: (repo: string) => void;
   running: boolean;
   onCancelRun: () => void;
-  onExport: (format: 'md' | 'json') => void;
-  onShare: () => void;
+  onExport: (format: 'md' | 'json') => string;
+  onShare: () => Promise<boolean>;
 }
 
 const Block = ({ text }: { text: string }) => (
-  <pre className="overflow-x-auto rounded-xs bg-bg-3 p-3 text-xs leading-[18px] text-fg-0 select-all">
+  <pre className="rounded-xs bg-bg-3 p-3 text-xs leading-[18px] whitespace-pre-wrap text-fg-0 select-all [overflow-wrap:anywhere]">
     <code>{text}</code>
   </pre>
 );
 
-export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, onRemediate, running, onCancelRun, onExport, onShare }: FixDrawerProps) {
+export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, canUndo, onUndo, onRemediate, running, onCancelRun, onExport, onShare }: FixDrawerProps) {
   const ref = useRef<HTMLDialogElement>(null);
+  const undoRef = useRef<HTMLButtonElement>(null);
+  const [note, setNote] = useState('');
+  const say = (text: string) => setNote(text);
   const shown = useRef<string | null>(repo);
   if (repo) shown.current = repo; // keep the content on screen while the exit transition runs
   const id = useId();
@@ -54,7 +62,12 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, onR
     if (!d) return;
     if (repo && !d.open) d.showModal();
     else if (!repo && d.open) d.close();
+    setNote(''); // a new repo or a closed drawer starts with a clean status line
   }, [repo]);
+  // "Mark remediated" unmounts the button that had focus: land on Undo, the next thing a person might want.
+  useEffect(() => {
+    if (canUndo) undoRef.current?.focus();
+  }, [canUndo]);
 
   const r = shown.current;
   const exposure = report.exposures.find((e) => e.repo === r);
@@ -63,8 +76,9 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, onR
   const notice = report.notices.find((n) => n.team === exposure?.team);
   const bad = new Set(report.incident.versions.map((v) => v.id));
   const fixText = fix ? `${JSON.stringify({ overrides: fix.overrides }, null, 2)}\n\n${fix.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\n${fix.prBody}` : '';
-  const copyLabel = tab === 'fix' ? 'Fix' : 'Notice';
+  const copyLabel = tab === 'fix' ? 'Fix' : 'Slack message';
   const copyBody = tab === 'fix' ? fixText : (notice?.text ?? '');
+  const copy = async () => say((await copyText(copyBody, copyLabel, true)) ? `${copyLabel} copied` : `Clipboard blocked. Select the ${copyLabel.toLowerCase()} text above and copy it manually.`);
 
   return (
     <dialog
@@ -92,6 +106,12 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, onR
 
           <div className="scroll-pane flex-1 p-4">
             {exposure.tier === 'WOULD_PULL' && <p className="mb-3 text-sm text-fg-1">{HONEST_SEMANTICS}</p>}
+            {isHead(r) && (
+              <p className="mb-3 text-sm text-fg-1">
+                <span className="mr-2 rounded-xs bg-bg-3 px-1.5 py-0.5 font-mono text-2xs font-medium text-fg-0">COUNTERFACTUAL</span>
+                {HEAD_NOTE}
+              </p>
+            )}
             {path && (
               <div className="mb-4">
                 <p className="label-caps mb-1.5">Path {path.id}</p>
@@ -142,7 +162,11 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, onR
                     <p className="text-fg-0">{fix.prBody}</p>
                   </>
                 ) : (
-                  <p className="text-fg-1">No fix was drafted for this repo. The graph found exposure here, but this run produced no overrides for it.</p>
+                  <p className="text-fg-1">
+                    {exposure.tier === 'MAINTAINER'
+                      ? 'Nothing to fix yet: no malicious version is known for the packages this repo takes from the compromised account. Watch for new advisories.'
+                      : `No fix was drafted for this repo. Each run drafts a path and a fix for its top ${report.remediations.length || 5} exposures only. Ask a follow-up about this repo to get its path.`}
+                  </p>
                 ))}
               {tab === 'notice' &&
                 (notice ? (
@@ -159,22 +183,49 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, onR
           </div>
 
           <div className="flex flex-wrap items-center gap-2 border-t border-line-1 p-4">
-            <Button variant="primary" icon={<Copy size={16} />} disabled={!copyBody} onClick={() => void copyText(copyBody, copyLabel)}>
-              Copy
+            <p role="status" className="min-h-5 basis-full text-xs text-fg-1 empty:hidden">
+              {note}
+            </p>
+            <Button variant="primary" icon={<Copy size={16} />} disabled={!copyBody} onClick={() => void copy()}>
+              {tab === 'fix' ? 'Copy fix' : 'Copy as Slack message'}
             </Button>
-            <Button icon={<Download size={16} />} onClick={() => onExport('md')}>
-              Markdown
+            <Button
+              icon={<Download size={16} />}
+              aria-label="Export the whole report as Markdown"
+              title="The whole triage report, not just this repo"
+              onClick={() => say(`Exported ${onExport('md')}`)}
+            >
+              Report .md
             </Button>
-            <Button icon={<Download size={16} />} onClick={() => onExport('json')}>
-              JSON
+            <Button
+              icon={<Download size={16} />}
+              aria-label="Export the whole report as JSON"
+              title="The whole triage report, not just this repo"
+              onClick={() => say(`Exported ${onExport('json')}`)}
+            >
+              Report .json
             </Button>
-            <IconButton label="Copy share link" icon={<LinkIcon size={16} />} onClick={onShare} />
+            <IconButton
+              label="Copy share link"
+              icon={<LinkIcon size={16} />}
+              onClick={async () => say((await onShare()) ? 'Link copied' : 'Clipboard blocked. Copy the address from the browser bar.')}
+            />
             {remediatedAt !== null ? (
               <span className="inline-flex items-center gap-1.5 text-sm text-tier-clean">
                 <Check size={16} /> remediated {utc(remediatedAt)}
+                {canUndo && (
+                  <button
+                    ref={undoRef}
+                    type="button"
+                    className="ml-1 inline-flex min-h-(--control-h) items-center rounded-xs text-link underline underline-offset-2"
+                    onClick={() => (onUndo(r), say('Undone: not marked remediated'))}
+                  >
+                    Undo
+                  </button>
+                )}
               </span>
             ) : (
-              <Button onClick={() => onRemediate(r)}>Mark remediated</Button>
+              <Button onClick={() => (onRemediate(r), say('Marked remediated. Undo is available for 10 seconds.'))}>Mark remediated</Button>
             )}
             {running && (
               <Button variant="ghost" onClick={onCancelRun}>

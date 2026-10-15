@@ -76,7 +76,7 @@ function ToastView({ item }: { item: ToastItem }) {
       {item.action && (
         <button
           type="button"
-          className="shrink-0 rounded-xs px-1 font-medium text-link underline underline-offset-2"
+          className="shrink-0 rounded-xs px-1 font-medium text-link underline underline-offset-2 pointer-coarse:min-h-11 pointer-coarse:px-2"
           onClick={() => {
             item.action!.onClick();
             dismissToast(item.id);
@@ -85,7 +85,7 @@ function ToastView({ item }: { item: ToastItem }) {
           {item.action.label}
         </button>
       )}
-      <button type="button" aria-label="Dismiss" className="shrink-0 text-fg-2" onClick={() => dismissToast(item.id)}>
+      <button type="button" aria-label="Dismiss" className="shrink-0 rounded-xs text-fg-2 pointer-coarse:-m-3 pointer-coarse:p-3" onClick={() => dismissToast(item.id)}>
         <Close size={16} />
       </button>
     </motion.li>

@@ -1,5 +1,6 @@
 // useAnalyze(): paste-a-repo flow. POST /api/analyze streams AnalyzeEvents (fetch -> parse -> write -> enrich ->
-// admits); resolves with the guest graph name so the caller can start a triage with `{ guest, scenario }`.
+// admits); resolves with the guest graph name and repo id ("owner/repo", or "owner/repo@HEAD" when no pre-incident snapshot
+// existed) so the caller can start a triage with `{ guest, scenario }`.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError, streamAnalyze, type AnalyzeRequest } from './api.ts';
 import type { AnalyzeEvent } from './types.ts';
@@ -16,7 +17,7 @@ export function useAnalyze() {
   const [state, setState] = useState<AnalyzeState>(idle);
   const ctl = useRef<AbortController | null>(null);
 
-  const analyze = useCallback(async (req: AnalyzeRequest): Promise<string | null> => {
+  const analyze = useCallback(async (req: AnalyzeRequest): Promise<{ graph: string; repo: string } | null> => {
     ctl.current?.abort();
     const ctrl = (ctl.current = new AbortController());
     setState({ ...idle, status: 'running' });
@@ -28,7 +29,7 @@ export function useAnalyze() {
           return null;
         } else {
           setState({ status: 'ready', stage: null, repo: e.repo, error: null });
-          return e.graph;
+          return { graph: e.graph, repo: e.repo };
         }
       }
     } catch (err) {
