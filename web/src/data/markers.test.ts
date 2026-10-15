@@ -12,12 +12,13 @@ const AXIOS: Spec = { id: 'axios-2026-03-31', firstPublishAt: D('2026-03-30T23:5
 const inc = (x: Spec): IncidentMeta => ({ title: '', maintainer: null, versions: [], sources: [], ...x });
 const minutes = (hhmm: string) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3));
 
-test('the first marker is the first exposure, and its label minus the OSV label is the figure', () => {
-  for (const [i, ahead, first] of [[QIX, 74, '13:12'], [AXIOS, 105, '00:22']] as const) {
-    const [exposed, , osv] = markersOf(inc(i));
+test('the first marker is the first exposure, labelled with its own minute (as the verdict says it)', () => {
+  for (const [i, ahead, first] of [[QIX, 74, '13:12'], [AXIOS, 105, '00:21']] as const) {
+    const [exposed, alert, osv] = markersOf(inc(i));
     assert.equal(exposed!.key, 'exposed');
-    assert.equal(minutes(utc(osv!.shown)) - minutes(utc(exposed!.shown)), ahead);
+    assert.ok(minutes(utc(osv!.shown)) - minutes(utc(exposed!.shown)) - ahead <= 1); // floored figure, truncated labels
     assert.equal(utc(exposed!.shown), first);
+    assert.equal(alert!.long.endsWith('after OSV'), i.alertAt > i.advisoryAt);
     assert.equal(Math.floor((i.advisoryAt - i.firstExposureAt!) / 60_000), ahead); // the App's figure
   }
   assert.equal(markersOf(inc(AXIOS))[0]!.t, AXIOS.firstExposureAt); // the tick sits at the true instant, not the 23:59 publish

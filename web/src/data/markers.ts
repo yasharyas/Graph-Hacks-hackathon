@@ -14,19 +14,17 @@ export interface Marker {
 
 /**
  * The four markers. The first is the first moment any repo was exposed (not the first publish: axios' first publish is
- * a dependency nobody reached, 22 minutes earlier). The figure on screen is advisory minus that instant, floored, so the
- * label prints OSV's minute minus the figure: the HH:MM arithmetic between the two labels is the figure by construction
- * (axios' exposure at 00:21:58 and its OSV record at 02:07:58 are 105.997 min apart; truncated labels alone would read 106).
+ * a dependency nobody reached, 22 minutes earlier). Every label is the instant's own minute, like the verdict's "since
+ * 00:21 UTC" (axios: 00:21:58), so the label arithmetic can exceed the floored figure by one (105.997 min reads 105).
+ * An alert that came after the OSV record (axios) says so in its long label.
  */
 export function markersOf(i: IncidentMeta): Marker[] {
   const first = i.firstExposureAt ?? null;
-  const osvMinute = Math.floor(i.advisoryAt / MIN) * MIN;
-  const ahead = first === null ? 0 : Math.floor((i.advisoryAt - first) / MIN);
   return [
     first === null
       ? { key: 'exposed', t: i.firstPublishAt, shown: i.firstPublishAt, long: 'first publish', short: 'publish', bad: true }
-      : { key: 'exposed', t: first, shown: osvMinute - ahead * MIN, long: 'exposed', short: 'exposed', bad: true },
-    { key: 'alert', t: i.alertAt, shown: i.alertAt, long: 'alert', short: 'alert', bad: false },
+      : { key: 'exposed', t: first, shown: Math.floor(first / MIN) * MIN, long: 'exposed', short: 'exposed', bad: true },
+    { key: 'alert', t: i.alertAt, shown: i.alertAt, long: i.alertAt > i.advisoryAt ? 'alert, after OSV' : 'alert', short: 'alert', bad: false },
     { key: 'osv', t: i.advisoryAt, shown: i.advisoryAt, long: 'OSV record', short: 'OSV', bad: false },
     { key: 'removed', t: i.removedAt, shown: i.removedAt, long: 'removed', short: 'removed', bad: false },
   ];
