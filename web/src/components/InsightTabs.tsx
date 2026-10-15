@@ -3,8 +3,9 @@
  *        totalMs (server-reported run time or null), remediated (repo -> epoch ms of every mark, the server's and this
  *        screen's, so a mark made a second ago is listed).
  * Tabs: Concentration (bars; for one pasted repo it is collapsed behind a button: "the next compromised account" is an org
- * question), All Cypher used (one <pre>, Copy all: every statement runnable as pasted, with the FalkorDB parameter prefix it
- * ran with, data/cypherParams.ts, and an exact repeat listed once), Triage history (two lists: "Marked remediated",
+ * question), All Cypher used (one <pre>, unwrapped, Copy all: one example per distinct statement with the FalkorDB parameter
+ * prefix it ran with, each ";"-terminated and labelled, since FalkorDB runs one statement per query; data/cypherParams.ts
+ * cypherScript), Triage history (two lists: "Marked remediated",
  * each repo with the time in the person's own zone, first; and "Assessed in earlier runs": how many repos, the latest time
  * and their tiers, both from recall_triage rows {repo, tier, action, at}, one row per repo), Graph stats (graph name and
  * the graph's node / edge counts from /api/stats, per-tool queries / rows / FalkorDB ms, and the schema this run's Cypher
@@ -14,7 +15,7 @@
 import { useId, useRef, useState, type KeyboardEvent } from 'react';
 import { localStamp } from '../data/clock.ts';
 import { schemaOf } from '../data/cypher.ts';
-import { runnable } from '../data/cypherParams.ts';
+import { cypherScript } from '../data/cypherParams.ts';
 import { fmtMs, plural } from '../data/format.ts';
 import { repoLabel } from '../data/repoLabel.ts';
 import type { Report } from '../data/types.ts';
@@ -44,7 +45,8 @@ export function InsightTabs({ report, cards, graph, totalMs, remediated }: Insig
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   const results = cards.flatMap((c) => (c.result ? [{ card: c, r: c.result }] : []));
   const hints = report.incident.maintainer ? { maintainer: report.incident.maintainer } : {};
-  const cypher = [...new Set(results.flatMap(({ card, r }) => r.cypher.map((q) => `// ${r.tool}\n${runnable(q, r.params ?? card.params, hints)}`)))].join('\n\n');
+  // One example per distinct statement, each ";"-terminated and labelled: FalkorDB runs one statement per query.
+  const cypher = cypherScript(results.flatMap(({ card, r }) => r.cypher.map((q, i) => ({ tool: r.tool, q, params: r.params ?? card.params, n: i + 1, of: r.cypher.length }))), hints);
   const schema = schemaOf(results.flatMap(({ r }) => r.cypher));
   const earlier = (results.find(({ r }) => r.tool === 'recall_triage')?.r.rows ?? []).flatMap((row) =>
     typeof row.repo === 'string' ? [{ repo: row.repo, tier: String(row.tier ?? ''), action: typeof row.action === 'string' ? row.action : null, at: typeof row.at === 'number' ? row.at : 0 }] : [],
@@ -137,11 +139,14 @@ export function InsightTabs({ report, cards, graph, totalMs, remediated }: Insig
           ))}
         {tab === 1 && (
           <div className="flex flex-col items-start gap-2">
-            <Button icon={<Copy size={16} />} onClick={() => void copyText(cypher, 'Cypher')} disabled={!cypher}>
-              Copy all
-            </Button>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <Button icon={<Copy size={16} />} onClick={() => void copyText(cypher, 'All statements')} disabled={!cypher}>
+                Copy all
+              </Button>
+              <p className="text-xs text-fg-1">One example per distinct statement. FalkorDB runs one statement per query: paste and run each on its own.</p>
+            </div>
             {cypher ? (
-              <pre tabIndex={0} role="region" aria-label="Cypher queries" className="max-h-72 w-full overflow-auto rounded-xs bg-bg-3 p-2 text-xs leading-[18px] whitespace-pre-wrap text-fg-0 [overflow-wrap:anywhere]">
+              <pre tabIndex={0} role="region" aria-label="Cypher queries" className="max-h-72 w-full overflow-auto rounded-xs bg-bg-3 p-2 text-xs leading-[18px] whitespace-pre text-fg-0">
                 <code>{cypher}</code>
               </pre>
             ) : (

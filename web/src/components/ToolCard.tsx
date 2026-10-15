@@ -13,10 +13,14 @@
  *   guest         a pasted repo's run: route_owners has no real team to show, so it says so instead of "Your team"
  *   cypherHints   parameter values a tool derived inside its run (the incident's maintainer), for the runnable prefix
  * The stable DOM id is cardDomId(card) so anything can link to a card.
- * Cypher is runnable: each statement shows, and "Copy Cypher" copies, the FalkorDB parameter prefix the tool ran it with
- * (`CYPHER incident="qix-2025-09-08" at=1757338200000 MATCH ...`, data/cypherParams.ts), so it pastes into FalkorDB
- * Browser or redis-cli as is. A traced card, an opened plan and the "Show all rows" toggle are scrolled clear of the pinned
- * Ask bar (components/scrollPane.ts reveal).
+ * Cypher is runnable: each statement shows the FalkorDB parameter prefix the tool ran it with (`CYPHER incident="qix-2025-09-08"
+ * at=1757338200000 MATCH ...`, data/cypherParams.ts) and has its own Copy, which copies that one statement, runnable as pasted
+ * in FalkorDB Browser or redis-cli. FalkorDB takes one statement per query, so a call with several offers "Copy all N" as a
+ * script that says so (data/cypherParams.ts cypherScript: ";" per statement, a comment naming each). A value the page cannot
+ * know ($session, an httpOnly cookie) is a marked placeholder. The code never wraps (a 335px column broke it every ~28
+ * characters): each statement is a horizontally scrolling block, focusable and labelled, so a keyboard can scroll it too.
+ * A traced card, an opened plan and the "Show all rows" toggle are scrolled clear of the pinned Ask bar (components/scrollPane.ts reveal).
+ * A pasted repo's cards show no team column (its "team" is a placeholder), and a tier cell carries its plain meaning as a title.
  * States: pending (radar + 3 skeleton rows; after 3 s "waiting for FalkorDB... 4 s"), done (collapsed line; open:
  * table, Cypher), error (neutral alert block: red means infected on this screen), cancelled. Radar only while pending.
  * Multi-query cards label every statement ("2/5 . Incident . RESOLVES_TO"). GRAPH.EXPLAIN is matched to the statement
@@ -26,7 +30,7 @@
 import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import { ApiError, getPlan } from '../data/api.ts';
 import { planFor, planLine, statements } from '../data/cypher.ts';
-import { paramPrefix, runnable } from '../data/cypherParams.ts';
+import { cypherScript, paramPrefix, runnable } from '../data/cypherParams.ts';
 import { plainError } from '../data/errors.ts';
 import { pinTargets } from '../data/export.ts';
 import { nextStep, requestIdFor } from '../data/failure.ts';
@@ -38,6 +42,8 @@ import { ChevronDown, CircleAlert, Copy } from './icons/Glyphs.tsx';
 import { RadarIcon } from './icons/RadarIcon.tsx';
 import { PathChain } from './PathChip.tsx';
 import { reveal } from './scrollPane.ts';
+import { TIER_SUBTITLE } from './TierChip.tsx';
+import { realTeam } from '../data/repoLabel.ts';
 
 const MAX_ROWS = 5;
 const TIME_KEY = /(At|Time)$|^(at|since|until)$/;
@@ -88,8 +94,9 @@ function fmtCell(key: string, v: unknown): string {
 function Cell({ k, v }: { k: string; v: unknown }) {
   const s = fmtCell(k, v);
   const id = typeof v === 'string' && (/[/@^~]|\d\.\d/.test(v) || CAPS.test(v));
+  const meaning = k === 'tier' && typeof v === 'string' ? (TIER_SUBTITLE as Record<string, string>)[v] : undefined; // the tier's plain meaning
   return (
-    <td data-col={k} className={`py-1 pr-2 align-top ${typeof v === 'string' && CAPS.test(v) ? 'whitespace-nowrap' : 'break-words'} ${typeof v === 'number' ? 'tabular-nums' : id ? 'font-mono' : ''} text-fg-0`}>
+    <td data-col={k} title={meaning} className={`py-1 pr-2 align-top ${typeof v === 'string' && CAPS.test(v) ? 'whitespace-nowrap' : 'break-words'} ${typeof v === 'number' ? 'tabular-nums' : id ? 'font-mono' : ''} text-fg-0`}>
       {id
         ? s.split('/').map((part, i) => (
             <Fragment key={i}>
@@ -104,10 +111,12 @@ function Cell({ k, v }: { k: string; v: unknown }) {
 
 const rowFlash = 'bg-bg-3 outline-2 -outline-offset-2 outline-fg-0';
 
-function RowsTable({ tool, rows, flash, showAll, onToggleAll }: { tool: string; rows: Record<string, unknown>[]; flash: number | null; showAll: boolean; onToggleAll: () => void }) {
+function RowsTable({ tool, rows, flash, showAll, onToggleAll, guest }: { tool: string; rows: Record<string, unknown>[]; flash: number | null; showAll: boolean; onToggleAll: () => void; guest: boolean }) {
   const shown = showAll ? rows : rows.slice(0, MAX_ROWS);
   const first = rows[0] ?? {};
-  const cols = (COLS[tool] ?? Object.keys(first)).filter((k) => k in first && (first[k] === null || typeof first[k] !== 'object' || Array.isArray(first[k]))).slice(0, 3);
+  // a pasted repo's "team" is the placeholder "Your team" (#your-team): no team or channel column for it
+  const placeholder = guest || (typeof first.team === 'string' && !realTeam(first.team));
+  const cols = (COLS[tool] ?? Object.keys(first)).filter((k) => k in first && !(placeholder && (k === 'team' || k === 'channel')) && (first[k] === null || typeof first[k] !== 'object' || Array.isArray(first[k]))).slice(0, 3);
   // The toggle moves (19 rows appear above it, or go away): it keeps the keyboard focus, so it is kept on screen too.
   const toggle = useRef<HTMLButtonElement>(null);
   const toggled = useRef(false);
@@ -261,7 +270,8 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
   const params = r?.params ?? card.params; // the raw values the queries ran with (epoch ms, arrays), not the display strings
   const planWanted = useRef<number | null>(null); // a plan was just asked for: bring it into view once it is there
   // a pasted repo's route_owners can only answer with the placeholder team: say what that means instead of naming "Your team"
-  const noRouting = guest && card.tool === 'route_owners';
+  // (whatever this card was told: its own rows show it, data/repoLabel.ts realTeam)
+  const noRouting = card.tool === 'route_owners' && (guest || (!!r && r.rows.length > 0 && r.rows.every((x) => !realTeam(typeof x.team === 'string' ? x.team : null))));
   const summary = noRouting ? 'No team to notify: a pasted repo has no owner in the graph' : r?.summary;
 
   useEffect(() => {
@@ -337,9 +347,14 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
     setPlanOpen((s) => new Set([...s, i]));
   };
 
-  // What "Copy Cypher" copies: every statement with its parameter prefix, runnable as pasted.
+  // One statement: runnable as pasted. Several ("Copy all N"): a script that says FalkorDB runs them one at a time.
   const copyCypher = async () => {
-    if (r && !(await copyText(r.cypher.map((q) => runnable(q, params, cypherHints)).join('\n\n'), 'Cypher'))) setCypherOpen(true); // show it selectable
+    if (!r) return;
+    const text = r.cypher.length === 1 ? runnable(r.cypher[0]!, params, cypherHints) : cypherScript(r.cypher.map((q, i) => ({ tool: card.tool, q, params, n: i + 1, of: r.cypher.length })), cypherHints);
+    if (!(await copyText(text, r.cypher.length === 1 ? 'Cypher' : `All ${r.cypher.length} statements`))) setCypherOpen(true); // show it selectable
+  };
+  const copyOne = async (i: number) => {
+    if (r && !(await copyText(runnable(r.cypher[i]!, params, cypherHints), `Query ${i + 1} of ${r.cypher.length}`))) setCypherOpen(true);
   };
 
   // One line: the tool name keeps its width, the subject (a repo, a maintainer) truncates and says the rest in its title.
@@ -454,7 +469,7 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
               ) : card.tool === 'draft_remediation' ? (
                 <PinRows rows={r.rows} flash={flash?.row ?? null} />
               ) : (
-                <RowsTable tool={card.tool} rows={r.rows} flash={flash?.row ?? null} showAll={showAll} onToggleAll={() => setShowAll((a) => !a)} />
+                <RowsTable tool={card.tool} rows={r.rows} flash={flash?.row ?? null} showAll={showAll} onToggleAll={() => setShowAll((a) => !a)} guest={guest} />
               )}
               {r.truncated ? <p className="mt-1 text-xs text-fg-2">+{r.truncated} rows withheld from the summary</p> : null}
 
@@ -468,9 +483,14 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
                   <ChevronDown size={14} className={`transition-transform duration-(--dur-base) ease-out ${cypherOpen ? 'rotate-180' : ''}`} />
                   Cypher{stmts.length > 1 ? ` (${stmts.length} queries)` : ''}
                 </button>
-                <button type="button" onClick={copyCypher} className="inline-flex items-center gap-1 rounded-xs px-1 text-xs text-fg-1 pointer-coarse:min-h-11 hov:text-fg-0">
+                <button
+                  type="button"
+                  onClick={copyCypher}
+                  title={stmts.length > 1 ? 'One text, one statement after another: FalkorDB runs one statement per query, so paste and run each on its own' : undefined}
+                  className="inline-flex items-center gap-1 rounded-xs px-1 text-xs text-fg-1 pointer-coarse:min-h-11 hov:text-fg-0"
+                >
                   <Copy size={14} />
-                  Copy Cypher
+                  {stmts.length > 1 ? `Copy all ${stmts.length}` : 'Copy Cypher'}
                 </button>
               </div>
               <div className={`grid transition-[grid-template-rows] duration-(--dur-base) ease-out ${cypherOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
@@ -484,20 +504,40 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
                         <div key={i} role="group" aria-label={`${named}, query ${s.n} of ${s.of}`}>
                           <div className="mb-1 flex items-center justify-between gap-2">
                             <p className="label-caps text-xs">{stmts.length > 1 ? `${s.n}/${s.of} · ${s.label}` : s.label}</p>
-                            {scenario && (
-                              <button
-                                type="button"
-                                aria-expanded={wanted}
-                                aria-controls={id}
-                                aria-label={stmts.length > 1 ? `${wanted ? 'Hide' : 'Show'} plan for query ${s.n} of ${s.of}` : undefined}
-                                onClick={() => void togglePlan(i)}
-                                className="shrink-0 rounded-xs px-1 text-xs text-fg-1 underline underline-offset-2 pointer-coarse:min-h-11 hov:text-fg-0"
-                              >
-                                {wanted ? 'Hide plan' : 'Show plan'}
-                              </button>
-                            )}
+                            <span className="flex shrink-0 items-center gap-2">
+                              {stmts.length > 1 && (
+                                // each statement copies on its own: FalkorDB runs one statement per query
+                                <button
+                                  type="button"
+                                  onClick={() => void copyOne(i)}
+                                  aria-label={`Copy query ${s.n} of ${s.of}`}
+                                  className="inline-flex items-center gap-1 rounded-xs px-1 text-xs text-fg-1 pointer-coarse:min-h-11 hov:text-fg-0"
+                                >
+                                  <Copy size={14} />
+                                  Copy
+                                </button>
+                              )}
+                              {scenario && (
+                                <button
+                                  type="button"
+                                  aria-expanded={wanted}
+                                  aria-controls={id}
+                                  aria-label={stmts.length > 1 ? `${wanted ? 'Hide' : 'Show'} plan for query ${s.n} of ${s.of}` : undefined}
+                                  onClick={() => void togglePlan(i)}
+                                  className="shrink-0 rounded-xs px-1 text-xs text-fg-1 underline underline-offset-2 pointer-coarse:min-h-11 hov:text-fg-0"
+                                >
+                                  {wanted ? 'Hide plan' : 'Show plan'}
+                                </button>
+                              )}
+                            </span>
                           </div>
-                          <pre className="rounded-xs bg-bg-3 p-2 text-xs leading-[18px] whitespace-pre-wrap text-fg-0 [overflow-wrap:anywhere]">
+                          {/* Never wrapped: a long line scrolls sideways inside its own block (keyboard: focus it, then the arrow keys). */}
+                          <pre
+                            tabIndex={0}
+                            role="region"
+                            aria-label={`Cypher, ${stmts.length > 1 ? `query ${s.n} of ${s.of}` : 'the query'} of ${named}`}
+                            className="overflow-x-auto rounded-xs bg-bg-3 p-2 text-xs leading-[18px] whitespace-pre text-fg-0 [scrollbar-width:thin] focus-visible:-outline-offset-2"
+                          >
                             {/* the parameters it ran with, as FalkorDB's CYPHER prefix: the block is runnable as selected */}
                             {prefix && (
                               <code className="text-xs text-fg-1" title="The parameters this query ran with, in FalkorDB's CYPHER prefix form">

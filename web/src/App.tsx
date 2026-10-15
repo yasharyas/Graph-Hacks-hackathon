@@ -18,10 +18,14 @@
  *
  * Every run starts at ONE clock, named on its button ("Run triage at 13:30 UTC"): the minute the person scrubbed to, else
  * the last run's, else the scenario's default (the autoplay's resting place does not count: it is where the story ends).
+ * An alert typed in "Describe an alert" (not yet run) takes over every Run button ("Run triage on this alert"). A run stops
+ * the scrubber at its clock as it starts; while it streams, the band's action is "Cancel run"; a run that failed leaves one
+ * action, the feed's.
  * Arrow keys on the scenario control only move the selection; running is a click, Enter or the Run button.
  *
- * Share links (data/urlState.ts): ?scenario&at, plus &repo (an org repo: the triage reruns at that minute, the row is
- * selected, and &open names the drawer tab) or &guest (a pasted public repo: NOT fetched on load, since a widely shared link
+ * Share links (data/urlState.ts): ?scenario&at, plus &repo (an org repo: the page is laid out compact from the first paint,
+ * the triage reruns at that minute, the row is selected with its path drawn, &open names the drawer tab, and a one-line strip
+ * says which repo the link is about, or that it is not in this scenario) or &guest (a pasted public repo: NOT fetched on load, since a widely shared link
  * would spend the server's GitHub quota per visitor; a strip asks for one click, then analyses, triages, selects, opens).
  * A dropped lockfile has nothing to reopen, so it says so instead of copying a link that would open the demo org.
  *
@@ -62,12 +66,13 @@ import { OnboardingHint } from './components/OnboardingHint.tsx';
 import { PasteBox, type PasteRequest } from './components/PasteBox.tsx';
 import { PathGraph } from './components/PathGraph.tsx';
 import { ReportClock } from './components/ReportClock.tsx';
-import { scrollPaneTo } from './components/scrollPane.ts';
+import { reveal as revealEl, scrollPaneTo } from './components/scrollPane.ts';
 import { AlertBanner, AlertField, type ScenarioChoice } from './components/ScenarioControl.tsx';
-import { SharedPrompt } from './components/SharedPrompt.tsx';
+import { SharedPrompt, SharedRepoNote } from './components/SharedPrompt.tsx';
 import { TimelineScrubber } from './components/TimelineScrubber.tsx';
 import { toast, Toasts } from './components/Toasts.tsx';
 import { ToolFeed } from './components/ToolFeed.tsx';
+import { RadarIcon } from './components/icons/RadarIcon.tsx';
 
 const QIX: ScenarioId = 'qix-2025-09-08';
 const AXIOS: ScenarioId = 'axios-2026-03-31';
@@ -125,6 +130,8 @@ export function App() {
   const orgRepo = urlInit.guest ? null : urlInit.repo;
   const restoreRepo = useRef(orgRepo); // the share link's repo, selected when its report lands...
   const restoreOpen = useRef<OpenTab | null>(orgRepo ? urlInit.open : null); // ...with this drawer tab open
+  // The share link's repo, said in a strip from the first paint: found (selected, path drawn), or not in this scenario.
+  const [linked, setLinked] = useState<{ repo: string; found: boolean | null } | null>(orgRepo ? { repo: orgRepo, found: null } : null);
   const paneRef = useRef<Pane>('feed');
   const panesRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<HTMLDivElement>(null);
@@ -150,7 +157,8 @@ export function App() {
   const running = triage.status === 'running';
   // The band collapses to one row from the click that starts a run, an analysis included (behind the sheet): a collapse when the
   // analysis ends, seconds later, would be a layout shift nobody asked for. It expands again when the sheet is closed.
-  const compact = triage.status !== 'idle' || (analyze.status !== 'idle' && (panel === 'paste' || shared !== null));
+  // A share link that names an org repo runs its triage on load: it is laid out compact from the first paint, not collapsed after it.
+  const compact = triage.status !== 'idle' || orgRepo !== null || (analyze.status !== 'idle' && (panel === 'paste' || shared !== null));
   const landing = useExposureAt(scenario, report || stale ? null : rawSnapshot); // after a report the table has its own query
 
   const remediation = useRemediation(
@@ -164,7 +172,10 @@ export function App() {
   const lastRunAt = triage.incident?.id === scenario ? triage.at : null;
   const clockFor = (scn: ScenarioId) => (scn === scenario ? (userAt ?? lastRunAt ?? (startAt !== null ? Math.floor(startAt / MIN) * MIN : null) ?? DEFAULT_AT[scn]) : DEFAULT_AT[scn]);
   const runClock = clockFor(scenario);
-  const runLabel = `Run triage at ${utcLabel(runClock)}`;
+  // An alert typed in the "Describe an alert" box (not yet run): while it is there, every Run button runs it and says so.
+  const [draft, setDraft] = useState('');
+  const typedAlert = panel === 'alert' ? draft.trim() : '';
+  const runLabel = typedAlert ? 'Run triage on this alert' : `Run triage at ${utcLabel(runClock)}`;
 
   // After a report, scrubbing re-queries the org graph at the new clock. Not for a pasted repo (its graph is its
   // own) and not when the scrubber now shows a different incident than the report.
@@ -242,6 +253,19 @@ export function App() {
     const hit = want ? report.exposures.find((e) => e.repo === want || e.repo.startsWith(`${want}@`)) : undefined; // a pasted repo read at HEAD is "owner/name@HEAD"
     setSelected(hit?.repo ?? report.exposures[0]?.repo ?? null);
     if (hit && tab) setDrawer({ repo: hit.repo, tab });
+    if (want && report.scope?.kind !== 'guest') {
+      setLinked((l) => (l && l.repo === want ? { repo: want, found: !!hit } : l));
+      // the linked row may sit far down the table: bring it into its pane (the page itself does not move)
+      if (hit && !tab) {
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            const row = document.querySelector('#exposures [aria-current="true"]')?.closest('tr');
+            const pane = tableRef.current;
+            if (row && pane && pane.scrollHeight > pane.clientHeight + 1) revealEl(row, 'nearest');
+          }),
+        );
+      }
+    }
   }, [report]);
   // A share link that names an org repo reopens its answer: the triage runs at the link's minute.
   const autoRan = useRef(false);
@@ -297,14 +321,30 @@ export function App() {
     );
   };
 
-  const startRun = (fn: () => void) => {
+  /**
+   * Every run starts here. The scrubber stops and goes to the run's clock at once (when it is known): a run that fails before
+   * its first event must not leave the autoplay running behind its error, and one that works lands there anyway.
+   */
+  const runStarted = useRef(0);
+  const startRun = (fn: () => void, clock?: number) => {
     setDrawer((d) => ({ ...d, repo: null }));
     setSelected(null);
     setTurnKey((k) => k + 1);
     showPane('feed');
+    runStarted.current = performance.now();
+    if (!restoreRepo.current) setLinked(null); // a run of its own: the share link's note no longer describes the screen
+    if (clock === undefined) playback.pause();
+    else {
+      playback.seek(clock);
+      snapSettled(clock);
+    }
     fn();
   };
-  // The button that started a run is disabled while it runs, which would drop keyboard focus to the page top: land in the feed instead.
+  // "Cancel run" takes the place of "Run again" under the pointer: the second click of a double click must not cancel the run it started.
+  const cancelRun = () => {
+    if (performance.now() - runStarted.current > 600) triage.abort();
+  };
+  // A run starts in the feed: keyboard focus lands there (where its progress and its verdict are), whichever button started it.
   useEffect(() => {
     if (turnKey > 0) feedRef.current?.focus({ preventScroll: true });
   }, [turnKey]);
@@ -317,7 +357,7 @@ export function App() {
     }
     await remediation.flush();
     const when = { at: clock ?? clockFor(scn) };
-    startRun(() => triage.run(g ? { guest: g.graph, scenario: scn, ...when } : { scenario: scn, ...when }));
+    startRun(() => triage.run(g ? { guest: g.graph, scenario: scn, ...when } : { scenario: scn, ...when }), when.at);
   };
   const runAlert = async (text: string) => {
     setAlertText(text);
@@ -336,11 +376,13 @@ export function App() {
       setPanel('none');
       setAlertText(null);
       setShared(null);
-      startRun(() => triage.run({ guest: g.graph, scenario: scn, at: clockFor(scn) }));
+      const at = clockFor(scn);
+      startRun(() => triage.run({ guest: g.graph, scenario: scn, at }), at);
     }
   };
   /** The one action behind every Run button, Enter on a scenario and "Re-run to update": what is on screen, run again at the run clock. */
   const run = () => {
+    if (typedAlert) return void runAlert(typedAlert);
     if (alertText !== null && !guest && choice === 'alert') return void runAlert(alertText);
     if (guestReq.current && guest?.scenario !== scenario) return void onAnalyze(guestReq.current, scenario); // a pasted repo is built per incident
     void runAt();
@@ -396,6 +438,8 @@ export function App() {
 
   const showFlagged = () => {
     showPane('feed');
+    // on a laptop-height window the claim map is folded into the narrative's "Show ..." disclosure: open that first
+    if (!document.getElementById('flagged-claims')) flushSync(() => document.querySelector<HTMLButtonElement>('section[aria-label="Narrative"] [data-narrative-more][aria-expanded="false"]')?.click());
     requestAnimationFrame(() => {
       const el = document.getElementById('flagged-claims');
       if (el instanceof HTMLDetailsElement) {
@@ -446,7 +490,7 @@ export function App() {
   const showHint = report !== null && !hintDismissed;
   const reveal = !stale && incident !== null && at !== null && at >= incident.advisoryAt; // the figure waits for the playhead to pass the OSV record
   const alertNote =
-    alertText !== null && !hasClock(alertText) && triage.at !== null
+    alertText !== null && triage.at !== null && !hasClock(alertText, DEFAULT_AT[triage.incident?.id ?? scenario])
       ? `No time in the alert: using ${utcLabel(triage.at)}, the scenario default. Add one, like 13:16 UTC.`
       : null;
 
@@ -461,7 +505,7 @@ export function App() {
     return isGuest && !new URL(url).searchParams.has('guest') ? null : url;
   };
   const share = () => {
-    const url = link();
+    const url = link(selected, !isGuest && selected ? 'fix' : null); // an org repo's link opens its Fix tab: the link is about that repo
     if (url) void copyText(url, 'Link');
     else toast({ message: NO_SHARE_LOCKFILE });
   };
@@ -470,7 +514,8 @@ export function App() {
 
   const actions = (
     <div className="flex min-h-(--control-h) flex-wrap items-center gap-2">
-      <Button variant={shared ? 'secondary' : 'primary'} loading={running} onClick={run}>
+      {/* one primary on screen: the alert box's own Run while it is open, the share strip's Re-check when there is one */}
+      <Button variant={shared || panel === 'alert' ? 'secondary' : 'primary'} loading={running} onClick={run}>
         {runLabel}
       </Button>
       <Button onClick={() => switchTo(scenario === QIX ? AXIOS : QIX, true)}>{scenario === QIX ? 'Try axios 2026' : 'Try qix 2025'}</Button>
@@ -490,16 +535,19 @@ export function App() {
   // `cypherHints`: what a tool derived inside its run (incident_exposure looks up the maintainer), for the runnable Cypher.
   const maintainer = (report?.incident ?? triage.incident)?.maintainer;
   const feedExtra = { clockAt: settledAt ?? undefined, onRerun: run, onShowFlagged: showFlagged, guest: isGuest, cypherHints: maintainer ? { maintainer } : undefined };
-  const verdictLine =
+  // What the mode badge means for this run: the badge's title and screen-reader text, not a line above the verdict.
+  const modeNote =
     triage.narration === null
-      ? ''
-      : triage.mode === 'live'
-        ? 'Verdict from the graph · analyst pick by the LLM'
-        : triage.mode === 'replay'
-          ? 'Verdict from the graph · analyst pick replayed'
-          : triage.mode === 'template'
-            ? 'Verdict from the graph · no analyst pick'
-            : 'Verdict from the graph · analyst pick pending';
+      ? undefined
+      : `${
+          triage.mode === 'live'
+            ? 'Verdict from the graph · analyst pick by the LLM'
+            : triage.mode === 'replay'
+              ? 'Verdict from the graph · analyst pick replayed'
+              : triage.mode === 'template'
+                ? 'Verdict from the graph · no analyst pick'
+                : 'Verdict from the graph · analyst pick pending'
+        }${results.some((r) => r.cached) ? '. “cached” on a call: it reused an earlier read-only query' : ''}`;
 
   return (
     <div className="relative flex min-h-dvh flex-col pb-(--tabbar-h) lg:pb-0 xl:h-dvh xl:overflow-clip">
@@ -521,6 +569,7 @@ export function App() {
         clockAt={failed ? null : view ? view.at : at}
         queryTotal={queryTotal}
         mode={triage.mode}
+        modeNote={modeNote}
         guard={triage.guard}
         onShowFlagged={showFlagged}
         onOpenStats={openStats}
@@ -532,9 +581,18 @@ export function App() {
         Skip to exposure table
       </a>
       {shared && <SharedPrompt repo={shared} scenario={scenario} analyze={analyze} onRecheck={recheck} onDismiss={() => setShared(null)} />}
+      {linked && (
+        <SharedRepoNote
+          repo={linked.repo}
+          found={linked.found}
+          total={report?.scope?.repos ?? null}
+          onShow={linked.found ? () => (pick(selected ?? linked.repo), showPane('graph', true)) : null}
+          onDismiss={() => setLinked(null)}
+        />
+      )}
       {panel === 'alert' && (
         <section aria-label="Describe an alert" className="border-b border-line-1 bg-bg-1 px-(--gutter) py-4">
-          <AlertField onRun={runAlert} disabled={running} />
+          <AlertField onRun={runAlert} onDraft={setDraft} disabled={running} />
         </section>
       )}
       {alertText && <AlertBanner text={alertText} pulseKey={turnKey} note={alertNote} />}
@@ -544,7 +602,7 @@ export function App() {
 
       <main id="results" tabIndex={-1} className="flex min-h-0 flex-1 flex-col">
         <div className="shrink-0 border-b border-line-1">
-          {!compact && <p className="px-(--gutter) pt-3 text-base text-fg-1 short:hidden">{PURPOSE}</p>}
+          {!compact && <p className="px-(--gutter) pt-3 text-base text-fg-1 max-sm:text-sm short:hidden">{PURPOSE}</p>}
           <div className={compact ? '' : 'grid short:grid-cols-2 xl:grid-cols-[4fr_6fr] min-[1440px]:grid-cols-[5fr_6fr]'}>
             <div className={compact ? '' : 'border-b border-line-1 short:border-r short:border-b-0 xl:border-r xl:border-b-0'}>
               {timeline.status === 'error' && timeline.error ? (
@@ -575,11 +633,19 @@ export function App() {
                   failed={failed}
                   remediated={marked}
                   stale={stale}
+                  fixedCount={isGuest && report ? { exposed: report.counts.LOCKED + report.counts.WOULD_PULL, total: report.scope?.repos ?? 1, at: report.at } : null}
                   trailing={
-                    // the empty icon slot is where the radar goes while it runs: the button keeps its width
-                    <Button loading={running} icon={<span className="size-3.5" />} onClick={run} className="shrink-0 pl-2">
-                      Run again
-                    </Button>
+                    // While a run streams the band's action stops it; after one, it runs again. A run that failed has its one
+                    // action in the feed ("Run triage"), so the band offers none. Same width either way: nothing beside it moves.
+                    failed ? null : running ? (
+                      <Button variant="ghost" icon={<RadarIcon size={14} />} onClick={cancelRun} className="min-w-28 shrink-0 pl-2">
+                        Cancel run
+                      </Button>
+                    ) : (
+                      <Button icon={<span className="size-3.5" />} onClick={run} className="min-w-28 shrink-0 pl-2">
+                        Run again
+                      </Button>
+                    )
                   }
                 />
               )}
@@ -611,17 +677,10 @@ export function App() {
               // Opening a tool call (or its Cypher) is "first use" too: retire the hint.
               if ((e.target as HTMLElement).closest('button[aria-expanded]')) dismissHint();
             }}
-            // Below 1024px the Ask box is fixed above the tab bar: keep the last cards clear of it.
-            className={`scroll-pane border-line-1 bg-bg-1 p-3 lg:row-span-2 lg:h-0 lg:min-h-full lg:border-r xl:row-span-1 xl:h-auto xl:min-h-0 ${report ? 'max-lg:pb-36' : ''} ${paneClass('feed')}`}
+            // Below 1024px the Ask box is fixed above the tab bar: keep the last cards clear of it. From the click that starts a run
+            // the feed holds at least one screen, so the page never collapses (and jumps back) while the run streams in.
+            className={`scroll-pane border-line-1 bg-bg-1 p-3 fold:pt-2 lg:row-span-2 lg:h-0 lg:min-h-full lg:border-r xl:row-span-1 xl:h-auto xl:min-h-0 ${report ? 'max-lg:pb-36' : ''} ${compact ? 'max-lg:min-h-dvh' : ''} ${paneClass('feed')}`}
           >
-            {/* Two lines reserved from the click on Run triage (the verdict line, and the cached note on a narrow pane), so what arrives
-                later never pushes the cards down. */}
-            {compact && (
-              <aside aria-label="Narration mode" className="mb-2 min-h-9 text-xs text-fg-1">
-                {verdictLine}
-                {results.some((r) => r.cached) && <> <span className="block text-fg-2">“cached” on a call: reused an earlier read-only query</span></>}
-              </aside>
-            )}
             <ToolFeed
               {...feedExtra}
               cards={triage.toolCards}

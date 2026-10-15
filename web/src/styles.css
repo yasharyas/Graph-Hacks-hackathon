@@ -2,8 +2,13 @@
 @import './design/tokens.css';
 
 /* A phone held sideways (or any window under 500px tall below the war-room layout): `short:` packs the landing so the
-   Run triage action is in the first view: one-row header, no purpose line, scrubber and contrast card side by side. */
-@custom-variant short (@media (max-height: 500px) and (max-width: 1023px));
+   Run triage action is in the first view: one-row header, no purpose line, scrubber and contrast card side by side.
+   Not under 480px wide: a 320x256 window (a 1280x1024 screen at 400% zoom) is a narrow phone, and two 160px columns would
+   push the actions off the side of the screen (WCAG 1.4.10); it gets the one-column phone layout and scrolls down. */
+@custom-variant short (@media (max-height: 500px) and (min-width: 480px) and (max-width: 1023px));
+/* The war room on a laptop-height window (1024px wide or more, 900px tall or less): the triage narrative is set a step
+   tighter so the first tool call stays on screen with the whole verdict above it. */
+@custom-variant fold (@media (min-width: 1024px) and (max-height: 900px));
 
 /* Hover only where hovering exists (docs/design.md section 4): use `hov:bg-bg-3`, never plain `hover:`. */
 @custom-variant hov {
@@ -116,13 +121,13 @@
     color: var(--fg-1);
   }
   @media (hover: hover) and (pointer: fine) {
-    .btn-primary:hover:not(:disabled) {
+    .btn-primary:hover:not(:disabled):not([aria-disabled='true']) {
       background: var(--btn-primary-hover);
     }
-    .btn-secondary:hover:not(:disabled) {
+    .btn-secondary:hover:not(:disabled):not([aria-disabled='true']) {
       background: var(--bg-3);
     }
-    .btn-ghost:hover:not(:disabled) {
+    .btn-ghost:hover:not(:disabled):not([aria-disabled='true']) {
       background: var(--bg-3);
       color: var(--fg-0);
     }
@@ -266,6 +271,20 @@
     border: 2px solid var(--bg-0);
     border-radius: 9999px;
     background: var(--fg-0);
+  }
+  /* The compact band's slider: 16px, the thumb's own height (the band is what a laptop pays before the feed). */
+  .scrub-compact {
+    height: 16px;
+  }
+  /* separate rules: one browser's unknown pseudo-element would drop a whole selector list */
+  .scrub-compact::-webkit-slider-runnable-track {
+    height: 16px;
+  }
+  .scrub-compact::-moz-range-track {
+    height: 16px;
+  }
+  .scrub-compact::-webkit-slider-thumb {
+    margin-top: 0;
   }
   .scrub:focus-visible::-webkit-slider-thumb {
     outline: var(--focus-ring-width) solid var(--focus-ring-color);

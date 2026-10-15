@@ -58,9 +58,11 @@ export function segments(text: string, guard: GuardClaims | null, seen: Set<stri
   });
 }
 
-const LABEL = /^[*_#\s]*(Verdict|Why|Notify|Do)\s*[*_]*\s*:\s*[*_]*\s*/; // tolerates "**Verdict:**" and "## Do:"
+// Tolerates "**Verdict:**", "## Do:" and a pasted repo's "Verdict (its package-lock.json at commit 5f8e8a8 ...):", whose
+// parenthetical is where the verdict came from: it is kept apart (`source`) so the label is still "Verdict".
+const LABEL = /^[*_#\s]*(Verdict|Why|Notify|Do)\s*(?:\(([^()]*)\))?\s*[*_]*\s*:\s*[*_]*\s*/;
 /** One narration as lines: "Verdict: ..." / "Why: ..." / "Notify: ..." / "Do: ..." split into label and body, anything else is a plain line. */
-export function lines(text: string, guard: GuardClaims | null): { label: string | null; segs: Segment[] }[] {
+export function lines(text: string, guard: GuardClaims | null): { label: string | null; source: string | null; segs: Segment[] }[] {
   const seen = new Set<string>(); // chips are first mentions across the whole narration, not per line
   return text
     .split('\n')
@@ -68,9 +70,31 @@ export function lines(text: string, guard: GuardClaims | null): { label: string 
     .filter(Boolean)
     .map((l) => {
       const m = LABEL.exec(l);
-      return { label: m ? m[1]! : null, segs: segments(m ? l.slice(m[0].length) : l, guard, seen) };
+      return { label: m ? m[1]! : null, source: m?.[2]?.trim() || null, segs: segments(m ? l.slice(m[0].length) : l, guard, seen) };
     });
 }
+
+/**
+ * The Why line as whole path sentences: "`a/b` locks `debug@4.4.2` through `express@5.1.0` [E1]; `c/d` declares ..." breaks
+ * after each "; " that is followed by a name (the next path), never inside a parenthetical like "(paths for 3 of 21; +18 more
+ * in the table)". Presentation only: the pieces join back to the identical segments, so chips and claim checks are unchanged.
+ */
+export function whyParts(segs: Segment[]): Segment[][] {
+  const out: Segment[][] = [[]];
+  segs.forEach((s, i) => {
+    const next = segs[i + 1];
+    if (s.kind === 'text' && next?.kind === 'entity' && /; $/.test(s.text)) {
+      out.at(-1)!.push({ kind: 'text', text: s.text.slice(0, -1) }); // the ";" ends this sentence, the space goes with the break
+      out.push([]);
+      return;
+    }
+    out.at(-1)!.push(s);
+  });
+  return out.filter((p) => p.length > 0);
+}
+
+/** How many evidence ids ([E2]) a set of segments carries: what a folded Why hides, so the disclosure can say it. */
+export const citeCount = (parts: Segment[][]): number => parts.flat().filter((s) => s.kind === 'cite').length;
 
 /** More verified names than this in one line is a list, not a sentence: the chips would be a wall, so the line uses the light treatment. */
 export const LIST_MAX = 4;

@@ -22,7 +22,9 @@
  * (A phone held sideways has no height to spare: below 560px tall the Ask box scrolls with the feed instead.)
  * Keyboard: three skip links open the feed ("Skip to tool calls", "Skip to Ask", "Skip to exposure table").
  * ONE live region (role=status) serves the whole feed: a summary ("2 of 5 tools done"), or the last thing a card or a
- * claim asked it to say (what opened, a plan loaded). No card has a live region of its own. An Ask answer is read out
+ * claim asked it to say (what opened, a plan loaded). No card has a live region of its own. While a run streams, the count
+ * changes at most once every 2 s (useCalm): a fast stream says "Starting the triage" and then "Triage complete", not a burst
+ * of "3 of 4 tools done". An Ask answer is read out
  * once, as words (data/narration.ts spokenAnswer), when it is complete; when it lands the feed scrolls so the question and
  * the answer's first lines sit above the pinned Ask bar (reveal, components/scrollPane.ts).
  * Each Ask answer is labelled with how it was made (the graph alone, or a model whose names and numbers were checked).
@@ -71,6 +73,25 @@ const skip =
   'sr-only focus:not-sr-only focus:rounded-sm focus:bg-bg-3 focus:px-3 focus:py-2 focus:text-sm focus:text-fg-0';
 const wide = () => matchMedia('(min-width: 1024px)').matches;
 const RUN = 3; // cards of one tool shown before "Show N more"
+const CALM_MS = 2000;
+
+/** `text`, but while `calm` it changes at most once per `ms` (the first value of a calm stretch at once, the latest value wins); when `calm` ends it follows at once. */
+function useCalm(text: string, calm: boolean, ms: number): string {
+  const [out, setOut] = useState(text);
+  const last = useRef(-Infinity);
+  useEffect(() => {
+    if (!calm) {
+      last.current = -Infinity;
+      return setOut(text);
+    }
+    const now = () => ((last.current = Date.now()), setOut(text));
+    const wait = last.current + ms - Date.now();
+    if (wait <= 0) return now();
+    const t = setTimeout(now, wait);
+    return () => clearTimeout(t);
+  }, [text, calm, ms]);
+  return out;
+}
 
 export function ToolFeed({ cards, followUps, narration, guard, status, error, scenario, onRun, onSelectEntity, clockAt, guest = false, cypherHints, footer }: ToolFeedProps) {
   const lastRef = useRef<HTMLElement>(null);
@@ -131,6 +152,7 @@ export function ToolFeed({ cards, followUps, narration, guard, status, error, sc
                   : '';
   // A new summary replaces what a card or claim said, so progress still announces; until then the last message stands.
   useEffect(() => setSaid(''), [summary]);
+  const spoken = useCalm(summary, status === 'running', CALM_MS);
   const drafting = (narration as { draft?: boolean } | null)?.draft ?? (status === 'running' && guard === null);
 
   /** A claim was clicked: open the tool call that returned it, and (desktop) highlight its path in the graph. */
@@ -168,9 +190,10 @@ export function ToolFeed({ cards, followUps, narration, guard, status, error, sc
     const cs = round(n);
     if (!cs.length) return null;
     const every = cs.every((c) => c.status !== 'done' || open.has(c.id));
+    const cached = cs.find((c) => c.result?.cached)?.id; // what "cached" means is said once, under the first such call
     return (
       <div id={n === 0 ? 'tool-calls-list' : undefined} className="flex flex-col gap-3">
-        <div className="flex items-baseline justify-between gap-2">
+        <div className="-mb-1 flex items-baseline justify-between gap-2">
           <h3 id={n === 0 ? 'tool-calls' : undefined} tabIndex={n === 0 ? -1 : undefined} className="label-caps text-xs">
             {calls(cs)}
           </h3>
@@ -190,18 +213,20 @@ export function ToolFeed({ cards, followUps, narration, guard, status, error, sc
           return (
             <Fragment key={run[0].id}>
               {run.filter((c) => !hidden.includes(c)).map((c) => (
-                <ToolCard
-                  key={c.id}
-                  card={c}
-                  scenario={scenario}
-                  index={cs.indexOf(c)}
-                  open={open.has(c.id)}
-                  onOpenChange={(o) => setOpen((s) => new Set(o ? [...s, c.id] : [...s].filter((id) => id !== c.id)))}
-                  trace={target?.id === c.id ? target : null}
-                  onSay={setSaid}
-                  guest={guest}
-                  cypherHints={cypherHints}
-                />
+                <Fragment key={c.id}>
+                  <ToolCard
+                    card={c}
+                    scenario={scenario}
+                    index={cs.indexOf(c)}
+                    open={open.has(c.id)}
+                    onOpenChange={(o) => setOpen((s) => new Set(o ? [...s, c.id] : [...s].filter((id) => id !== c.id)))}
+                    trace={target?.id === c.id ? target : null}
+                    onSay={setSaid}
+                    guest={guest}
+                    cypherHints={cypherHints}
+                  />
+                  {c.id === cached && <p className="-mt-1.5 px-1 text-xs text-fg-2">“cached”: the same read-only query ran earlier on this server; its result was reused.</p>}
+                </Fragment>
               ))}
               {(full || hidden.length > 0) && (
                 <button
@@ -226,114 +251,131 @@ export function ToolFeed({ cards, followUps, narration, guard, status, error, sc
     );
   };
 
+  // ONE status region for both states (empty and running): the element stays mounted, so the first thing it says
+  // ("Starting the triage") is a change a screen reader speaks, not a region inserted already holding its text.
+  const region = (
+    <p role="status" className="sr-only">
+      {said || spoken}
+    </p>
+  );
   if (cards.length === 0 && status !== 'running') {
     return (
-      <div className="flex h-full flex-col">
-        <h2 className="sr-only">Tool feed</h2>
-        <p role="status" className="sr-only">
-          {summary}
-        </p>
-        {status === 'error' && error ? (
-          <EmptyState
-            kind="error"
-            title={failTitle(error)}
-            cause={error.message}
-            fix={nextStep(error, 'triage')}
-            requestId={requestIdFor(error)}
-            action={{ label: 'Run triage', onClick: onRun }}
-          />
-        ) : (
-          <EmptyState
-            title="No triage yet"
-            cause="Every tool call, its Cypher and its FalkorDB time will appear here as the triage runs."
-            fix="Pick a scenario or describe an alert, then run it."
-          />
-        )}
-      </div>
+      <>
+        {region}
+        <div className="flex h-full flex-col">
+          <h2 className="sr-only">Tool feed</h2>
+          {status === 'error' && error ? (
+            <EmptyState
+              kind="error"
+              title={failTitle(error)}
+              cause={error.message}
+              fix={nextStep(error, 'triage')}
+              requestId={requestIdFor(error)}
+              action={{ label: 'Run triage', onClick: onRun }}
+            />
+          ) : (
+            <EmptyState
+              title="No triage yet"
+              cause="Every tool call, its Cypher and its FalkorDB time will appear here as the triage runs."
+              fix="Pick a scenario or describe an alert, then run it."
+            />
+          )}
+        </div>
+      </>
     );
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      <h2 className="sr-only">Tool feed</h2>
-      <p role="status" className="sr-only">
-        {said || summary}
-      </p>
-      <nav aria-label="Skip links" className="flex flex-wrap gap-2">
-        {cards.length > 0 && (
-          <a href="#tool-calls" onClick={toCalls} className={skip}>
-            Skip to tool calls
-          </a>
-        )}
-        {footer && (
-          <a href="#ask-question" onClick={toAsk} className={skip}>
-            Skip to Ask
-          </a>
-        )}
-        <a href="#exposures" onClick={toTable} className={skip}>
-          Skip to exposure table
-        </a>
-      </nav>
-      {cards.length === 0 && <p className="p-1 text-sm text-fg-1">Connecting to the graph&hellip;</p>}
-      <NarrativePanel
-        narration={narration}
-        guard={guard}
-        onTrace={(e) => trace(e, 0)}
-        cards={pool(0)}
-        clockAt={clockAt}
-        onRerun={onRun}
-        drafting={drafting}
-        awaitingGuard={status === 'running' && guard === null}
-        guest={guest}
-      />
-      {list(0)}
-      {status === 'error' && error && cards.length > 0 && (
-        <div role="alert" className="flex flex-col items-start gap-1.5 rounded-sm border border-line-3 p-3 text-sm">
-          <p className="flex items-start gap-2 text-fg-0">
-            <CircleAlert size={16} className="mt-0.5 shrink-0 text-fg-1" />
-            {plainError(error)}
-          </p>
-          {nextStep(error, 'triage') && <p className="text-fg-1">{nextStep(error, 'triage')}</p>}
-          {requestIdFor(error) && (
-            <p className="font-mono text-xs text-fg-2">
-              request <span className="select-all text-fg-1">{requestIdFor(error)}</span>
-            </p>
+    <>
+      {region}
+      <div className="flex flex-col gap-3">
+        <h2 className="sr-only">Tool feed</h2>
+        {/* the skip links take no room until one has focus (the feed's gap would cost the fold 12px) */}
+        <nav aria-label="Skip links" className="flex flex-wrap gap-2 [&:not(:focus-within)]:-mb-3">
+          {cards.length > 0 && (
+            <a href="#tool-calls" onClick={toCalls} className={skip}>
+              Skip to tool calls
+            </a>
           )}
-          <Button onClick={onRun}>Run triage again</Button>
-        </div>
-      )}
-      {followUps.map((f, i) => (
-        <section
-          key={i}
-          ref={i === followUps.length - 1 ? lastRef : undefined}
-          aria-label={`Follow-up ${i + 1}`}
-          className="flex scroll-mt-3 flex-col gap-3 border-t border-line-1 pt-3"
-        >
-          <p className="text-sm text-fg-1">
-            <span className="label-caps text-xs mr-2">You asked</span>
-            {f.question}
-          </p>
-          {f.narration && (
-            <>
-              <p className="text-xs text-fg-1">{answerLabel(f.narration)}</p>
-              <NarrationBlock narration={f.narration} guard={f.guard} onTrace={(e) => trace(e, i + 1)} cards={pool(i + 1)} idSuffix={`-${i}`} modelWords={f.narration.mode !== 'template'} />
-            </>
+          {footer && (
+            <a href="#ask-question" onClick={toAsk} className={skip}>
+              Skip to Ask
+            </a>
           )}
-          {list(i + 1)}
-          {f.status === 'error' && !f.narration && <p className="text-sm text-fg-2">This follow-up got no answer. It does not count toward the limit.</p>}
-        </section>
-      ))}
-      {footer && (
-        <>
-          <div aria-hidden className="h-20 lg:hidden [@media(max-height:559px)]:hidden" />
-          <div
-            id="ask"
-            className="z-(--z-sticky) -mx-3 -mb-3 border-t border-line-1 bg-bg-1 px-3 pt-2 pb-3 max-lg:mx-0 max-lg:mb-0 max-lg:[@media(min-height:560px)]:fixed max-lg:[@media(min-height:560px)]:inset-x-0 max-lg:[@media(min-height:560px)]:bottom-(--tabbar-h) lg:sticky lg:-bottom-3"
-          >
-            {footer}
+          <a href="#exposures" onClick={toTable} className={skip}>
+            Skip to exposure table
+          </a>
+        </nav>
+        {/* The verdict streams in after the tool calls: its place is held from the start of the run (about its usual height),
+            so the cards below do not jump down when it lands. */}
+        {status === 'running' && !narration && (
+          <div aria-hidden className="flex min-h-[26rem] flex-col gap-2 lg:min-h-96">
+            <p className="label-caps text-xs">Verdict</p>
+            <p className="text-sm text-fg-1">{cards.length === 0 ? 'Connecting to the graph…' : 'Writing the verdict from the graph…'}</p>
+            {['w-11/12', 'w-4/5', 'w-5/6', 'w-2/3'].map((w) => (
+              <div key={w} className={`skeleton h-4 ${w}`} />
+            ))}
           </div>
-        </>
-      )}
-    </div>
+        )}
+        <NarrativePanel
+          narration={narration}
+          guard={guard}
+          onTrace={(e) => trace(e, 0)}
+          cards={pool(0)}
+          clockAt={clockAt}
+          onRerun={onRun}
+          drafting={drafting}
+          awaitingGuard={status === 'running' && guard === null}
+          guest={guest}
+        />
+        {list(0)}
+        {status === 'error' && error && cards.length > 0 && (
+          <div role="alert" className="flex flex-col items-start gap-1.5 rounded-sm border border-line-3 p-3 text-sm">
+            <p className="flex items-start gap-2 text-fg-0">
+              <CircleAlert size={16} className="mt-0.5 shrink-0 text-fg-1" />
+              {plainError(error)}
+            </p>
+            {nextStep(error, 'triage') && <p className="text-fg-1">{nextStep(error, 'triage')}</p>}
+            {requestIdFor(error) && (
+              <p className="font-mono text-xs text-fg-2">
+                request <span className="select-all text-fg-1">{requestIdFor(error)}</span>
+              </p>
+            )}
+            <Button onClick={onRun}>Run triage again</Button>
+          </div>
+        )}
+        {followUps.map((f, i) => (
+          <section
+            key={i}
+            ref={i === followUps.length - 1 ? lastRef : undefined}
+            aria-label={`Follow-up ${i + 1}`}
+            className="flex scroll-mt-3 flex-col gap-3 border-t border-line-1 pt-3"
+          >
+            <p className="text-sm text-fg-1">
+              <span className="label-caps text-xs mr-1">You asked</span> {f.question}
+            </p>
+            {f.narration && (
+              <>
+                <p className="text-xs text-fg-1">{answerLabel(f.narration)}</p>
+                <NarrationBlock narration={f.narration} guard={f.guard} onTrace={(e) => trace(e, i + 1)} cards={pool(i + 1)} idSuffix={`-${i}`} modelWords={f.narration.mode !== 'template'} />
+              </>
+            )}
+            {list(i + 1)}
+            {f.status === 'error' && !f.narration && <p className="text-sm text-fg-2">This follow-up got no answer. It does not count toward the limit.</p>}
+          </section>
+        ))}
+        {footer && (
+          <>
+            <div aria-hidden className="h-20 lg:hidden [@media(max-height:559px)]:hidden" />
+            <div
+              id="ask"
+              className="z-(--z-sticky) -mx-3 -mb-3 border-t border-line-1 bg-bg-1 px-3 pt-2 pb-3 max-lg:mx-0 max-lg:mb-0 max-lg:[@media(min-height:560px)]:fixed max-lg:[@media(min-height:560px)]:inset-x-0 max-lg:[@media(min-height:560px)]:bottom-(--tabbar-h) lg:sticky lg:-bottom-3"
+            >
+              {footer}
+            </div>
+          </>
+        )}
+      </div>
+    </>
   );
 }

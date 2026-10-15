@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { clampCentre, markersOf, placeLabels } from './markers.ts';
+import { autoplayCaption, clampCentre, markersOf, placeLabels } from './markers.ts';
 import { utc } from './format.ts';
 import type { IncidentMeta } from './types.ts';
 
@@ -66,6 +66,18 @@ test('placement holds for arbitrary ticks', () => {
     );
     put.forEach((p, a) => assert.ok(p.left >= 0 && p.left + marks[a]!.w <= trackW + 1e-9));
   }
+});
+
+test('the autoplay caption has three states, keyed to the first exposure and the OSV record, and fits a phone line', () => {
+  const q = inc(QIX);
+  const at = (s: string) => D(`2025-09-08T${s}:00Z`);
+  assert.equal(autoplayCaption(q, at('13:05')), 'Before 13:12 UTC: no malicious version published yet');
+  assert.equal(autoplayCaption(q, at('13:12')), 'Before 13:12 UTC: no malicious version published yet'); // 13:12:00 is before 13:12:10
+  assert.equal(autoplayCaption(q, at('13:13')), '13:12 malicious versions out · exposed repos climb · no advisory until 14:26');
+  assert.equal(autoplayCaption(q, at('14:26')), autoplayCaption(q, at('13:40'))); // 14:26:00 is before 14:26:51: one caption all the way
+  assert.equal(autoplayCaption(q, at('14:30')), '14:26 first OSV record: scanners can flag it only now, 74 min late');
+  assert.equal(autoplayCaption(inc(AXIOS), D('2026-03-31T02:10:00Z'), true), '02:07 first OSV record · 105 min late'); // the figure's 105, not 02:07 − 00:21
+  for (const t of ['13:05', '13:40', '14:30']) assert.ok(autoplayCaption(q, at(t), true).length <= 44, autoplayCaption(q, at(t), true));
 });
 
 test('the scrub bubble stays inside the track at both ends', () => {

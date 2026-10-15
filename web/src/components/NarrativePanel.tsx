@@ -1,19 +1,22 @@
 /* NarrativePanel: the narration as text + claim chips (docs/design.md section 5). Never innerHTML (S5).
  * The text is the deterministic Verdict / Why / Notify / Do the server builds from the report (always complete). An optional
- * `note` is the analyst pick: one observation the LLM chose; the server wrote its words from the report. Own block,
- * labelled "Analyst pick (LLM)" with a visible line saying what the model did, never mixed into the facts. While the verdict
- * is a draft (the model is still picking) the block's place is reserved ("Picking the analyst observation...") so nothing
- * moves when the pick lands; a final narration with no pick removes it.
+ * `note` is the analyst pick: one observation the LLM chose; the server wrote its words from the report. Its own short
+ * paragraph run in after the label "Analyst pick (LLM)" (what the model did is the label's title and screen-reader text),
+ * never mixed into the facts; no pick, no block.
  * The narration is untrusted, so a claim is "verified" ONLY if the server's guard listed that exact text with ok=true
  * (data/narration.ts decides; this file renders). No raw markdown ever reaches the screen (stripped there).
  *
- * The Verdict is never clamped. It reads as a headline plus one line per tier: the SAME text, broken before " LOCKED, ",
- * " WOULD_PULL, " and " Marked remediated:" (data/narration.ts verdictLines; presentation only, so chips, claim checks and
- * copy see the identical text). The triage narrative folds Notify and Do behind one disclosure so the tool calls (the
- * FalkorDB proof) stay near the top of the feed; on a short window Why and the pick are clamped too, and the disclosure
- * says what it reveals ("Show 2 more evidence paths, who to notify and the steps"). An Ask answer shows every line it has
- * (`fold` is off). A pasted repo has no team to notify (its Notify line, if any, is not shown); the demo org's Notify says
- * its teams are demo teams.
+ * Nothing is ever clamped mid-sentence. The Verdict reads as a headline plus one line per tier: the SAME text, broken before
+ * " LOCKED, ", " WOULD_PULL, " and " Marked remediated:" (data/narration.ts verdictLines; presentation only, so chips, claim
+ * checks and copy see the identical text). Its label row always says "Verdict" (a pasted repo's "Verdict (its lockfile at
+ * commit ...):" is parsed so; that provenance is a small line under the label). The triage narrative (`fold`) keeps the tool
+ * calls (the FalkorDB proof) near the top of the feed: Why shows whole path sentences only (data/narration.ts whyParts: one
+ * on a laptop-height window, two on a tall one, all on a phone, where the feed is the page), and Notify, Do, the rest of Why
+ * and (except on a tall desktop window) the analyst pick sit behind ONE disclosure that says what it reveals ("Show 2 more
+ * evidence paths, the analyst pick, who to notify and the steps"). An Ask answer shows every line it has (`fold` is off).
+ * A pasted repo has no team to notify (its Notify line, if any, is not shown); the demo org's Notify says its teams are demo
+ * teams. A narration for another clock is marked by a bar at its left edge and the "as of" stamp, never by dimming its text
+ * (dimmed text fell under 4.5:1).
  *
  * Every verified claim leads to proof: a chip, an [E1] tag, or an entry in the claim map calls onTrace(entity); the feed
  * scrolls to the tool call that returned it, opens its Cypher and flashes the row (ToolFeed + ToolCard).
@@ -26,15 +29,16 @@
  * did: "12 of 12 names and numbers found in the graph results; the wording is the model's", not "verified".
  *
  * NarrativePanel props:  narration, guard, onTrace(entity), cards (ToolCardState[] this narration may cite, preferred
- *                        first), clockAt (the scrubber's resting clock: when the narration's `at` differs, it is dimmed,
+ *                        first), clockAt (the scrubber's resting clock: when the narration's `at` differs, it is marked,
  *                        stamped "as of HH:MM UTC" and offers a re-run), onRerun, drafting (the pick is still coming),
  *                        awaitingGuard (the run has not checked its claims yet: their line keeps its place), guest
  * NarrationBlock props:  the same body without the heading, reused by Ask follow-ups; idSuffix keeps ids unique.
  * A trailing "6 of 14 ..." line (the server's coverage of an enumerating answer) is set apart, not buried in the text.
+ * A run-in label is followed by a real space, so a screen reader says "Why acme/web", not "Whyacme/web".
  */
-import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode } from 'react';
+import { Fragment, useEffect, useId, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { plural, utcLabel } from '../data/format.ts';
-import { claimMap, crowded, guardLine, lines, splitCoverage, teamStarts, verdictLines, type ProofCard, type Segment } from '../data/narration.ts';
+import { citeCount, claimMap, crowded, guardLine, lines, splitCoverage, teamStarts, verdictLines, whyParts, type ProofCard, type Segment } from '../data/narration.ts';
 import type { Guard, Narration } from '../data/useTriage.ts';
 import { Button } from './Button.tsx';
 import { CheckDrawIcon } from './icons/CheckDrawIcon.tsx';
@@ -68,8 +72,10 @@ interface BlockProps {
 
 const NOT_RETURNED = 'not returned by any graph query';
 const chip = 'rounded-xs border px-1.5 py-0.5 font-mono text-xs';
+// A 44px hit area on touch (a pseudo-element reaching into the line gaps), with no change to the chip's size or the text's density.
+const HIT = 'relative pointer-coarse:after:absolute pointer-coarse:after:-inset-x-0.5 pointer-coarse:after:-inset-y-[7px]';
 const LABEL = 'label-caps text-xs';
-const PICK_EXPLAINED = 'The model chose this; the words come from the graph.'; // one line at the feed's narrowest
+const PICK_EXPLAINED = 'The model chose this observation; the words come from the graph.';
 const TRACE_TITLE = 'Verified against a graph query. Click to open the tool call that returned it.';
 const summary = 'inline-flex min-h-6 items-center gap-1.5 rounded-xs text-xs pointer-coarse:min-h-11 marker:hidden [&::-webkit-details-marker]:hidden hov:text-fg-0';
 const chevron = 'transition-transform duration-(--dur-base) ease-out [details[open]_&]:rotate-180';
@@ -107,7 +113,7 @@ function Spans({ segs, onTrace, hint, checking = false }: { segs: Segment[]; onT
         if (s.kind === 'cite') {
           if (s.verdict === 'verified') {
             return (
-              <button key={i} type="button" data-cite="" aria-describedby={hint} onClick={() => onTrace(s.id)} className="-my-1.5 rounded-xs px-1 py-1.5 font-mono text-xs text-fg-1 underline underline-offset-2 hov:text-fg-0">
+              <button key={i} type="button" data-cite="" aria-describedby={hint} onClick={() => onTrace(s.id)} className="-my-1.5 rounded-xs px-1 py-1.5 font-mono text-xs text-fg-1 underline underline-offset-2 hov:text-fg-0 relative pointer-coarse:after:absolute pointer-coarse:after:-inset-x-0.5 pointer-coarse:after:-inset-y-[7px]">
                 [{s.id}]
               </button>
             );
@@ -163,8 +169,8 @@ function Spans({ segs, onTrace, hint, checking = false }: { segs: Segment[]; onT
                 title={TRACE_TITLE}
                 className={
                   team
-                    ? 'rounded-xs text-sm font-medium text-fg-1 transition-colors duration-(--dur-fast) ease-out hov:text-fg-0'
-                    : '-my-1.5 rounded-xs px-0.5 py-1.5 font-mono text-xs text-fg-0 underline decoration-dotted decoration-fg-1 decoration-1 underline-offset-4 transition-colors duration-(--dur-fast) ease-out hov:decoration-fg-0'
+                    ? 'relative rounded-xs text-sm font-medium text-fg-1 transition-colors duration-(--dur-fast) ease-out hov:text-fg-0 pointer-coarse:after:absolute pointer-coarse:after:inset-x-0 pointer-coarse:after:-inset-y-3'
+                    : '-my-1.5 rounded-xs px-0.5 py-1.5 font-mono text-xs text-fg-0 underline decoration-dotted decoration-fg-1 decoration-1 underline-offset-4 transition-colors duration-(--dur-fast) ease-out hov:decoration-fg-0 relative pointer-coarse:after:absolute pointer-coarse:after:-inset-x-0.5 pointer-coarse:after:-inset-y-[7px]'
                 }
               >
                 {s.text}
@@ -179,7 +185,7 @@ function Spans({ segs, onTrace, hint, checking = false }: { segs: Segment[]; onT
             aria-describedby={hint}
             onClick={() => onTrace(s.text)}
             title={TRACE_TITLE}
-            className={`${chip} -my-0.5 inline-flex items-center pointer-coarse:min-h-6 border-line-2 bg-bg-2 text-fg-0 transition-transform duration-(--dur-press) ease-out active:scale-(--press-scale) hov:border-line-3 hov:bg-bg-3`}
+            className={`${chip} -my-0.5 inline-flex fold:py-0 items-center pointer-coarse:min-h-6 ${HIT} border-line-2 bg-bg-2 text-fg-0 transition-transform duration-(--dur-press) ease-out active:scale-(--press-scale) hov:border-line-3 hov:bg-bg-3`}
           >
             {s.text}
           </button>
@@ -250,20 +256,33 @@ function ClaimMap({ guard, cards, onTrace, id, modelWords }: { guard: Guard; car
 
 type Row = ReturnType<typeof lines>[number];
 
-// How much of each line the compact narrative shows in the war room's three-pane layout (from 1024px wide), where the feed
-// is a 320 to 360px column: the Verdict never; Why and the pick on a short window only, so the first tool call is not pushed
-// off a laptop screen. Below 1024px the feed is the whole page and nothing is clamped. `line-clamp` is purely visual: screen
-// readers read every word, and keyboard focus inside a clamped line lifts the clamps (it does not open Notify and Do).
-const CLAMP: Record<string, string> = {
-  Why: 'lg:[@media(max-height:999px)]:line-clamp-2 lg:[@media(min-height:1000px)]:line-clamp-3',
+// How much room the triage narrative has. From 1024px wide the feed is a 320 to 360px column beside the graph: on a window up
+// to 900px tall (a laptop) it shows the Verdict, one whole Why sentence and the disclosure, so the first tool call stays on
+// screen; on a taller one, two Why sentences and the analyst pick. Below 1024px the feed is the page: all of Why.
+type Room = 'phone' | 'short' | 'tall';
+const WIDE = '(min-width: 1024px)';
+const SHORT = '(min-width: 1024px) and (max-height: 900px)';
+const subscribe = (cb: () => void) => {
+  const qs = [matchMedia(WIDE), matchMedia(SHORT)];
+  qs.forEach((q) => q.addEventListener('change', cb));
+  return () => qs.forEach((q) => q.removeEventListener('change', cb));
 };
-const PICK_CLAMP = 'lg:[@media(max-height:899px)]:line-clamp-2';
+const room = (): Room => (!matchMedia(WIDE).matches ? 'phone' : matchMedia(SHORT).matches ? 'short' : 'tall');
+const useRoom = () => useSyncExternalStore(subscribe, room, () => 'tall' as Room);
+const WHY_SHOWN: Record<Room, number> = { phone: Infinity, short: 1, tall: 2 };
+
+/** "Show 2 more evidence paths, the analyst pick, who to notify and the steps": what the one disclosure reveals. */
+const revealLabel = (parts: (string | null | false)[]) => {
+  const xs = parts.filter((x): x is string => !!x);
+  return xs.length ? `Show ${sayList(xs)}` : 'Show the rest';
+};
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 export function NarrationBlock({ narration, guard, onTrace, cards = [], idSuffix = '', stale = false, fold = false, drafting = false, awaitingGuard = false, stamp, modelWords = false, guest = false }: BlockProps) {
   const hint = useId();
   const more = useId();
-  const [full, setFull] = useState(false); // the compact narrative opened: clamps off, Notify and Do shown
-  const [unclamped, setUnclamped] = useState(false); // keyboard focus reached a clamped line: clamps off, nothing else opens
+  const space = useRoom();
+  const [full, setFull] = useState(false); // the compact narrative opened: all of Why, the pick, Notify and Do
   const { body, coverage } = splitCoverage(narration.text);
   const rows = lines(body, guard).filter((r) => !(guest && r.label === 'Notify')); // a pasted repo has no team to route to
   const note = narration.note?.trim() ? lines(narration.note, guard) : null;
@@ -271,97 +290,105 @@ export function NarrationBlock({ narration, guard, onTrace, cards = [], idSuffix
   const shown = fold ? rows.filter((r) => !folded.includes(r)) : rows;
   const unchecked = [...rows, ...(note ?? [])].some((l) => l.segs.some((s) => s.kind === 'entity' && s.verdict === 'plain'));
   const checked = guard !== null && guard.total > 0;
-  const pending = drafting && !note; // a draft reserves the pick's place
-  // A final narration with no pick keeps the place it reserved and says so: removing ~100px under the verdict would shift
-  // every tool card below it (CLS). A narration that never had a draft (no model at all) has no block.
-  const [reserved, setReserved] = useState(false);
-  useEffect(() => {
-    if (pending) setReserved(true);
-  }, [pending]);
-  const noPick = !note && !pending && reserved;
+  const pending = drafting && !note; // the model is still picking
   const checking = (drafting || awaitingGuard) && guard === null; // the guard has not run: names are not "unchecked" yet, and its line is reserved
-  const clamp = fold && !full && !unclamped;
-  // What the clamps actually hide, so the disclosure can say it: evidence ids cut off in Why, a cut analyst pick.
-  const box = useRef<HTMLDivElement>(null);
-  const [cut, setCut] = useState({ any: false, cites: 0, pick: false });
-  useLayoutEffect(() => {
-    const el = box.current;
-    if (!el || !clamp) return setCut((c) => (c.any ? { any: false, cites: 0, pick: false } : c));
-    const measure = () => {
-      let cites = 0;
-      let pick = false;
-      let any = false;
-      for (const p of el.querySelectorAll<HTMLElement>('[data-clamp]')) {
-        if (p.scrollHeight <= p.clientHeight + 8) continue; // a clamp cuts whole lines; chips' padding overflows a few px
-        any = true;
-        if (p.dataset.clamp === 'pick') pick = true;
-        const bottom = p.getBoundingClientRect().bottom;
-        cites += [...p.querySelectorAll('[data-cite]')].filter((c) => c.getBoundingClientRect().top >= bottom - 4).length;
-      }
-      setCut((c) => (c.any === any && c.cites === cites && c.pick === pick ? c : { any, cites, pick }));
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [clamp, narration.text, narration.note]);
-  // Keyboard focus inside a clamped line (a person tabbing to a chip) lifts the clamps: focus is never clipped. A mouse click does not.
-  const open = (e: FocusEvent<HTMLElement>) => {
-    if (clamp && (e.target as HTMLElement).matches(':focus-visible')) setUnclamped(true);
-  };
-  const reveals = sayList(
-    [
-      cut.cites > 0 ? `${cut.cites} more evidence ${cut.cites === 1 ? 'path' : 'paths'}` : cut.any && !cut.pick ? 'the rest of why' : null,
-      cut.pick ? 'the full analyst pick' : null,
-      folded.some((r) => r.label === 'Notify') ? 'who to notify' : null,
-      folded.some((r) => r.label === 'Do') ? 'the steps' : null,
-    ].filter((x): x is string => x !== null),
-  );
+  const compact = fold && !full;
+  // Why, as whole path sentences: the compact narrative shows the first one or two, never a sentence cut in half.
+  const why = rows.find((r) => r.label === 'Why');
+  const whyAll = why ? whyParts(why.segs) : [];
+  const whyShown = compact ? Math.min(whyAll.length, WHY_SHOWN[space]) : whyAll.length;
+  const whyHidden = whyAll.slice(whyShown);
+  const cites = citeCount(whyHidden);
+  // The pick: in place on a tall window (and in an Ask answer); elsewhere in the triage narrative it is behind the disclosure.
+  const pickInline = !fold || space === 'tall';
+  const hasPick = note !== null || pending;
+  // The claim map ("62 of 62 claims traced", which the header badge also counts) folds with the rest, except on a tall window.
+  const claimsFolded = fold && !full && space !== 'tall' && (checking || (guard !== null && guard.total > 0));
+  const reveals = revealLabel([
+    whyHidden.length > 0 && (cites > 0 ? `${cites} more evidence ${cites === 1 ? 'path' : 'paths'}` : 'the rest of why'),
+    !pickInline && hasPick && 'the analyst pick',
+    folded.some((r) => r.label === 'Notify') && 'who to notify',
+    folded.some((r) => r.label === 'Do') && 'the steps',
+    claimsFolded && 'the claim map',
+  ]);
+  const expandable = fold && (full || folded.length > 0 || whyHidden.length > 0 || (!pickInline && hasPick) || claimsFolded);
+  const tight = fold ? 'fold:leading-[18px]' : ''; // a laptop-height window: 13px lines a step closer
 
-  // A labelled line runs the label into the text: the 320px feed has no width for a label column.
-  // The "as of" stamp shares the first label's line, above the text, so it never sits mid-sentence.
-  const row = (r: Row, i: number, first = false) => {
-    const head = first && stamp;
-    const label = r.label && (
-      <span className={`${LABEL} ${head ? '' : 'mr-2'}`}>
-        {r.label}
-        {r.label === 'Notify' && <span className="ml-1.5 font-sans tracking-normal normal-case text-fg-2">demo teams</span>}
-      </span>
+  // A labelled line runs the label into the text (the 320px feed has no width for a label column), with a real space after
+  // it. The Verdict's label has its own row, shared with the "as of" stamp, so the stamp never sits mid-sentence.
+  const label = (r: Row) =>
+    r.label && (
+      <>
+        <span className={`${LABEL} mr-1`}>
+          {r.label}
+          {r.label === 'Notify' && <span className="ml-1.5 font-sans tracking-normal normal-case text-fg-2">demo teams</span>}
+        </span>{' '}
+      </>
     );
+  const row = (r: Row, i: number) => {
+    const head = r.label === 'Verdict' || (i === 0 && stamp);
     const verdict = r.label === 'Verdict' ? verdictLines(r.segs) : null;
     return (
       <Fragment key={`${r.label}-${i}`}>
         {head && (
           <p className="flex max-w-(--measure) items-baseline justify-between gap-2">
-            {label || <span />}
-            {stamp}
+            {r.label ? <span className={LABEL}>{r.label}</span> : <span />} {stamp}
           </p>
         )}
-        <p
-          onFocus={open}
-          data-clamp={clamp && r.label && CLAMP[r.label] ? 'line' : undefined}
-          className={`max-w-(--measure) text-fg-0 ${r.label === 'Verdict' || !r.label ? 'text-md' : 'text-sm'} ${clamp && r.label ? (CLAMP[r.label] ?? '') : ''}`}
-        >
-          {!head && label}
-          {verdict
-            ? verdict.map((segs, j) =>
-                j === 0 ? (
-                  <Spans key={j} segs={segs} onTrace={onTrace} hint={hint} checking={checking} />
-                ) : (
-                  // a tier's sentence on its own line: the same paragraph, so it is read as one
-                  <span key={j} className="mt-1 block text-sm">
-                    <Spans segs={segs} onTrace={onTrace} hint={hint} checking={checking} />
-                  </span>
-                ),
-              )
-            : <Spans segs={r.segs} onTrace={onTrace} hint={hint} checking={checking} />}
+        {r.source && <p className="-mt-1 max-w-(--measure) text-xs text-fg-1">{cap(r.source)}</p>}
+        <p className={`max-w-(--measure) text-fg-0 ${r.label === 'Verdict' || !r.label ? `text-md ${fold && r.label === 'Verdict' ? 'fold:text-base' : ''}` : `text-sm ${tight}`}`}>
+          {!head && label(r)}
+          {verdict ? (
+            verdict.map((segs, j) =>
+              j === 0 ? (
+                <Spans key={j} segs={segs} onTrace={onTrace} hint={hint} checking={checking} />
+              ) : (
+                // a tier's sentence on its own line: the same paragraph, so it is read as one
+                <span key={j} className={`mt-1 block text-sm ${fold ? 'fold:mt-0.5' : ''} ${tight}`}>
+                  <Spans segs={segs} onTrace={onTrace} hint={hint} checking={checking} />
+                </span>
+              ),
+            )
+          ) : r === why ? (
+            whyAll.slice(0, whyShown).map((segs, j) => (
+              <Fragment key={j}>
+                {j > 0 && ' '}
+                <Spans segs={segs} onTrace={onTrace} hint={hint} checking={checking} />
+              </Fragment>
+            ))
+          ) : (
+            <Spans segs={r.segs} onTrace={onTrace} hint={hint} checking={checking} />
+          )}
         </p>
       </Fragment>
     );
   };
+  // The analyst pick, run in after its label; what the model did is the label's title and screen-reader text. Nothing at all
+  // when no observation was picked. While it is coming, its place is held (where it is shown in place).
+  const pick =
+    note !== null ? (
+      note.map((r, i) => (
+        <p key={`pick-${i}`} className="max-w-(--measure) text-sm text-fg-1">
+          {i === 0 && (
+            <>
+              <span className={`${LABEL} mr-1`} title={PICK_EXPLAINED}>
+                Analyst pick (LLM{narration.mode === 'replay' ? ', replayed' : ''})
+              </span>{' '}
+              <span className="sr-only">{PICK_EXPLAINED} </span>
+            </>
+          )}
+          <Spans segs={r.segs} onTrace={onTrace} hint={hint} checking={checking} />
+        </p>
+      ))
+    ) : pending ? (
+      <p className={`max-w-(--measure) text-sm text-fg-2 ${pickInline && fold ? 'min-h-10' : ''}`}>
+        <span className={`${LABEL} mr-1`}>Analyst pick (LLM)</span> Picking an observation&hellip;
+      </p>
+    ) : null;
 
   return (
-    <div ref={box} className={`flex flex-col gap-1.5 transition-opacity duration-(--dur-slow) ${stale ? 'opacity-70' : ''}`}>
+    // Another clock: a bar in the feed's gutter and the stamp say so; the text keeps its colours (and its contrast).
+    <div className={`relative flex flex-col gap-1.5 ${stale ? 'before:absolute before:inset-y-0 before:-left-2 before:w-0.5 before:rounded-xs before:bg-line-3' : ''}`}>
       <span id={hint} className="sr-only">
         {checked
           ? modelWords
@@ -369,51 +396,32 @@ export function NarrationBlock({ narration, guard, onTrace, cards = [], idSuffix
             : `${guard.verified} of ${plural(guard.total, 'claim')} verified against the graph. Verified names and evidence ids open the tool call and query that returned them.`
           : 'Not checked against the graph.'}
       </span>
-      {shown.map((r, i) => row(r, i, i === 0))}
+      {shown.map((r, i) => row(r, i))}
+      {pickInline && pick}
 
       {coverage && (
         <p className="max-w-(--measure) rounded-xs bg-bg-2 px-2 py-1.5 text-sm text-fg-0">
-          <span className={`${LABEL} mr-2`}>Coverage</span>
-          {coverage}
+          <span className={`${LABEL} mr-1`}>Coverage</span> {coverage}
         </p>
       )}
 
-      {(note || pending || noPick) && (
-        // the pick's place is reserved while it is coming (three lines on a phone, two where it is clamped) and kept after it lands
-        <div className={`mt-0.5 flex flex-col gap-0.5 ${fold ? 'min-h-24 lg:min-h-0' : ''}`}>
-          <p className={LABEL}>
-            Analyst pick (LLM){narration.mode === 'replay' ? ', replayed' : ''}
-          </p>
-          <p className="text-xs text-fg-1">{PICK_EXPLAINED}</p>
-          {note ? (
-            note.map((r, i) => (
-              <p key={i} onFocus={open} data-clamp={clamp ? 'pick' : undefined} className={`max-w-(--measure) text-sm text-fg-1 ${clamp ? PICK_CLAMP : ''}`}>
-                <Spans segs={r.segs} onTrace={onTrace} hint={hint} checking={checking} />
-              </p>
-            ))
-          ) : (
-            <p className={`min-h-15 text-sm text-fg-2 ${clamp ? 'lg:min-h-10' : ''}`}>
-              {pending ? <>Picking the analyst observation&hellip;</> : 'No observation was picked for this run: the verdict above is the whole answer.'}
-            </p>
-          )}
-        </div>
-      )}
-
-      {fold && (folded.length > 0 || cut.any || full) && (
+      {expandable && (
         <>
           {/* One expander for everything the compact narrative leaves out, and its label says what that is. */}
           <button
             type="button"
+            data-narrative-more=""
             aria-expanded={full}
-            aria-controls={folded.length ? more : undefined}
+            aria-controls={full ? more : undefined}
             onClick={() => setFull((f) => !f)}
             className={`${summary} self-start text-left text-fg-1`}
           >
-            <span>{full ? 'Show less' : reveals ? `Show ${reveals}` : 'Show the rest'}</span>
+            <span>{full ? 'Show less' : reveals}</span>
             <ChevronDown size={12} aria-hidden className={`shrink-0 transition-transform duration-(--dur-base) ease-out ${full ? 'rotate-180' : ''}`} />
           </button>
-          {full && folded.length > 0 && (
+          {full && (
             <div id={more} className="flex flex-col gap-2">
+              {!pickInline && pick}
               {folded.map((r, i) => row(r, i + shown.length))}
             </div>
           )}
@@ -421,9 +429,9 @@ export function NarrationBlock({ narration, guard, onTrace, cards = [], idSuffix
       )}
 
       {/* the "N of N claims traced" row has this place once the guard answers: reserved at its height, so it adds no shift */}
-      {checking && <p className="flex min-h-6 items-center text-xs text-fg-2 pointer-coarse:min-h-11">Checking the claims against the graph&hellip;</p>}
+      {checking && !claimsFolded && <p className="flex min-h-6 items-center text-xs text-fg-2 pointer-coarse:min-h-11">Checking the claims against the graph&hellip;</p>}
       {guard && guard.total === 0 && <p className="text-xs text-fg-1">Unverified: no claim in this text was checked against the graph.</p>}
-      {guard && guard.total > 0 && <ClaimMap guard={guard} cards={cards} onTrace={onTrace} id={`flagged-claims${idSuffix}`} modelWords={modelWords} />}
+      {guard && guard.total > 0 && !claimsFolded && <ClaimMap guard={guard} cards={cards} onTrace={onTrace} id={`flagged-claims${idSuffix}`} modelWords={modelWords} />}
       {unchecked && !checking && <p className="text-xs text-fg-2">Dashed names were not checked by the guard.</p>}
     </div>
   );
@@ -483,7 +491,7 @@ export function NarrativePanel({
         drafting={drafting ?? narration.draft ?? false}
         awaitingGuard={awaitingGuard}
         guest={guest}
-        stamp={narration.at !== undefined ? <span className="font-mono text-xs text-fg-1 tabular-nums">as of {utcLabel(narration.at)}</span> : undefined}
+        stamp={narration.at !== undefined ? <span className={`font-mono text-xs tabular-nums ${stale ? 'text-fg-0' : 'text-fg-1'}`}>as of {utcLabel(narration.at)}</span> : undefined}
       />
     </section>
   );

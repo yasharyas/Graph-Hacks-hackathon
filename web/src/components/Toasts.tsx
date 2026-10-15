@@ -6,6 +6,8 @@
  * focused element would still be under it, it moves to the top. Never steals focus, announced politely. Timers pause on
  * hover, while the toast holds focus and while the tab is hidden; Esc dismisses the newest (its Dismiss is far down the tab
  * order). Dismiss is 44x44 on touch. Errors are neutral, never infection red.
+ * A toast that goes away while it holds the keyboard focus (Dismiss, Esc, its action, its timer) hands focus back to where
+ * it came from (the element focused before Tab reached the toast), else to the results region, never to <body>.
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
@@ -35,9 +37,12 @@ export function toast(t: ToastInput): number {
   emit();
   return item.id;
 }
+let cameFrom: HTMLElement | null = null; // what had the keyboard focus before Tab moved it into the stack
 export function dismissToast(id: number): void {
+  const held = document.querySelector(`[data-toast="${id}"]`)?.contains(document.activeElement) ?? false;
   items = items.filter((i) => i.id !== id);
   emit();
+  if (held) (cameFrom?.isConnected ? cameFrom : document.getElementById('results'))?.focus({ preventScroll: true });
 }
 
 const subscribe = (l: () => void) => (listeners.add(l), () => void listeners.delete(l));
@@ -74,7 +79,12 @@ function ToastView({ item }: { item: ToastItem }) {
       exit={{ opacity: 0, transition: { duration: 0.14 } }}
       onPointerEnter={() => setHover(true)}
       onPointerLeave={() => setHover(false)}
-      onFocus={() => setFocused(true)}
+      data-toast={item.id}
+      onFocus={(e) => {
+        setFocused(true);
+        const from = e.relatedTarget;
+        if (from instanceof HTMLElement && !e.currentTarget.parentElement?.contains(from)) cameFrom = from;
+      }}
       onBlur={(e) => !e.currentTarget.contains(e.relatedTarget) && setFocused(false)}
       className="pointer-events-auto flex items-start gap-3 rounded-sm bg-bg-2 p-3 text-sm shadow-popover"
     >

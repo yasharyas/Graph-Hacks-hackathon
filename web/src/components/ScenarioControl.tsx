@@ -9,7 +9,8 @@
  *
  * Also exported here:
  *   scenarioLabel(id)  "qix Sept 2025" / "axios Mar 2026", for sentences
- *   AlertField props: onRun(text), disabled. Free text, 500 chars max with a counter, label always visible. Takes focus when it opens.
+ *   AlertField props: onRun(text), onDraft(text) (every change, so the page's other Run buttons can run what is typed),
+ *     disabled. Free text, 500 chars max with a counter, label always visible. Takes focus when it opens.
  *   AlertBanner props: text, pulseKey, note. Shown while a free-text alert run is on screen; the shield pulses twice.
  *     `text` is untrusted and rendered as text only. `note` says which clock a run without a time in its text used.
  */
@@ -89,7 +90,8 @@ export function ScenarioControl({
             )}
             <span>
               {o.label}
-              {o.tail && <span className="max-sm:hidden short:hidden lg:max-xl:hidden">{o.tail}</span>}
+              {/* below 1440px the header's clock chip carries the date, so the segment drops it */}
+              {o.tail && <span className="max-sm:hidden short:hidden lg:max-[1439px]:hidden">{o.tail}</span>}
             </span>
           </button>
         );
@@ -100,8 +102,9 @@ export function ScenarioControl({
 
 const MAX = 500;
 
-export function AlertField({ onRun, disabled }: { onRun: (text: string) => void; disabled?: boolean }) {
+export function AlertField({ onRun, onDraft, disabled }: { onRun: (text: string) => void; onDraft?: (text: string) => void; disabled?: boolean }) {
   const [text, setText] = useState('');
+  useEffect(() => onDraft?.(text), [text]); // App's other Run buttons run this text while it is here (one meaning for "Run")
   const id = useId();
   const field = useRef<HTMLTextAreaElement>(null);
   const ok = text.trim().length > 0 && !disabled;

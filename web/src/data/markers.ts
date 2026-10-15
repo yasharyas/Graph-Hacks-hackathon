@@ -52,5 +52,21 @@ export function placeLabels(marks: { x: number; w: number }[], trackW: number, g
   return out;
 }
 
+const hhmm = (t: number) => new Date(Math.floor(t / MIN) * MIN).toISOString().slice(11, 16);
+
+/**
+ * The one-line caption that narrates the landing autoplay, by where the playhead is: before the first exposure, while repos
+ * are one install away and no advisory exists yet, and once the OSV record is out. It changes at those two moments only, so
+ * read as a live region it speaks twice in 12 s, not every minute. `short` is the phone wording (one line at 288px).
+ */
+export function autoplayCaption(i: IncidentMeta, at: number, short = false): string {
+  const first = i.firstExposureAt ?? i.firstPublishAt;
+  const [f, osv] = [hhmm(first), hhmm(i.advisoryAt)];
+  if (at < first) return short ? `Before ${f}: nothing malicious yet` : `Before ${f} UTC: no malicious version published yet`;
+  if (at < i.advisoryAt) return short ? `${f} malware out · no advisory until ${osv}` : `${f} malicious versions out · exposed repos climb · no advisory until ${osv}`;
+  const ahead = Math.floor((i.advisoryAt - first) / MIN); // the figure's own definition (App: advisory minus first exposure)
+  return short ? `${osv} first OSV record · ${ahead} min late` : `${osv} first OSV record: scanners can flag it only now, ${ahead} min late`;
+}
+
 /** The scrub bubble's centre, kept inside the track so its box never runs off either end. */
 export const clampCentre = (x: number, w: number, trackW: number): number => Math.min(Math.max(x, w / 2), Math.max(w / 2, trackW - w / 2));

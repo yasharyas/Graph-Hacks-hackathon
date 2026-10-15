@@ -1,7 +1,7 @@
 // Run: node --test web/src/data/narration.test.ts
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { answerLabel, claimMap, crowded, guardLine, lines, LIST_MAX, proofFor, segments, spokenAnswer, splitCoverage, stripMarkdown, teamStarts, verdictLines, type ProofCard, type Segment } from './narration.ts';
+import { answerLabel, citeCount, claimMap, crowded, guardLine, lines, LIST_MAX, proofFor, segments, spokenAnswer, splitCoverage, stripMarkdown, teamStarts, verdictLines, whyParts, type ProofCard, type Segment } from './narration.ts';
 
 const verdicts = (text: string, g: Parameters<typeof segments>[1]) =>
   segments(text, g).flatMap((s) => (s.kind === 'entity' ? [[s.text, s.verdict]] : s.kind === 'cite' ? [[s.id, s.verdict]] : s.kind === 'struck' ? [[s.text, 'struck']] : []));
@@ -63,6 +63,25 @@ test('Verdict / Notify / Do lines carry their label and share one first-mention 
 
 test('a Why line is labelled like Verdict, Notify and Do', () => {
   assert.deepEqual(lines('Verdict: a.\nWhy: `x/y` locks `debug@4.4.2`.\nDo: b.', null).map((l) => l.label), ['Verdict', 'Why', 'Do']);
+});
+
+test('a pasted repo’s "Verdict (where it came from):" is still the Verdict label, its parenthetical kept apart', () => {
+  const [v] = lines('Verdict (counterfactual: this checks the lockfile you pasted as if it had been committed on 2025-09-08): `pasted/x` would not have been exposed.', null);
+  assert.equal(v!.label, 'Verdict');
+  assert.equal(v!.source, 'counterfactual: this checks the lockfile you pasted as if it had been committed on 2025-09-08');
+  assert.equal(v!.segs[0]?.kind === 'entity' && v!.segs[0].text, 'pasted/x');
+  assert.equal(lines('Verdict: plain.', null)[0]!.source, null);
+});
+
+test('Why splits into whole path sentences, never inside a parenthetical, and joins back to the same text', () => {
+  const text = '`acme/checkout-web` locks `debug@4.4.2` through `express@5.1.0` [E1], and also `chalk@5.6.1`; `github/docs` declares `^5.0.1`, which admits `chalk@5.6.1` [E2]; `mochajs/mocha` declares `^4.3.5`, which admits `debug@4.4.2` [E3] (paths for 3 of 21; +18 more in the table).';
+  const parts = whyParts(segments(text, null));
+  assert.equal(parts.length, 3);
+  assert.equal(parts.map((p) => join([p])).join(' '), text);
+  assert.match(join([parts[0]!]), /^`acme\/checkout-web` .* \[E1\], and also `chalk@5\.6\.1`;$/);
+  assert.match(join([parts[2]!]), /\(paths for 3 of 21; \+18 more in the table\)\.$/);
+  assert.equal(citeCount(parts.slice(1)), 2);
+  assert.equal(whyParts(segments('`mochajs/mocha` declares `^4.3.5`, which admits `debug@4.4.2` [E1].', null)).length, 1);
 });
 
 test('a line with more verified names than LIST_MAX is a list (light treatment); repeats and unchecked names do not count', () => {

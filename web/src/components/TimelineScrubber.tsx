@@ -19,8 +19,14 @@
  *                      repo's report replaces the demo org's labels: nothing below it shifts
  *   failed             the triage did not run: no counter, no counts (a stale number beside "did not run" reads as a result)
  *   remediated         repos marked remediated: printed beside the exposed count ("· 2 marked remediated")
- *   trailing           compact row only: the action at its end ("Run again")
+ *   trailing           compact row only: the action at its end ("Run again", or "Cancel run" while one runs)
  *   stale              the previous incident, dimmed while the next one loads (no skeleton flash)
+ *   fixedCount         a pasted repo's count, true at the one clock it was analysed at: the slider then says that ("13:45 UTC;
+ *                      this repo: 1 of 1 exposed at 13:30 UTC"), not the demo org's timeline count
+ * The landing band's last line is the autoplay's caption (data/markers.ts autoplayCaption: what the 90 minutes are showing,
+ * in three states). It is a polite live region only while the autoplay plays, so it speaks at its two changes and never on
+ * a scrub (the slider's own aria-valuetext does that). The clock is printed by the header chip and the scrub bubble only.
+ * The autoplay pauses when the slider takes focus: a focused slider must not read out a moving value.
  * Marker labels never collide, from 320 to 1920px: each is measured and put on the first row where it fits, flipped left of
  * its tick (and clamped) at the right edge (data/markers.ts placeLabels); short words below 520px. The layout is redone
  * whenever the incident, the track's width or the fonts change, wherever the track sits (the landing and the compact row
@@ -33,7 +39,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { IncidentMeta, TimelinePoint } from '../data/types.ts';
 import { plural, utc, utcLabel, utcSec } from '../data/format.ts';
-import { clampCentre, markersOf, placeLabels } from '../data/markers.ts';
+import { autoplayCaption, clampCentre, markersOf, placeLabels } from '../data/markers.ts';
 import { exposedCount, snapshotAt } from '../data/snapshot.ts';
 import { Button } from './Button.tsx';
 import { Pause, Play } from './icons/Glyphs.tsx';
@@ -62,14 +68,17 @@ export interface TimelineScrubberProps {
   stale?: boolean;
   /** Compact row only: the action at its end ("Run again"). */
   trailing?: ReactNode;
+  /** A pasted repo's count at the clock it was analysed at: what the slider says instead of the timeline's count. */
+  fixedCount?: { exposed: number; total: number; at: number } | null;
 }
 
-export function TimelineScrubber({ incident, points, at, snapshot, playing, onPlay, onPause, onSeek, landingEnd, compact = false, scope = null, scopeNote = null, scopeNoteShort = null, scopeSource = null, failed = false, remediated = 0, stale = false, trailing }: TimelineScrubberProps) {
+export function TimelineScrubber({ incident, points, at, snapshot, playing, onPlay, onPause, onSeek, landingEnd, compact = false, scope = null, scopeNote = null, scopeNoteShort = null, scopeSource = null, failed = false, remediated = 0, stale = false, trailing, fixedCount = null }: TimelineScrubberProps) {
   const ready = incident !== null && points.length > 0;
   const start = ready ? points[0]!.at : 0;
   const end = ready ? points.at(-1)!.at : 1;
   const pct = (t: number) => Math.min(100, Math.max(0, ((t - start) / (end - start)) * 100));
   const exposed = snapshot && !failed ? exposedCount(snapshot.counts) : null;
+  const safe = exposed ? (snapshot?.counts.WOULD_PULL ?? 0) : 0; // exposed only to a fresh install: npm ci from the lockfile is safe
   const sample = ready ? snapshotAt(points, at) : null; // the slider speaks for the timeline, whoever's numbers the band shows
 
   const [trackEl, setTrackEl] = useState<HTMLDivElement | null>(null); // state, not a ref: the track is re-parented when the band collapses
@@ -128,6 +137,9 @@ export function TimelineScrubber({ incident, points, at, snapshot, playing, onPl
     { label: 'MAINTAINER', value: snapshot?.counts.MAINTAINER, cls: 'text-tier-maintainer', sub: 'uses the account’s packages, nothing malicious yet' },
     { label: 'OSV advisories', value: snapshot?.scanner, cls: 'text-fg-1', sub: 'OSV records published' },
   ];
+  const valueText = fixedCount
+    ? `${utcLabel(at)}; this repo: ${fixedCount.exposed} of ${plural(fixedCount.total, 'repo')} exposed at ${utcLabel(fixedCount.at)}, the clock it was analysed at`
+    : `${utcLabel(at)}, ${plural(sample ? exposedCount(sample.counts) : 0, 'repo')} exposed`;
   const minutes = landingEnd !== null && ready ? Math.round((landingEnd - start) / MIN) : 90;
   const playLabel = playing ? 'Pause' : ready && landingEnd !== null && at >= landingEnd ? `Play the ${minutes} minutes` : 'Play';
 
@@ -138,9 +150,12 @@ export function TimelineScrubber({ incident, points, at, snapshot, playing, onPl
       onClick={playing ? onPause : onPlay}
       disabled={!ready}
       aria-label={compact ? playLabel : undefined}
-      className={compact ? 'min-w-20' : 'min-w-[12rem]'} // wide enough for "Play the 163 minutes": the label changes when the autoplay ends and must not push the counter
+      title={compact ? playLabel : undefined}
+      // landing: wide enough for "Play the 163 minutes" (the label changes when the autoplay ends and must not push the
+      // counter); compact: the icon alone, so the one-row band fits 1280px with its action at the end
+      className={compact ? 'w-(--control-h) px-0' : 'min-w-[12rem]'}
     >
-      {compact ? (playing ? 'Pause' : 'Play') : playLabel}
+      {compact ? null : playLabel}
     </Button>
   );
 
@@ -148,7 +163,20 @@ export function TimelineScrubber({ incident, points, at, snapshot, playing, onPl
     <div className="flex min-w-0 flex-col">
       <p className="flex flex-wrap items-baseline gap-x-2">
         <span className={`inline-block min-w-[2ch] text-right font-bold text-fg-0 tabular-nums ${compact ? 'text-2xl' : 'text-3xl'}`}>{exposed ?? '–'}</span>
-        <span className="text-sm text-fg-1">{failed ? 'no result: the triage did not run' : `${exposed === 1 ? 'repo' : 'repos'} one install from malware`}</span>
+        <span className="text-sm text-fg-1">{failed ? 'no result: the triage did not run' : `${exposed === 1 ? 'repo' : 'repos'} one install from malware${safe > 0 ? ',' : ''}`}</span>
+        {/* the number is not the whole story: WOULD_PULL repos are safe as long as they install from their lockfile */}
+        {/* compact: the slot is always laid out (invisible when it does not apply), so a narrow band never gains or loses a
+            line when a pasted repo's numbers land */}
+        {safe > 0 ? (
+          <span className="text-sm whitespace-nowrap text-fg-1">{safe === exposed ? (exposed === 1 ? 'safe' : 'all safe') : `${safe} safe`} with npm ci</span>
+        ) : (
+          compact &&
+          !failed && (
+            <span aria-hidden className="invisible text-sm whitespace-nowrap">
+              20 safe with npm ci
+            </span>
+          )
+        )}
         {remediated > 0 && !failed && <span className="text-sm whitespace-nowrap text-tier-clean">· {remediated} marked remediated</span>}
       </p>
       {scope &&
@@ -164,7 +192,9 @@ export function TimelineScrubber({ incident, points, at, snapshot, playing, onPl
         ) : (
           <p className="text-xs text-fg-1">
             {scope}
-            {scopeNote && <span className="text-fg-2"> · {scopeNote}</span>}
+            {/* a phone gets the few-word note: one line, so the Run action stays above the tab bar at 320x640 */}
+            {scopeNote && <span className="text-fg-2 max-sm:hidden"> · {scopeNote}</span>}
+            {scopeNoteShort && <span className="text-fg-2 sm:hidden"> · {scopeNoteShort}</span>}
           </p>
         ))}
     </div>
@@ -175,10 +205,19 @@ export function TimelineScrubber({ incident, points, at, snapshot, playing, onPl
   const openLegend = () => setLegend(true);
   const counts = compact ? (
     <div className="flex items-center gap-2">
-      <dl data-legend-trigger="" onClick={openLegend} className="flex cursor-help flex-wrap gap-x-5 gap-y-1">
+      <dl data-legend-trigger="" onClick={openLegend} className="flex cursor-help flex-wrap gap-x-3 gap-y-1">
         {stats.map((s) => (
           <div key={s.label} className="flex items-baseline gap-1.5">
-            <dt className="font-mono text-2xs text-fg-1">{s.label}</dt>
+            {/* the row has no width to spare at 1280: "OSV" (the legend beside it says what an OSV advisory is) */}
+            <dt className="font-mono text-2xs text-fg-1" title={s.sub}>
+              {s.label === 'OSV advisories' ? (
+                <>
+                  OSV<span className="sr-only"> advisories</span>
+                </>
+              ) : (
+                s.label
+              )}
+            </dt>
             <dd className={`min-w-[1.5ch] text-right text-md font-bold tabular-nums ${s.value && !failed ? s.cls : 'text-fg-2'}`}>{num(s.value)}</dd>
           </div>
         ))}
@@ -200,14 +239,16 @@ export function TimelineScrubber({ incident, points, at, snapshot, playing, onPl
     </div>
   );
 
+  // The compact row's track is 8px lower than the landing's (a 16px slider under a 16px bubble): the band is what a laptop
+  // pays for before the feed starts.
   const track = (
-    <div className="relative pt-5" style={{ paddingBottom: rows * ROW + 4 }}>
-      <div ref={setTrackEl} className="pointer-events-none absolute inset-x-2 top-5 h-6">
+    <div className={`relative ${compact ? 'pt-4' : 'pt-5'}`} style={{ paddingBottom: rows * ROW + 4 }}>
+      <div ref={setTrackEl} className={`pointer-events-none absolute inset-x-2 ${compact ? 'top-4 h-4' : 'top-5 h-6'}`}>
         <div data-scrub-track="" className="absolute inset-x-0 top-1/2 h-0.5 -translate-y-1/2 rounded-full bg-line-3" />
         {ready && <div data-scrub-fill="" className="absolute top-1/2 left-0 h-0.5 -translate-y-1/2 rounded-full bg-fg-1" style={{ width: `${pct(at)}%` }} />}
         <span
           ref={bubbleRef}
-          className="absolute -top-5 -translate-x-1/2 rounded-xs bg-bg-2 px-1.5 font-mono text-2xs text-fg-0 tabular-nums"
+          className={`absolute -translate-x-1/2 rounded-xs bg-bg-2 px-1.5 font-mono text-2xs text-fg-0 tabular-nums ${compact ? '-top-4' : '-top-5'}`}
           style={{ left: ready ? bubbleX : 0 }}
           aria-hidden
         >
@@ -231,24 +272,25 @@ export function TimelineScrubber({ incident, points, at, snapshot, playing, onPl
       </div>
       <input
         type="range"
-        className="scrub relative pointer-coarse:-my-2.5 pointer-coarse:h-11"
+        className={`scrub relative ${compact ? 'scrub-compact pointer-coarse:-my-3.5' : 'pointer-coarse:-my-2.5'} pointer-coarse:h-11`}
         aria-label="Scenario time, UTC"
         min={start}
         max={end}
         step={MIN}
         value={ready ? at : start}
         disabled={!ready}
-        aria-valuetext={ready ? `${utcLabel(at)}, ${plural(sample ? exposedCount(sample.counts) : 0, 'repo')} exposed` : 'Loading'}
+        aria-valuetext={!ready ? 'Loading' : valueText}
         onChange={(e) => onSeek(Number(e.target.value))}
         onKeyDown={onKeyDown}
+        onFocus={() => playing && onPause()}
       />
     </div>
   );
 
   return (
-    <section aria-label="Incident timeline" aria-busy={stale || !ready || undefined} className={`flex flex-col gap-2 transition-opacity duration-(--dur-fast) ease-out ${compact ? 'px-(--gutter) py-1' : 'p-3 sm:p-4'} ${stale ? 'pointer-events-none opacity-50' : ''}`}>
+    <section aria-label="Incident timeline" aria-busy={stale || !ready || undefined} className={`flex flex-col gap-2 transition-opacity duration-(--dur-fast) ease-out ${compact ? 'px-(--gutter) py-1' : 'p-3 max-sm:gap-1.5 sm:p-4'} ${stale ? 'pointer-events-none opacity-50' : ''}`}>
       {compact ? (
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-1 xl:flex-nowrap">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 xl:flex-nowrap">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 xl:shrink-0 xl:flex-nowrap">
             {playButton}
             {headline}
@@ -262,13 +304,18 @@ export function TimelineScrubber({ incident, points, at, snapshot, playing, onPl
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             {playButton}
             {headline}
-            {/* a phone shows the time on the track's bubble (and in the header): the band's own chip would only push the actions down */}
-            <p className="ml-auto rounded-xs bg-bg-2 px-2 py-0.5 font-mono text-xs text-fg-0 tabular-nums max-sm:hidden short:hidden lg:[@media(max-height:800px)]:hidden">
-              {ready ? <time dateTime={new Date(at).toISOString()}>{utcLabel(at)}</time> : '--:-- UTC'}
-            </p>
           </div>
           {counts}
           {track}
+          {/* One line, reserved from the first paint (each state is written to fit it): what the autoplay is showing. */}
+          <p aria-live={playing ? 'polite' : 'off'} className="-mt-1 min-h-[18px] text-xs text-fg-1 max-sm:-mt-2">
+            {incident && ready && (
+              <>
+                <span className="sm:hidden">{autoplayCaption(incident, at, true)}</span>
+                <span className="max-sm:hidden">{autoplayCaption(incident, at)}</span>
+              </>
+            )}
+          </p>
         </>
       )}
     </section>

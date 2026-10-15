@@ -33,50 +33,68 @@ export function ReportClock({ runAt, viewAt, wantAt, loading, error, guest, head
   const notes: string[] = [];
   if (head) notes.push(HEAD_NOTE);
   if (other) notes.push(`This report is for ${other}, run at ${utcLabel(runAt)}. The timeline above is for a different incident, so scrubbing it does not change this table.`);
-  if (!notes.length && wantAt === null) return null;
+  // What a screen reader hears when the clock moves. The region is always mounted (empty when there is nothing to say):
+  // a live region inserted already holding its text is not read by most screen readers, so the first scrub was silent.
+  const said =
+    wantAt === null || other || loading
+      ? ''
+      : error
+        ? `Could not load exposure at ${utcLabel(wantAt)}: ${error.message} ${error.fix}`
+        : guest
+          ? `A pasted repo is analysed at one clock. The table stays at ${utcLabel(runAt)} while the timeline shows ${utcLabel(wantAt)}.`
+          : `Showing exposure at ${utcLabel(viewAt)}. Paths and fix drafts belong to the triage run at ${utcLabel(runAt)}.`;
+  const status = (
+    <p role="status" className="sr-only">
+      {said}
+    </p>
+  );
+  if (!notes.length && wantAt === null) return status;
 
   return (
-    <aside aria-label="Report clock" className="flex flex-col gap-2 border-b border-line-1 bg-bg-2 px-3 py-2 text-sm">
-      {notes.map((n) => (
-        <p key={n} role="note" className="max-w-(--measure) text-fg-1">
-          {n === HEAD_NOTE && <span className="mr-2 rounded-xs bg-bg-3 px-1.5 py-0.5 font-mono text-2xs font-medium text-fg-0">COUNTERFACTUAL</span>}
-          {n}
-        </p>
-      ))}
-      {wantAt !== null && !other && (
-        <div className="flex flex-col gap-2">
-          {/* Only the sentence is the live region: the buttons below would make every settled scrub a long announcement. */}
-          <div role="status">
-            {loading ? (
-              <p aria-hidden className="font-mono text-xs text-fg-1">
-                Updating to {utcLabel(wantAt)}&hellip; showing {utcLabel(viewAt)} meanwhile
-              </p>
-            ) : error ? (
-              <div className="flex flex-col gap-1">
-                <p className="flex items-start gap-2 text-infect-400">
-                  <CircleAlert size={16} className="mt-0.5 shrink-0" />
-                  Could not load exposure at {utcLabel(wantAt)}: {error.message}
+    <>
+      {status}
+      <aside aria-label="Report clock" className="flex flex-col gap-2 border-b border-line-1 bg-bg-2 px-3 py-2 text-sm">
+        {notes.map((n) => (
+          <p key={n} role="note" className="max-w-(--measure) text-fg-1">
+            {n === HEAD_NOTE && <span className="mr-2 rounded-xs bg-bg-3 px-1.5 py-0.5 font-mono text-2xs font-medium text-fg-0">COUNTERFACTUAL</span>}
+            {n}
+          </p>
+        ))}
+        {wantAt !== null && !other && (
+          <div className="flex flex-col gap-2">
+            {/* The sentence is said by the region above (always mounted); this copy is for the eyes and for browsing. */}
+            <div aria-hidden>
+              {loading ? (
+                <p aria-hidden className="font-mono text-xs text-fg-1">
+                  Updating to {utcLabel(wantAt)}&hellip; showing {utcLabel(viewAt)} meanwhile
                 </p>
-                <p className="text-fg-1">{error.fix}</p>
-                {error.requestId && <p className="font-mono text-xs text-fg-2">request <span className="select-all text-fg-1">{error.requestId}</span></p>}
-              </div>
-            ) : guest ? (
-              <p className="max-w-(--measure) text-fg-1">
-                A pasted repo is analysed at one clock. The table stays at {utcLabel(runAt)} while the timeline shows {utcLabel(wantAt)}.
-              </p>
-            ) : (
-              <p className="max-w-(--measure) text-fg-1">
-                Showing exposure at <span className="font-mono text-xs text-fg-0">{utcLabel(viewAt)}</span>. Paths and fix drafts belong to the triage run at {utcLabel(runAt)}.
-              </p>
-            )}
+              ) : error ? (
+                <div className="flex flex-col gap-1">
+                  <p className="flex items-start gap-2 text-infect-400">
+                    <CircleAlert size={16} className="mt-0.5 shrink-0" />
+                    Could not load exposure at {utcLabel(wantAt)}: {error.message}
+                  </p>
+                  <p className="text-fg-1">{error.fix}</p>
+                  {error.requestId && <p className="font-mono text-xs text-fg-2">request <span className="select-all text-fg-1">{error.requestId}</span></p>}
+                </div>
+              ) : guest ? (
+                <p className="max-w-(--measure) text-fg-1">
+                  A pasted repo is analysed at one clock. The table stays at {utcLabel(runAt)} while the timeline shows {utcLabel(wantAt)}.
+                </p>
+              ) : (
+                <p className="max-w-(--measure) text-fg-1">
+                  Showing exposure at <span className="font-mono text-xs text-fg-0">{utcLabel(viewAt)}</span>. Paths and fix drafts belong to the triage run at {utcLabel(runAt)}.
+                </p>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {error && !guest && <Button onClick={onRetry}>Retry</Button>}
+              <Button onClick={onBack}>Back to {utcLabel(runAt)}</Button>
+              <Button onClick={() => onRerun(wantAt)}>Run triage at {utcLabel(wantAt)}</Button>
+            </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {error && !guest && <Button onClick={onRetry}>Retry</Button>}
-            <Button onClick={onBack}>Back to {utcLabel(runAt)}</Button>
-            <Button onClick={() => onRerun(wantAt)}>Run triage at {utcLabel(wantAt)}</Button>
-          </div>
-        </div>
-      )}
-    </aside>
+        )}
+      </aside>
+    </>
   );
 }
