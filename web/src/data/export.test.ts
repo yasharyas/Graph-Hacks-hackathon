@@ -121,3 +121,30 @@ test('the Details link is a shareUrl for the repo (org) or the pasted repo (gues
   assert.equal(detailsLink(base, report, 'not a repo', 'notice'), null, 'a name shareUrl refuses has no link');
   assert.ok(!slackMessage({ exposure: report.exposures[0]!, paths: [], incident: report.incident, link: null }).includes('Details:'));
 });
+
+test('the merge note is in every exported fix, not only the ones with direct pins (existing overrides blocks are common)', () => {
+  const plain: Remediation = { repo: 'a/b', overrides: { 'debug@4.4.2': '4.4.1' }, steps: [], prBody: '' };
+  const md = reportToMarkdown({ ...report, remediations: [plain] });
+  assert.ok(md.includes(DIRECT_NOTE));
+  assert.ok(md.includes('existing "overrides"'));
+});
+
+test('a pasted repo has no team in its notice and says which lockfile it was judged on', () => {
+  const e = { ...report.exposures[0]!, repo: 'mochajs/mocha@HEAD', team: 'Your team', tier: 'WOULD_PULL' as const };
+  const head = slackMessage({ exposure: e, paths: [], incident: report.incident, link: null, anonymous: true, source: { kind: 'head' } });
+  assert.ok(head.startsWith('npm incident '), head.split('\n')[0]);
+  assert.ok(!head.includes('Your team'));
+  assert.ok(head.includes("`mochajs/mocha (today's lockfile)`"));
+  assert.ok(head.includes("Lockfile judged: today's lockfile (counterfactual)"));
+  const snap = slackMessage({ exposure: { ...e, repo: 'mochajs/mocha' }, paths: [], incident: report.incident, link: null, anonymous: true, source: { kind: 'snapshot', sha: 'abcdef1234567890', date: Date.UTC(2025, 8, 1) } });
+  assert.ok(snap.includes('Lockfile judged: the lockfile at commit abcdef1 from 2025-09-01, the last change before the incident'));
+  const org = slackMessage({ exposure: report.exposures[0]!, paths: [], incident: report.incident, link: null });
+  assert.ok(!org.includes('Lockfile judged'), 'the demo org has no lockfile question');
+  assert.ok(org.startsWith(`${report.exposures[0]!.team}: npm incident`));
+});
+
+test('the Markdown header names the lockfile a pasted repo was judged on', () => {
+  const guest = { ...report, scope: { kind: 'guest' as const, label: 'mochajs/mocha', repos: 1, source: { kind: 'pasted' as const } } };
+  assert.ok(reportToMarkdown(guest).includes('Lockfile: Judged on your pasted lockfile (counterfactual)'));
+  assert.ok(!reportToMarkdown(report).includes('Lockfile: Judged'));
+});
