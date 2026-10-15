@@ -365,4 +365,8 @@ if (import.meta.main) {
   const port = Number(process.env.PORT ?? 8080);
   serve({ fetch: app.fetch, port }, () => console.log(`patient-zero on :${port}`));
   for (const s of SCENARIOS) timeline(s).catch((e) => console.error('timeline warm-up failed', e)); // first visitor gets it cached
+  // Fill the path/fix memo for each scenario's default clock, so the first demo run after a cold start is fast too.
+  (async () => {
+    for (const s of SCENARIOS) for await (const _ of triage({ graph: org(s), scenario: s, at: DEFAULT_AT[s], signal: AbortSignal.abort() }));
+  })().catch((e) => console.error('triage warm-up failed', e));
 }

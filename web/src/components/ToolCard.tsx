@@ -306,8 +306,11 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
           {pending && elapsed < 3 && <RadarIcon size={16} title="Query running" />}
           {r && (
             <span className="mt-0.5 shrink-0 font-mono text-xs text-fg-1 tabular-nums">
-              <span aria-hidden>{fmtMs(r.ms)}</span>
-              <span className="sr-only">, FalkorDB execution time {r.ms.toFixed(1)} ms</span>
+              <span aria-hidden title={r.cached ? 'Same query, same immutable demo graph: served from this server\'s cache. The time is from when it ran.' : undefined}>
+                {fmtMs(r.ms)}
+                {r.cached && ' · cached'}
+              </span>
+              <span className="sr-only">, FalkorDB execution time {r.ms.toFixed(1)} ms{r.cached ? ', cached result of the same query' : ''}</span>
             </span>
           )}
         </h3>

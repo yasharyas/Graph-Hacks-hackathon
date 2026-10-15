@@ -142,6 +142,21 @@ describe('graph', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, ()
     assert.ok(n >= 4, `only ${n} RESOLVES_TO paths`); // checkout-web x2, billing-api x2
   });
 
+  test('explain_path and draft_remediation are memoized on demo org graphs only; a hit is the same result, marked cached', async () => {
+    const at = Date.parse('2025-09-08T13:31:00Z'); // a clock no other test uses, so the first call is a miss
+    const args = { repo: 'mochajs/mocha', version: 'debug@4.4.2', at };
+    const a = await T.explainPath(QIX, args);
+    const b = await T.explainPath(QIX, args);
+    assert.equal(a.cached, undefined);
+    assert.equal(b.cached, true);
+    assert.deepEqual({ ...b, cached: undefined }, { ...a, cached: undefined });
+    const fix = { repo: 'mochajs/mocha', versions: ['debug@4.4.2'], at };
+    assert.equal((await T.draftRemediation(QIX, fix)).cached, undefined);
+    assert.equal((await T.draftRemediation(QIX, fix)).cached, true);
+    const guest: Graph = { ...QIX, name: QIX.name.replace('_acme_', '_guest_') }; // same data, guest-style name: never memoized
+    for (let i = 0; i < 2; i++) assert.equal((await T.explainPath(guest, args)).cached, undefined);
+  });
+
   test('scenario graphs are isolated: neither returns the other scenario\'s repos or snapshots', async () => {
     const manifest = JSON.parse(readFileSync('data/cache/lockfiles/manifest.json', 'utf8'));
     const q = (await exposure(QIX, 'qix-2025-09-08', QAT)).map((e) => e.repo);

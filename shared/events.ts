@@ -27,6 +27,7 @@ export interface ToolResult {
   params: Record<string, unknown>;
   ms: number; // FalkorDB internal execution time, summed over queries
   truncated?: number; // rows withheld from the LLM summary
+  cached?: boolean; // served from this server's memo of the same read-only query on an immutable demo graph; ms is from when it ran
 }
 
 export interface IncidentMeta {

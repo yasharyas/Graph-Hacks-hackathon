@@ -44,6 +44,23 @@ export async function incidentHeader(g: Graph, incident: string) {
 export const minutesAhead = (i: IncidentMeta) => (i.firstExposureAt == null ? 0 : Math.floor((i.advisoryAt - i.firstExposureAt) / 60_000));
 
 // One tool call: runs queries, records each distinct Cypher verbatim, sums FalkorDB's internal time.
+// On a 0.1-CPU host the 21 shortestPath walks and 21 safe-version picks are most of a triage, and on the read-only demo
+// org graphs their answers never change: they are memoized there per process, and the result says `cached`. Guest
+// graphs belong to one visitor and always run live.
+const memo = new Map<string, ToolResult>();
+const memoKey = (g: Graph, tool: ToolName, params: object) => (g.name.includes('_acme_') ? `${g.name}|${tool}|${JSON.stringify(params)}` : null);
+const fromMemo = (key: string | null): ToolResult | undefined => {
+  const r = key ? memo.get(key) : undefined;
+  return r && { ...r, cached: true };
+};
+function toMemo(key: string | null, r: ToolResult) {
+  if (key) {
+    if (memo.size >= 5000) memo.clear(); // ponytail: crude bound, keys are server-normalized params
+    memo.set(key, r);
+  }
+  return r;
+}
+
 function call(g: Graph) {
   const cypher: string[] = [];
   let ms = 0;
@@ -157,6 +174,9 @@ export async function maintainerBlastRadius(g: Graph, p: { maintainer: unknown }
 
 export async function explainPath(g: Graph, p: { repo: unknown; version: unknown; at: unknown }) {
   const params = { repo: str(p.repo), version: str(p.version), at: time(p.at) };
+  const key = memoKey(g, 'explain_path', params);
+  const hit = fromMemo(key);
+  if (hit) return hit;
   const c = call(g);
   const seen = new Set<string>();
   // Chain, range and hops first (the card shows the leading columns); identical paths through different lockfile
@@ -174,7 +194,7 @@ export async function explainPath(g: Graph, p: { repo: unknown; version: unknown
       ? `${params.repo} locks ${params.version}${b.hops > 1 ? `, ${plural(b.hops, 'hop')} deep via ${b.chain.slice(1, -1).join(' > ')}` : ' as a direct dependency'}`
       : b.hops ? `${params.repo}: its dependency ${b.chain.at(-1)} declares ${b.range}, admitting ${params.version} (${plural(b.hops, 'hop')} deep)`
         : `${params.repo} declares ${b.range} at the root, admitting ${params.version}`;
-  return c.result('explain_path', params, summary, rows, rows.flatMap((r) => [r.repo, r.version, r.range, ...r.chain]));
+  return toMemo(key, c.result('explain_path', params, summary, rows, rows.flatMap((r) => [r.repo, r.version, r.range, ...r.chain])));
 }
 
 export async function routeOwners(g: Graph, p: { repos: unknown }) {
@@ -195,6 +215,9 @@ export async function concentrationRisk(g: Graph, p: { top?: unknown }) {
 
 export async function draftRemediation(g: Graph, p: { repo: unknown; versions: unknown; at: unknown }) {
   const params = { repo: str(p.repo), versions: strs(p.versions, 20), at: time(p.at) };
+  const key = memoKey(g, 'draft_remediation', params);
+  const hit = fromMemo(key);
+  if (hit) return hit;
   const c = call(g);
   const versions = await c.q(Q.REMEDIATION_VERSIONS, params);
   const ranges = await c.q(Q.REMEDIATION_RANGES, params);
@@ -241,7 +264,7 @@ export async function draftRemediation(g: Graph, p: { repo: unknown; versions: u
   const row: Remediation = { repo: params.repo, overrides, steps: uniq(steps), prBody };
   const summary = `${params.repo}: lockfile pins ${isLocked ? `${badLocked.join(', ')} (malicious)` : safeLocked.length ? `${safeLocked.join(', ')} (safe)` : 'no malicious version'}; `
     + `${pins.length ? `override to ${pins.join(', ')}` : 'nothing safe to pin'}${missing.length ? `; no clean ${missing.join(', ')}` : ''}${isLocked ? '; rotate secrets and rebuild' : ''}`;
-  return c.result('draft_remediation', params, summary, [row], [params.repo, ...pins, ...Object.keys(overrides), ...badLocked, ...safeLocked]);
+  return toMemo(key, c.result('draft_remediation', params, summary, [row], [params.repo, ...pins, ...Object.keys(overrides), ...badLocked, ...safeLocked]));
 }
 
 // scanner_view also returns grepCount (the other "graph off" baseline) for the report.

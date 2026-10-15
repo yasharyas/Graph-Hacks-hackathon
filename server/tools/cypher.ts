@@ -58,10 +58,12 @@ RETURN d.repo AS repo, count(DISTINCT pkg) AS packages, collect(DISTINCT pkg.nam
 ORDER BY packages DESC, repo`;
 
 // explain_path: the exact lockfile chain from the repo root to the entry that locks (RESOLVES_TO) or declares a range
-// admitting (ADMITS, live at $at) the version. *0.. covers a range declared by the root itself (0 hops).
+// admitting (ADMITS, live at $at) the version. *0.. covers a range declared by the root itself (0 hops). Dep.depth is
+// the BFS depth from the root, so only the 3 shallowest entries need a shortestPath walk.
 export const EXPLAIN_PATH = `MATCH (:Repo {id: $repo})-[:ROOT]->(root:Dep)
-MATCH (x:Dep {repo: $repo})-[e:RESOLVES_TO|ADMITS]->(:Version {id: $version})
+MATCH (:Version {id: $version})<-[e:RESOLVES_TO|ADMITS]-(x:Dep {repo: $repo})
 WHERE type(e) = 'RESOLVES_TO' OR (e.fromT <= $at AND $at < e.toT)
+WITH root, x, e ORDER BY type(e) DESC, x.depth LIMIT 3
 WITH root, x, e, shortestPath((root)-[:REQUIRES*0..]->(x)) AS p
 RETURN type(e) AS kind, e.range AS range, length(p) AS hops, x.depth AS depth,
   [n IN nodes(p) | n.name + '@' + n.version] AS chain, [n IN nodes(p) | n.path] AS lockPaths
