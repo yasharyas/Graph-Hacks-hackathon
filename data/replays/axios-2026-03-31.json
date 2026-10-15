@@ -1,6 +1,6 @@
 {
  "2026-03-31T01:30Z": {
-  "note": "Only `acme/billing-api` has the malicious `axios@1.14.1` and `plain-crypto-js@4.2.1` installed [E1], while 9 other repos would fetch malicious versions on a fresh resolve.",
-  "provider": "gemini:gemini-3.5-flash-lite"
+  "pick": "carrier",
+  "provider": "groq:qwen/qwen3.8-27b"
  }
 }

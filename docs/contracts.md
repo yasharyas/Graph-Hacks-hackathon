@@ -110,4 +110,4 @@ Mock streams for UI work live in `shared/fixtures/`.
 - **LOCKED** counts from the repo's newest locked bad publish, since a lockfile cannot pin a version before it exists. **WOULD_PULL** counts while the `ADMITS` window is open.
 - **Minutes ahead** is always `advisoryAt - firstExposureAt`, on `/api/scenarios`, the `start` event and the report alike.
 - **`Remediation.overrides`** keys are version-qualified (`"debug@4.4.2": "4.4.1"`), so they only re-pin the bad version. Steps run in order: `npm ci` (the lockfile is the fix for WOULD_PULL), then overrides only if you must re-resolve, then rotate secrets (LOCKED only).
-- **Narration:** `text` is deterministic (Verdict / Why / Notify / Do, built from the report). `note` is an optional LLM line of at most 40 words, kept only if the guard passes with zero flags.
+- **Narration:** `text` is deterministic (Verdict / Why / Notify / Do, built from the report). `note` is an optional analyst pick: the server builds a few observations from the report (`observations()` in `narrate.ts`) and the LLM replies with one id. The words are never the model's.

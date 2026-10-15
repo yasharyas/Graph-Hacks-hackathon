@@ -99,7 +99,8 @@ export type TriageEvent =
   | { type: 'tool_result'; id: string; result: ToolResult }
   | { type: 'report'; report: Report }
   // `text`: the deterministic Verdict / Notify / Do built from the report (always complete and correct).
-  // `note`: an optional short analyst summary written by the LLM (guarded); `mode`/`provider` describe the note.
+  // `note`: an optional analyst pick, one observation built from the report that the LLM chose (it never writes the
+  // words); `mode`/`provider` describe the pick.
   // `at`: the scenario clock the narration describes (the UI dims it when the scrubber moves away).
   | { type: 'narration'; mode: LlmMode; provider: string | null; text: string; note?: string | null; at?: number }
   // `claims`: every claim the server checked; the UI marks a span verified only if it appears here with ok=true.

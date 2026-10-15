@@ -1,6 +1,7 @@
 /* NarrativePanel: the narration as text + claim chips (docs/design.md section 5). Never innerHTML (S5).
  * The text is the deterministic Verdict / Notify / Do the server builds from the report (always complete). An optional
- * `note` is the LLM analyst's summary: shown on its own line, labelled "Analyst note (LLM)", never mixed into the facts.
+ * `note` is the analyst pick: one observation the LLM chose; the server wrote its words from the report. Own line,
+ * labelled "Analyst pick (LLM)", never mixed into the facts.
  * The narration is untrusted, so a claim is "verified" ONLY if the server's guard listed that exact text with ok=true
  * (data/narration.ts decides; this file renders). No raw markdown ever reaches the screen (stripped there).
  *
@@ -207,7 +208,9 @@ export function NarrationBlock({ narration, guard, onTrace, cards = [], idSuffix
 
       {note && (
         <div className="mt-1 flex flex-col gap-1">
-          <p className={LABEL}>Analyst note (LLM){narration.mode === 'replay' ? ', replayed' : ''}</p>
+          <p className={LABEL} title="The model chose this observation; its words come from the graph, like the text above.">
+            Analyst pick (LLM){narration.mode === 'replay' ? ', replayed' : ''}
+          </p>
           {note.map((r, i) => (
             <p key={i} className="max-w-(--measure) text-sm text-fg-1">
               <Spans segs={r.segs} onTrace={onTrace} hint={hint} />

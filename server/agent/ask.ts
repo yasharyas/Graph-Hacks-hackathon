@@ -8,7 +8,7 @@ import { graph } from '../graph/client.ts';
 import { forPrompt } from '../security.ts';
 import { filterExposures, plural, TOOLS, utc } from '../tools/registry.ts';
 import { chat, type ChatReq, type ChatRes, type Msg } from './llm.ts';
-import { evidenceSet, narrationMessages } from './narrate.ts';
+import { evidenceBlock, evidenceSet } from './narrate.ts';
 import { guardEvent } from './replay.ts';
 
 export type Run = { runId: string; session: string; graph: string; scenario: ScenarioId; at: number; report: Report };
@@ -140,7 +140,7 @@ export async function* ask({ run, question, chatFn = pinned, signal }: { run: Ru
 
   const messages: Msg[] = [
     { role: 'system', content: system(run) },
-    { role: 'user', content: `${narrationMessages(run.report)[1].content}${attached}\nQUESTION: ${question}` },
+    { role: 'user', content: `${evidenceBlock(run.report)}${attached}\nQUESTION: ${question}` },
   ];
   let provider: string | undefined;
   let text = '';

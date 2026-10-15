@@ -1,12 +1,13 @@
-// Recorded analyst notes (data/replays/<scenario>.json, keyed by the scenario clock rounded to the minute). The tools
-// and the deterministic narration text always re-run live: a recorded note is shown only when no live note exists and
-// it passes the guard in full against the fresh evidence. RECORD=1 saves every live note. Note chain: live -> replay -> none.
+// Recorded analyst picks (data/replays/<scenario>.json, keyed by the scenario clock rounded to the minute): the id of
+// the observation the LLM chose, never its words. The tools, the text and the observations always re-run live; a
+// recorded pick is used only when no live pick exists and the fresh report still offers that observation.
+// RECORD=1 saves every live pick. Pick chain: live -> replay -> none.
 import { readFileSync, writeFileSync } from 'node:fs';
-import type { ScenarioId, TriageEvent } from '../../shared/events.ts';
+import type { Report, ScenarioId, TriageEvent } from '../../shared/events.ts';
 import { guard, type Evidence } from './guard.ts';
-import { acceptNote, evidenceSet } from './narrate.ts';
+import { evidenceSet, observations } from './narrate.ts';
 
-type Recording = { note: string; provider: string | null };
+type Recording = { pick: string; provider: string | null };
 const file = (s: ScenarioId) => new URL(`../../data/replays/${s}.json`, import.meta.url); // s is a validated enum value
 const minute = (at: number) => new Date(Math.round(at / 60_000) * 60_000).toISOString().slice(0, 16) + 'Z';
 
@@ -30,13 +31,16 @@ export function guardEvent(text: string, ev: Evidence) {
 // describes) and re-emits the guard event over the text plus whichever note was shown.
 export async function* narrated(events: AsyncIterable<TriageEvent>, s: ScenarioId, at: number, replay: boolean): AsyncGenerator<TriageEvent> {
   let ev: Evidence | undefined;
+  let report: Report | undefined;
   let checked = '';
   for await (const e of events) {
-    if (e.type === 'report') ev = evidenceSet(e.report);
+    if (e.type === 'report') [report, ev] = [e.report, evidenceSet(e.report)];
     if (e.type === 'narration') {
-      if (e.mode === 'live' && e.note && process.env.RECORD === '1') record(s, at, { note: e.note, provider: e.provider });
-      const r = e.mode === 'template' && replay && ev ? recorded(s, at) : undefined;
-      const note = r && ev ? acceptNote(r.note, ev) : null;
+      const obs = report ? observations(report) : [];
+      const live = e.mode === 'live' ? obs.find((o) => o.text === e.note) : undefined;
+      if (live && process.env.RECORD === '1') record(s, at, { pick: live.id, provider: e.provider });
+      const r = e.mode === 'template' && replay ? recorded(s, at) : undefined;
+      const note = r ? obs.find((o) => o.id === r.pick)?.text : undefined;
       const shown = note ? { ...e, mode: 'replay' as const, provider: r!.provider, note } : e;
       checked = shown.note ? `${shown.text}\n${shown.note}` : shown.text;
       yield shown;

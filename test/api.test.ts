@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { connect } from 'node:net';
 import { guard } from '../server/agent/guard.ts';
 import type { ChatReq, ChatRes, Msg } from '../server/agent/llm.ts';
-import { evidenceSet } from '../server/agent/narrate.ts';
+import { evidenceSet, observations } from '../server/agent/narrate.ts';
 import { close, db } from '../server/graph/client.ts';
 import { build } from '../server/ingest/build.ts';
 import * as guests from '../server/ingest/guest.ts';
@@ -121,8 +121,8 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
       assert.ok(tools.length > 0 && tools.every((e, i) => e.type === (i % 2 ? 'tool_result' : 'tool_start')), tools.map((e) => e.type).join());
       const narration = of(evs, 'narration');
       assert.equal(narration.mode, 'replay');
-      assert.equal(narration.note, JSON.parse(readFileSync(`data/replays/${scenario}.json`, 'utf8'))[key].note);
-      assert.ok(narration.note!.split(/\s+/).length <= 40);
+      const pick = JSON.parse(readFileSync(`data/replays/${scenario}.json`, 'utf8'))[key].pick; // the recorded id, worded fresh
+      assert.equal(narration.note, observations(report).find((o) => o.id === pick)!.text);
       assert.match(narration.text, /^Verdict: .*\nWhy: .*\nNotify: .*\nDo: 1\) /s);
       assert.doesNotMatch(narration.text + narration.note, /\*\*/);
       assert.equal(narration.at, report.at);

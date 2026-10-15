@@ -1,5 +1,5 @@
 // Deterministic, graph-driven triage playbook: each step is a registry tool, and what runs next depends on what the
-// graph returned. The narration text is built from the report (narrate.ts); one LLM call adds a short analyst note
+// graph returned. The narration text is built from the report (narrate.ts); one LLM call picks an analyst observation
 // that the guard must pass in full. CLI: node --env-file-if-exists=.env server/agent/triage.ts qix-2025-09-08 2025-09-08T13:30:00Z
 import { randomUUID } from 'node:crypto';
 import type {
@@ -9,7 +9,7 @@ import { close, graph, orgGraph } from '../graph/client.ts';
 import * as T from '../tools/registry.ts';
 import type { Graph } from '../tools/types.ts';
 import { chat } from './llm.ts';
-import { acceptNote, evidenceSet, narrationMessages, verdictText } from './narrate.ts';
+import { evidenceSet, observations, parsePick, pickMessages, verdictText } from './narrate.ts';
 import { guardEvent } from './replay.ts';
 
 const DAY = 86_400_000;
@@ -111,16 +111,20 @@ export async function* triage({ graph: g, scenario, at, alert, session, signal }
         .catch((e) => console.error(`[${runId}] triage memory`, e)); // memory is a nicety: never fail the run for it
     }
 
-    // The text is deterministic; the LLM only adds a note, kept only if complete, short and fully traced.
+    // The text is deterministic. The LLM picks the one observation (also built from the report) most worth acting on;
+    // it never writes the words, so the note is as true as the text.
     const ev = evidenceSet(report);
     const text = verdictText(report);
+    const obs = observations(report);
     let narration = { mode: 'template' as LlmMode, provider: null as string | null, note: null as string | null };
-    try {
-      const res = await chat({ messages: narrationMessages(report), maxTokens: 1500, signal }); // reasoning models (gpt-oss) spend tokens before the 40 words
-      const note = acceptNote(res.text, ev, res.finish);
-      if (note) narration = { mode: 'live', provider: res.provider, note };
-    } catch {
-      // every provider failed or none is configured: no note
+    if (obs.length >= 2) {
+      try {
+        const res = await chat({ messages: pickMessages(report, obs), maxTokens: 1500, signal }); // reasoning models (gpt-oss) think before the id
+        const pick = parsePick(res.text, obs);
+        if (pick) narration = { mode: 'live', provider: res.provider, note: pick.text };
+      } catch {
+        // every provider failed or none is configured: no pick
+      }
     }
     yield { type: 'narration', ...narration, text, at };
     yield guardEvent(narration.note ? `${text}\n${narration.note}` : text, ev);
