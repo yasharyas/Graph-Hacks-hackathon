@@ -1,26 +1,63 @@
 # Patient Zero
 
-**Exposed before the advisory exists.** A FalkorDB-backed triage agent for npm supply-chain hijacks: which of your repos are one fresh install away from malware, through which exact lockfile path, who owns the fix, and what to pin.
+**Exposed before the advisory exists.** When an npm maintainer account is hijacked, Patient Zero shows which of your repos are one fresh install away from the malware, through which exact lockfile path, and who owns the fix, before advisory-based scanners have a record to match.
 
-> Built for **FalkorDB Graph Hacks** (WeMakeDevs), **Track 1: Agents That Act on Connected Data**.
+- **Live demo:** `https://<render-url>` (no sign-up; a seeded demo org, or paste your own repo)
+- **Video (2:30):** `https://<video-url>`
+- Built for **FalkorDB Graph Hacks** (WeMakeDevs), **Track 1: Agents That Act on Connected Data**. MIT licensed. Runs on free tiers only.
 
 ## The 74-minute window
 
-On 2025-09-08 an npm maintainer account (`qix`) was phished. The first malicious release (`ansi-styles@6.2.2`) went out at 13:12:10 UTC, `debug@4.4.2` at 13:12:39. The first OSV advisory record (MAL-2025-46974) was published at 14:26:51. For **74 minutes**, advisory-based scanners (`npm audit`, OSV, Dependabot) had nothing to report. In 2026, `axios@1.14.1` went **2 h 54 min** without its own OSV record.
+On 2025-09-08 the npm account `qix` was hijacked. `ansi-styles@6.2.2` went out at 13:12:10 UTC, `debug@4.4.2` at 13:12:39. Someone raised the alarm in about four minutes (Aikido, ~13:16). The first OSV record, MAL-2025-46974 for `debug`, was published at 14:26:51. For **74 minutes**, `npm audit`, OSV and Dependabot had no record to match a lockfile against.
 
-Patient Zero is a **triage layer, not a detector**: once anyone raises the alarm ("account X is compromised"), it answers *what does this mean for us* in seconds, from a graph of maintainers, versions, declared ranges, repos and teams.
+On 2026-03-31 it was `axios`. `axios@1.14.1` was published at 00:21:58 UTC and had no OSV record for **2 h 54 min**.
 
-> **Honest semantics.** `WOULD_PULL` means a *fresh resolve* during the window (new install, lockfile regeneration, `npx`, Dependabot, CI without `npm ci`, or the project's own consumers) would have fetched the malicious version. It is **not** a claim that the project was compromised; `npm ci` with a committed lockfile was safe. `LOCKED` appears only on two clearly badged synthetic repos.
+Detection was not the gap; vendors flagged both quickly. The gap is the next question on the on-call engineer's screen: *which of our repos does this reach, through what, and who do I page?* Patient Zero is a **triage layer, not a detector**. Give it the alarm ("qix is compromised") and it answers that question from a FalkorDB graph of maintainers, versions, declared ranges, lockfile entries, repos and teams, with the Cypher behind every answer.
+
+> **What the tiers mean, before you quote the numbers.**
+> `WOULD_PULL`: a *fresh resolve* during the window would have fetched the malicious version. That is a new clone plus `npm install`, a lockfile regeneration, `npx`, a Dependabot run, CI without `npm ci`, or the project's own downstream consumers. It is **not** a claim that the project was compromised. `npm ci` from a committed lockfile was safe throughout both incidents.
+> `LOCKED`: the lockfile itself pins a malicious version. It appears only on two clearly badged synthetic repos, `acme/checkout-web` and `acme/billing-api`.
+> The 20 other repos are real public projects, read from lockfiles committed just before each incident. Teams and Slack channels are synthetic.
+
+## Try it in 3 clicks
+
+1. **Land.** The timeline autoplays from the first malicious publish past the OSV record. The "Advisory scanner" row stays at 0 while the graph's exposure count climbs; the 74-min figure is revealed only once the playhead passes the advisory, so nothing is spoiled.
+2. **Run triage.** The playbook streams 49 read-only graph calls as tool cards, each with its rows, its Cypher and the query time in ms. The verdict, the notify list and the fix steps are assembled from those rows.
+3. **Click a row, then its Cypher.** Each exposed repo shows the exact chain from its lockfile root to the entry whose range admits the bad version; "Show plan" fetches `GRAPH.EXPLAIN` for that query. **Fix** drafts the pin and PR body; **Notice** drafts the Slack message for the repo's owning team.
+
+Then **paste your own repo** (`owner/name` or a `package-lock.json`). It gets its own graph via `GRAPH.COPY` and the same triage. Or type a follow-up in the **Ask** box: "which exposures are prod-only and who owns them?"
+
+```text
+alert ("qix is compromised") or a scenario clock
+  |
+  v
+Node server: triage playbook, deterministic, 49 read-only tool calls
+  |   find_target > suspect_versions > incident_exposure > explain_path
+  |   > route_owners > draft_remediation > concentration_risk > scanner_view
+  |
+  +-- GRAPH.RO_QUERY as ACL user pz_ro ----------> FalkorDB
+  |                                                pz_registry            template: incidents, advisories, version timelines
+  |                                                pz_acme_qix            GRAPH.COPY + lockfiles as of 2025-09-08T13:00Z
+  |                                                pz_acme_axios          GRAPH.COPY + lockfiles as of 2026-03-31T00:00Z
+  |                                                pz_guest_<sha>_<scn>   GRAPH.COPY + one pasted repo (LRU 4, TTL 1 h)
+  |
+  +-- one LLM call (Groq / Gemini free tier): picks ONE observation id from graph-built facts
+  |
+  +-- SSE --> web UI: timeline, tool cards with Cypher + GRAPH.EXPLAIN, Fix / Notice, Ask box, paste a repo
+  +-- stdio > MCP server: the same read-only tools inside Claude Code / Claude Desktop
+```
 
 ## What it found (verified numbers, see `docs/proof-points.md`)
 
 - **qix at 13:30 UTC:** 20 of 20 real public repos would fetch at least one malicious version on a fresh resolve (13 through production dependencies), plus the synthetic `acme/checkout-web` (LOCKED). `npm/cli`, `mochajs/mocha`, `remy/nodemon` and `github/docs` declare a hijacked package directly in their own `package.json`.
-- **axios at 01:30 UTC:** 9 of 20 repos; `louislam/uptime-kuma` declares `axios ~0.30.3`, which resolved to the malicious 0.30.4.
+- **axios at 01:30 UTC:** 9 of 20 repos; `louislam/uptime-kuma` declares `axios ~0.30.3`, which resolved to the malicious 0.30.4. The app shows **105 min** ahead of the campaign's first OSV record (MAL-2026-2306).
+- **Scanner view:** 0 hits at both clocks, until the first advisory lands.
+- **Graph size:** `pz_acme_qix` holds 46,810 nodes and 123,426 edges (24 MB), built in about 3.3 s; the baked RDB is 11.6 MB.
 - Repos are real public projects, analysed as of their lockfiles just before each incident (`data/cache/lockfiles/manifest.json` pins every SHA).
 
 ## Why the graph does the work
 
-Every answer is a traversal; there is no in-app dependency model. Kill FalkorDB and nothing renders.
+Every answer is a traversal; there is no in-app dependency model. Stop FalkorDB and nothing renders.
 
 | Question | How the graph answers |
 |---|---|
@@ -32,6 +69,15 @@ Every answer is a traversal; there is no in-app dependency model. Kill FalkorDB 
 | What would a scanner see? | one hop, lockfile vs. published OSV records (`SCANNER_VIEW`): **0** for the whole window |
 
 One graph per (tenant, scenario) via `GRAPH.COPY` of a registry template; pasted repos get their own `pz_guest_*` graph.
+
+## What this proves about FalkorDB
+
+- **Multigraph tenancy.** `pz_registry` holds the incidents, advisories and every version timeline once. `GRAPH.COPY` stamps out one graph per tenant and scenario (`pz_acme_qix`, `pz_acme_axios`) and one per pasted repo (`pz_guest_<sha256[0:12]>_<scenario>`, LRU 4, TTL 1 h), so a guest's lockfile never shares a graph with the demo org and the name is never user-controlled.
+- **Time-windowed edges.** `ADMITS {range, fromT, toT}` records when a declared range started and stopped resolving to a bad version. "Who was exposed at 13:30?" is a property filter on the edge, not a replay of the registry.
+- **`shortestPath` with `Dep.depth`.** `EXPLAIN_PATH` starts from the indexed `Version`, orders the candidate lockfile entries by `Dep.depth` (BFS depth from the root, computed at ingest) and runs `shortestPath((root)-[:REQUIRES*0..]->(x))` only for the three shallowest. `*0..` covers a range declared by the root itself.
+- **PageRank.** `CALL algo.pageRank` over the `PKG_DEPENDS` projection writes `Package.pagerank`; `CONCENTRATION_RISK` sums it per maintainer to answer "who could be the next qix?" Top mass in the demo graph: sindresorhus, ljharb, types.
+- **`GRAPH.EXPLAIN` on every card.** "Show plan" fetches the execution plan for a tool's main query and the UI matches it to the statement it describes.
+- **Read-only ACL user.** Every tool runs `GRAPH.RO_QUERY` as `pz_ro` (`+GRAPH.RO_QUERY +GRAPH.EXPLAIN +GRAPH.LIST +PING +HELLO +CLIENT +INFO`); `GRAPH.QUERY` and `GRAPH.DELETE` get NOPERM. A separate `pz_rw` user writes the session-scoped triage records.
 
 ## Graph data model
 
@@ -306,9 +352,16 @@ A public, unauthenticated demo, built to 13 written rules (`docs/decisions.md`):
 
 npm `package-lock.json` v2/v3 only (no yarn/pnpm yet). `overrides`/`resolutions` are not modelled. `latest` is treated as "highest stable" rather than a moving dist-tag. Removal times are approximate (the registry keeps no removal timestamp).
 
+## Roadmap (not in v1)
+
+- **GitHub App** for private repos. v1 reads public repos and pasted lockfiles only.
+- **Registry watcher** that follows publish events for the maintainers your graph depends on, so triage starts from the publish rather than from someone's alarm.
+- **Slack actions**: send the Notice from the app and record the acknowledgement on the graph. v1 drafts the message for you to copy.
+- **yarn.lock, pnpm-lock.yaml and PyPI** lockfiles. v1 is npm `package-lock.json` v2/v3.
+
 ## AI-use disclosure
 
-Built with Claude Code (Anthropic) as the coding assistant, orchestrating several agents; every query and design decision was reviewed by the author. At runtime, free-tier models (Groq / Gemini) only parse alerts, narrate and pick tools in Ask mode; every fact is Cypher-backed and guard-checked.
+Built with Claude Code (Anthropic) as the coding assistant, under the author's direction; the author reviewed every Cypher query and design decision. At runtime, free-tier models (Groq, Gemini) do two things: pick one analyst observation, by id, from facts the server built from the graph, and handle open-ended Ask questions by picking read-only graph tools, with the claims guard checking every name and count in the reply. They never write the verdict, decide tiers, parse the alert, or answer list, rotate or `npm ci` questions. Every fact shown comes from Cypher. Full disclosure: `docs/AI_USE.md`.
 
 ## License
 
