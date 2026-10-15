@@ -19,6 +19,9 @@ test('untrusted values are dropped, not passed on', () => {
   const s = readUrlState('?scenario=nope&at=-5&repo=../../etc/passwd&guest=a/..&open=<script>');
   assert.deepEqual(s, { scenario: null, at: null, repo: null, guest: null, open: null });
   assert.equal(readUrlState('?at=abc').at, null);
+  assert.equal(readUrlState('?scenario=qix-2025-09-08&at=1e16').at, null, 'out of range: would throw in toISOString');
+  assert.equal(readUrlState('?scenario=qix-2025-09-08&at=1774920000000').at, null, "another incident's clock");
+  assert.equal(readUrlState('?scenario=qix-2025-09-08&at=1757338200000').at, 1757338200000);
 });
 
 test('no repo, no open: a dropped lockfile has nothing to reopen', () => {

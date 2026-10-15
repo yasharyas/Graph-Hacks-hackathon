@@ -187,7 +187,7 @@ export function parsePick(text: unknown, obs: Observation[]): Observation | null
 
 // ---------- the deterministic Verdict / Notify / Do ----------
 
-const tk = (s: string) => `\`${s}\``;
+const tk = (s: string) => `\`${s.replace(/[\u0000-\u001f\u007f`]/g, '')}\``; // external text: no line breaks, no code-span escape
 const hm = (t: number) => `${new Date(t).toISOString().slice(11, 16)} UTC`;
 const day = (t: number) => new Date(t).toISOString().slice(0, 10);
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;

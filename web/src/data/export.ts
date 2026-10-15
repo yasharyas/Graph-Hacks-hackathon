@@ -6,6 +6,8 @@ import type { Exposure, ExposurePath, IncidentMeta, Remediation, Report, Tier } 
 import { readUrlState, shareUrl, type OpenTab } from './urlState.ts';
 
 const code = (s: string) => `\`${s.replaceAll('`', "'").replace(/\s+/g, ' ')}\``;
+// Server prose quotes lockfile data: one line, and outside its `code` spans no Markdown link or HTML syntax.
+const prose = (s: string) => s.replace(/[\r\n]+/g, ' ').split('`').map((x, i) => (i % 2 ? x : x.replace(/[\\[\]<>]/g, '\\$&'))).join('`');
 const fence = (s: string) => `\`\`\`\n${s.replaceAll('```', "'''")}\n\`\`\``;
 const oneLine = (s: string) => s.replace(/\s+/g, ' ');
 const word = (s: string) => (/^[A-Z_]{1,16}$/.test(s) ? s : code(s));
@@ -55,7 +57,7 @@ export function reportToMarkdown(r: Report): string {
     '',
     '## Fixes',
     '',
-    ...r.remediations.flatMap((f) => [`### ${code(f.repo)}`, '', ...(hasDirect(f) ? [DIRECT_NOTE, ''] : []), fence(fixJson(f)), '',...f.steps.map((s, i) => `${i + 1}. ${s.replace(/[\r\n]+/g, ' ')}`), '']),
+    ...r.remediations.flatMap((f) => [`### ${code(f.repo)}`, '', ...(hasDirect(f) ? [DIRECT_NOTE, ''] : []), fence(fixJson(f)), '',...f.steps.map((s, i) => `${i + 1}. ${prose(s)}`), '']),
     '## Notices',
     '',
     ...r.notices.flatMap((n) => [`${code(n.team)} (${code(n.channel)})`, '', fence(n.text), '']),

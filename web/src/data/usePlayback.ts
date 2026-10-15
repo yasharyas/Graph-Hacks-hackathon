@@ -57,7 +57,7 @@ export function usePlayback(from: number | null, to: number | null, durationMs =
   // First load (and each scenario change): autoplay, or jump to the end under reduced motion.
   useEffect(() => {
     if (from === null || to === null) return;
-    if (startRef.current !== null && startRef.current >= from) setAt(floorMin(startRef.current));
+    if (startRef.current !== null && startRef.current >= from) setAt(floorMin(Math.min(startRef.current, to)));
     else if (reduce) setAt(to);
     else {
       setAt(from);

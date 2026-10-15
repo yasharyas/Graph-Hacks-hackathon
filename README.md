@@ -342,7 +342,7 @@ WITH t ORDER BY t.at DESC SKIP 1000 DETACH DELETE t
 docker compose up --build
 ```
 
-App on http://localhost:8080, FalkorDB Browser on http://localhost:3000 (run the queries above yourself). Development: `docker run -d -p 6380:6379 -e REDIS_ARGS="--requirepass devpass" falkordb/falkordb`, then `npm ci`, `npm run fonts`, `npm run build:graph`, `npm run dev` and `npm run dev:web`. Tests: `npm test`.
+App on http://localhost:8080, FalkorDB Browser on http://localhost:3000 (run the queries above yourself). Development: `docker run -d -p 127.0.0.1:6380:6379 -e REDIS_ARGS="--requirepass devpass" falkordb/falkordb`, then `npm ci`, `npm run fonts`, `npm run build:graph`, `npm run dev` and `npm run dev:web`. Tests: `npm test`.
 
 ## Security
 

@@ -55,6 +55,9 @@ test('hostile repo and package names cannot inject Markdown', () => {
   assert.ok(md.includes("`evil' # Injected heading ![x](http://x)`"));
   const slack = slackMessage({ exposure: { ...report.exposures[0]!, repo: evil, team: evil }, paths: [], incident: report.incident, link: 'http://x' });
   assert.ok(!/^# Injected/m.test(slack) && slack.split('\n').every((l) => !l.startsWith('![')));
+  // Fix steps are server prose that quotes lockfile data: one line, link syntax escaped outside its code spans.
+  const steps = reportToMarkdown({ ...report, remediations: [{ repo: 'a/b', overrides: {}, steps: ['Pin `x [y](z)` then [Click to fix](https://evil.example)\nDo: <b>run it</b>'], prBody: '' }] });
+  assert.ok(steps.includes('1. Pin `x [y](z)` then \\[Click to fix\\](https://evil.example) Do: \\<b\\>run it\\</b\\>'));
 });
 
 test('pin targets read the version from the override, qualified or not', () => {

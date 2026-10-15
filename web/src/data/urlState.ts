@@ -2,6 +2,7 @@
 // public repo (re-analysed on load; a dropped lockfile has nothing to reopen). Read once on load, written when the user
 // shares or copies a notice. Everything read from the URL is untrusted: it is validated here and never used as markup or
 // in a request body unchecked.
+import { DEFAULT_AT } from './clock.ts';
 import type { ScenarioId } from './types.ts';
 
 const SCENARIOS: readonly ScenarioId[] = ['qix-2025-09-08', 'axios-2026-03-31'];
@@ -17,6 +18,7 @@ export interface UrlState {
   open: OpenTab | null; // which drawer tab to open for `repo` or `guest`
 }
 
+const DAY = 86_400_000;
 const repoOf = (v: string | null) => (v && REPO.test(v) && !/^\.+\/|\/\.+$/.test(v) ? v : null);
 
 export function readUrlState(search: string): UrlState {
@@ -24,7 +26,9 @@ export function readUrlState(search: string): UrlState {
   const scenario = SCENARIOS.find((s) => s === q.get('scenario')) ?? null;
   const at = Number(q.get('at'));
   const open = OPEN.find((o) => o === q.get('open')) ?? null;
-  return { scenario, at: Number.isFinite(at) && at > 0 ? at : null, repo: repoOf(q.get('repo')), guest: repoOf(q.get('guest')), open };
+  // The server's atOf rule: within 30 days of the incident (a far-off clock would only throw in date formatting).
+  const near = Number.isSafeInteger(at) && Math.abs(at - DEFAULT_AT[scenario ?? SCENARIOS[0]]) <= 30 * DAY;
+  return { scenario, at: near ? at : null, repo: repoOf(q.get('repo')), guest: repoOf(q.get('guest')), open };
 }
 
 /** `base` is the current location (keeps ?mock and the path). Pass `guest` for a pasted public repo, `repo` for an org one. */

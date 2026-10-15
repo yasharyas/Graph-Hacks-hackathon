@@ -29,6 +29,12 @@ const keyName = (k: string) => {
 
 export const LIMITS = { entries: 6000, segments: 40, depsPerEntry: 1000, edges: 50_000, range: 128 };
 
+// A pasted repo's lockfile is attacker text, and names, versions and ranges are quoted in verdicts, fix steps and exports
+// (S1/S4): names keep npm's name characters, versions semver's, ranges lose control characters and Markdown link/code syntax.
+const safeName = (s: string) => s.replace(/[^A-Za-z0-9@/._~*-]/g, '').slice(0, 214);
+const safeVersion = (s: string) => s.replace(/[^0-9A-Za-z.+-]/g, '').slice(0, 64);
+const safeRange = (s: string) => s.replace(/[`[\]()]/g, '').replace(/[\s\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, LIMITS.range);
+
 export function parseLockfile(lock: unknown): { deps: Dep[]; edges: Edge[]; unresolved: number } {
   const l = lock as { name?: string; lockfileVersion?: unknown; packages?: Record<string, unknown> } | null;
   if ((l?.lockfileVersion !== 2 && l?.lockfileVersion !== 3) || typeof l.packages !== 'object' || !l.packages)
@@ -59,14 +65,14 @@ export function parseLockfile(lock: unknown): { deps: Dep[]; edges: Edge[]; unre
   for (const [path, e] of pkgs) {
     if (e.link) continue; // a symlink, not a package: resolve() follows it to the target
     // String() so a hostile object in `name`/`version` can never reach a query as a map (S3).
-    const name = String(e.name ?? linked.get(path) ?? (path ? keyName(path) : l.name ?? '')).slice(0, 214);
-    deps.push({ path, name, version: String(e.version ?? '').slice(0, 64), dev: e.dev === true, optional: e.optional === true, depth: -1 });
+    const name = safeName(String(e.name ?? linked.get(path) ?? (path ? keyName(path) : l.name ?? '')));
+    deps.push({ path, name, version: safeVersion(String(e.version ?? '')), dev: e.dev === true, optional: e.optional === true, depth: -1 });
 
     // Same order as npm's arborist: a later dep type overrides an earlier one for the same name.
     const want = new Map<string, { range: string; kind: Kind; optional: boolean }>();
     const add = (m: Deps | undefined, kind: Kind) => {
       for (const [n, range] of Object.entries(m ?? {}))
-        want.set(n, { range: String(range).slice(0, LIMITS.range), kind, optional: kind === 'optional' || (kind === 'peer' && !!e.peerDependenciesMeta?.[n]?.optional) });
+        want.set(n, { range: safeRange(String(range)), kind, optional: kind === 'optional' || (kind === 'peer' && !!e.peerDependenciesMeta?.[n]?.optional) });
     };
     add(e.peerDependencies, 'peer');
     add(e.dependencies, 'prod');
