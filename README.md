@@ -104,6 +104,18 @@ Why one `Dep` node per lockfile location instead of shared `Version -> Version` 
 
 Generated from `server/tools/cypher.ts` by `node scripts/gen-readme-cypher.ts`; `test/readme.test.ts` fails if this drifts from the code.
 
+**Run one yourself.** Every query takes `$parameters` (times are epoch milliseconds). In the FalkorDB Browser (http://localhost:3000 with `docker compose up`), pick the graph `pz_acme_qix` and paste a query with its parameters in front. This one returns the 19 versions the hijacked `qix` account published between 13:00 and 14:30 UTC on 2025-09-08, 74 minutes before the first OSV record:
+
+```cypher
+CYPHER maintainer="qix" since=1757336400000 until=1757341800000
+MATCH (:Maintainer {name: $maintainer})-[:MAINTAINS]->(p:Package)<-[:OF]-(v:Version)
+WHERE v.publishedAt >= $since AND v.publishedAt < $until
+RETURN v.id AS version, p.name AS package, v.publishedAt AS publishedAt, v.removed AS removed
+ORDER BY publishedAt LIMIT 40
+```
+
+From a shell, the same query is `GRAPH.RO_QUERY pz_acme_qix "CYPHER maintainer='qix' since=1757336400000 until=1757341800000 MATCH ..."`. In the app, every tool card's **Copy Cypher** puts the parameters of that run in front of each statement, so what you copy runs as is (13:30 UTC on 2025-09-08 is `at=1757338200000`).
+
 <!-- cypher:start -->
 
 #### `FIND_TARGET`
