@@ -93,7 +93,7 @@ describe('graph', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, ()
     assert.ok(!cli.locked!.some((v) => cli.versions.includes(v)), 'a WOULD_PULL lockfile pins no malicious version');
     const [fix] = T.rowsOf<{ overrides: Record<string, string>; steps: string[] }>(await T.draftRemediation(QIX, { repo: 'npm/cli', versions: cli.versions, at: QAT }));
     assert.match(fix.steps[0], /^Keep installing from your committed lockfile \(npm ci\): it pins .*chalk@5\.4\.1.* \(safe\)$/);
-    assert.match(fix.steps[1], /^Only if you must re-resolve dependencies while the malicious versions are live, add the overrides "chalk@5\.6\.1": "5\.6\.0"/);
+    assert.match(fix.steps[1], /^Only if you must re-resolve dependencies while the malicious versions are live \(they stopped resolving at 2025-09-08 15:15Z\), add the overrides "chalk@5\.6\.1": "5\.6\.0".* to package\.json: they pin every dependent whose range admits the malicious version to that release/);
     assert.ok(Object.keys(fix.overrides).every((k) => cli.versions.includes(k)));
     assert.ok(!fix.steps.some((s) => /rotate/i.test(s)));
   });

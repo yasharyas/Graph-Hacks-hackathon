@@ -125,7 +125,7 @@ function windowLine(incident: IncidentMeta, at?: number): string {
   const from = incident.firstExposureAt ?? incident.firstPublishAt;
   const day = (t: number) => new Date(t).toISOString().slice(0, 10);
   if (at !== undefined && at >= incident.removedAt) return `Window: malicious versions were live from ${utcLabel(from)} on ${day(from)} until npm removed them around ${utcLabel(incident.removedAt)}.`;
-  return `Window: malicious versions live since ${utcLabel(from)} on ${day(from)}${at !== undefined ? ` (still live at ${utcLabel(at)})` : ''}.`;
+  return `Window: malicious versions live since ${utcLabel(from)} on ${day(from)}${at !== undefined ? ` (still live at ${utcLabel(at)}; npm removed them around ${utcLabel(incident.removedAt)})` : ''}.`;
 }
 
 /**

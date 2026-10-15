@@ -77,7 +77,7 @@ async function capped(res: Response): Promise<string> {
 
 // The lockfile as of the scenario snapshot (commits API, unauthenticated: 60 requests an hour per server IP). Without
 // a historical commit (rate-limited, or the lockfile is newer) it falls back to today's lockfile, labelled in the repo id.
-async function fetchLock({ owner, repo }: { owner: string; repo: string }, snapshotAt: number, signal: AbortSignal) {
+async function fetchLock({ owner, repo }: { owner: string; repo: string }, snapshotAt: number, signal: AbortSignal, bad: string[] = []) {
   // A redirect (GitHub answers some repos with a 301 to /repositories/<id>) or a 403 rate limit: no history, use HEAD.
   const commits = await get(`https://api.github.com/repos/${owner}/${repo}/commits?path=package-lock.json&until=${new Date(snapshotAt).toISOString()}&per_page=1`, signal).catch(() => null);
   if (commits?.status === 404) throw new HttpError(404, `github.com/${owner}/${repo} is not a public repo.`);
@@ -91,7 +91,7 @@ async function fetchLock({ owner, repo }: { owner: string; repo: string }, snaps
   const ref = typeof sha === 'string' && /^[0-9a-f]{40}$/.test(sha) ? sha : null;
   const when = typeof date === 'string' ? Date.parse(date) : NaN;
   const res = await get(`https://raw.githubusercontent.com/${owner}/${repo}/${ref ?? 'HEAD'}/package-lock.json`, signal);
-  if (res.status === 404) throw new HttpError(404, await noLockfile(owner, repo, signal));
+  if (res.status === 404) throw new HttpError(404, await noLockfile(owner, repo, signal, bad));
   if (!res.ok) throw new HttpError(502, GITHUB_DOWN);
   const { name: _name, ...parsed } = checkLock(await capped(res));
   const source: LockSource = ref ? { kind: 'snapshot', sha: ref, ...(Number.isFinite(when) && { date: when }) } : { kind: 'head' };
@@ -99,10 +99,11 @@ async function fetchLock({ owner, repo }: { owner: string; repo: string }, snaps
 }
 
 // Which lockfile the repo uses instead, so the error says what to do (HEAD requests only: nothing is downloaded).
-async function noLockfile(owner: string, repo: string, signal: AbortSignal): Promise<string> {
+async function noLockfile(owner: string, repo: string, signal: AbortSignal, bad: string[] = []): Promise<string> {
+  const list = bad.length ? `${bad.slice(0, 6).map((v) => v.replace(/@(?=[^@]*$)/, ' ')).join(', ')}${bad.length > 6 ? ` and ${bad.length - 6} more (the timeline lists them all)` : ''}` : '';
   for (const [file, tool] of [['yarn.lock', 'yarn'], ['pnpm-lock.yaml', 'pnpm']] as const) {
     const r = await safeFetch(`https://raw.githubusercontent.com/${owner}/${repo}/HEAD/${file}`, { method: 'HEAD', signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]) }).catch(() => null);
-    if (r?.ok) return `${owner}/${repo} uses ${tool} (${file}), and Patient Zero reads only npm's package-lock.json (v2 or v3); ${tool} lockfiles are on the roadmap. If the project also installs with npm, run npm install --package-lock-only in a checkout and drop the generated file here (${tool} workspaces with workspace: dependencies cannot be converted this way).`;
+    if (r?.ok) return `${owner}/${repo} uses ${tool} (${file}), and Patient Zero reads only npm's package-lock.json (v2 or v3); ${tool} lockfiles are on the roadmap.${list ? ` To check it by hand, search ${file} at a commit from before the incident for the malicious versions: ${list}.` : ''} If the project also installs with npm (no workspace: dependencies), run npm install --package-lock-only in a checkout and drop the generated file here.`;
   }
   return `No package-lock.json at the root of ${owner}/${repo}. In a checkout, run npm install --package-lock-only (it writes the lockfile without installing anything) and drop the generated package-lock.json here.`;
 }
@@ -168,7 +169,7 @@ export async function* analyze(input: Input, scenario: ScenarioId, session: stri
     let source: LockSource = input.source ?? { kind: 'pasted' };
     if (input.github) {
       yield progress('fetch', 0);
-      ({ parsed, repo, sha, source } = await fetchLock(input.github, snapshotAt, signal));
+      ({ parsed, repo, sha, source } = await fetchLock(input.github, snapshotAt, signal, inc.versions.map((v) => v.id)));
       yield progress('fetch', 1);
     }
     yield progress('parse', 1);

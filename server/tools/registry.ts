@@ -266,13 +266,12 @@ export async function draftRemediation(g: Graph, p: { repo: unknown; versions: u
     : [
       `Keep installing from your committed lockfile (npm ci): ${safeLocked.length ? `it pins ${safeLocked.join(', ')} (safe)` : 'it never resolved the malicious version'}`,
       !pairs ? ''
-        : Number.isFinite(until) && until <= params.at ? `The malicious versions stopped resolving at ${utc(until)}, so a fresh resolve now gets a clean one; to be sure anyway, add the overrides ${pairs} to package.json`
-          // the removal time is not known yet at params.at, so the step never names it
-          : `Only if you must re-resolve dependencies while the malicious versions are live, add the overrides ${pairs} to package.json; each replaces only the malicious version`,
+        : Number.isFinite(until) && until <= params.at ? `The malicious versions stopped resolving at ${utc(until)}, so a fresh resolve now gets a clean release and no override is needed (the overrides ${pairs} were the fix during the window)`
+          : `Only if you must re-resolve dependencies while the malicious versions are live${Number.isFinite(until) ? ` (they stopped resolving at ${utc(until)})` : ''}, add the overrides ${pairs} to package.json: they pin every dependent whose range admits the malicious version to that release, other majors untouched; remove them once it is gone`,
       ...notes,
     ]).filter(Boolean);
   const prBody = `${isLocked ? 'The lockfile resolves' : 'Declared ranges admit'} ${params.versions.join(', ')}. `
-    + (pairs ? `This adds version-qualified overrides (${pairs}) that replace only the malicious versions.` : 'No clean version to pin yet.')
+    + (pairs ? `This adds version-qualified overrides (${pairs}): every dependent whose range admits a malicious version is pinned to the clean release, other majors untouched. Remove them once the malicious versions are gone from npm.` : 'No clean version to pin yet.')
     + (Object.keys({ ...direct, ...devDirect }).length ? ` It also sets the direct ${Object.entries({ ...direct, ...devDirect }).map(([n, v]) => `${n} to ${v}`).join(', ')}, which npm requires next to an override of a direct dependency.` : '');
   const row: Remediation = { repo: params.repo, overrides, ...(Object.keys(direct).length && { direct }), ...(Object.keys(devDirect).length && { devDirect }), steps: uniq(steps), prBody };
   const summary = `${params.repo}: lockfile pins ${isLocked ? `${badLocked.join(', ')} (malicious)` : safeLocked.length ? `${safeLocked.join(', ')} (safe)` : 'no malicious version'}; `

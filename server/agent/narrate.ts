@@ -333,7 +333,11 @@ export function verdictText(r: Report): string {
   const ahead = r.minutesAhead > 0 && first !== null && r.at >= first ? ` The graph showed this ${r.minutesAhead} minutes before the first OSV record.` : '';
   const total = r.scope?.repos ?? Object.values(r.counts).reduce((a, b) => a + b, 0);
   const fixFor = (e: Exposure) => r.remediations.find((m) => m.repo === e.repo)?.overrides ?? {};
-  const reresolve = closed ? 'The malicious versions are gone from npm, so a fresh resolve now gets clean ones; to be sure anyway' : 'Only if you must re-resolve before the malicious versions are removed';
+  // The override is an in-window measure: it pins every dependent whose range admits the bad version, so once npm removed
+  // the malicious versions it only holds packages back.
+  const overrideStep = (what: string) => closed
+    ? 'The malicious versions are gone from npm, so a fresh resolve now gets a clean release: no override is needed.'
+    : `Only if you must re-resolve before npm removes the malicious versions, add ${what}: they pin every dependent whose range admits the malicious version to that release (other majors untouched), so remove them once it is gone.`;
 
   // ----- a pasted repo: one plain answer, no team routing -----
   if (r.scope?.kind === 'guest') {
@@ -348,7 +352,7 @@ export function verdictText(r: Report): string {
       return `Verdict${counterfactual || lockfile}: ${tk(name)} ${counterfactual ? 'would not have been' : 'is not'} exposed to ${who} at ${hm(r.at)} on ${day(r.at)}: no malicious version is in its lockfile or admitted by its declared ranges.`
         + (maint.length ? ' It does depend on packages from the compromised account, so watch their next releases.' : '');
     }
-    const would = counterfactual ? 'would have been' : closed ? 'was' : 'is';
+    const would = counterfactual ? 'would have been' : 'was';
     const pins = (e.locked ?? []).filter((v) => !e.versions.includes(v));
     const fix = replace(fixFor(e));
     if (e.remediated) return [`Verdict${counterfactual || lockfile}: ${tk(e.repo)} is marked remediated for ${who}.`, `Why: ${why(r, e)}.`].join('\n');
@@ -358,9 +362,9 @@ export function verdictText(r: Report): string {
       `Do: 1) ${fix.length ? `Replace ${and(fix)} with overrides, regenerate the lockfile with npm install and commit it.` : 'Remove the malicious versions and regenerate the lockfile.'} 2) Rotate secrets that builds and CI could read in the window, and rebuild anything built from this lockfile in it.`,
     ].join('\n');
     return [
-      `Verdict${counterfactual || lockfile}: ${tk(e.repo)} ${would} exposed to ${who} only on a fresh install ${window}; installing from ${counterfactual ? 'that' : 'your committed'} lockfile ${counterfactual ? 'would have been' : 'was'} safe${pins.length ? `: it pins ${and(pins.map(tk))}` : ''}.${ahead}`,
+      `Verdict${counterfactual || lockfile}: ${tk(e.repo)} ${would} exposed to ${who} only on a fresh install ${window}. Installing from ${counterfactual ? 'that' : 'your committed'} lockfile ${counterfactual ? 'would have been' : 'was'} safe${pins.length ? `: it pins ${and(pins.map(tk))}` : ''}.${ahead}`,
       `Why: ${why(r, e)}.`,
-      `Do: 1) Keep installing from your committed lockfile (npm ci)${pins.length ? `; it pins ${and(pins.map(tk))} (safe)` : ''}.${fix.length ? ` 2) ${reresolve}, add overrides that replace ${and(fix)}; each replaces only the malicious version, so other dependents keep their own majors.` : ''}`,
+      `Do: 1) Keep installing from your committed lockfile (npm ci)${pins.length ? `; it pins ${and(pins.map(tk))} (safe)` : ''}.${fix.length ? ` 2) ${overrideStep(`overrides that replace ${and(fix)}`)}` : ''}`,
     ].join('\n');
   }
 
@@ -384,7 +388,7 @@ export function verdictText(r: Report): string {
   const example = pull.map((e) => replace(fixFor(e))[0]).find(Boolean);
   const steps = [
     pull.length ? `Keep installing the ${pull.length} WOULD_PULL ${pull.length === 1 ? 'repo' : 'repos'} from ${pull.length === 1 ? 'its committed lockfile' : 'their committed lockfiles'} (npm ci): none pins a malicious version.` : '',
-    pull.length && example ? `${reresolve}, add the version-qualified overrides from that repo's Fix (for example, replace ${example}); they leave other dependents on their own majors.` : '',
+    pull.length && example ? overrideStep(`the version-qualified overrides from that repo's Fix (for example, replace ${example})`) : '',
     locked.length ? `For ${and(locked.map((e) => `${tk(e.repo)}${pathOf(r, e) ? ` [${pathOf(r, e)!.id}]` : ''}`))}: rotate secrets that builds and CI could read in the window, rebuild anything built in it, and regenerate the lockfile with the overrides from its Fix.` : '',
   ].filter(Boolean);
 

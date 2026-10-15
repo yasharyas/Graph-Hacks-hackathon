@@ -380,7 +380,7 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
     assert.deepEqual([n.mode, n.note], ['template', null]); // no recording describes a guest graph
     assert.deepEqual(t.report.scope, { kind: 'guest', label: 'pasted/mocha', repos: 1, source: { kind: 'pasted' } });
     assert.deepEqual(t.report.notices, []);
-    assert.match(n.text, /^Verdict \(counterfactual: this checks the lockfile you pasted as if it had been committed on 2025-09-08\): `pasted\/mocha` would have been exposed to the `qix` account compromise only on a fresh install since \d\d:\d\d UTC on \d{4}-\d\d-\d\d \(still live at 13:30 UTC; npm removed them around \d\d:\d\d UTC\); installing from that lockfile would have been safe: it pins .*`debug@4\.3\.5`/);
+    assert.match(n.text, /^Verdict \(counterfactual: this checks the lockfile you pasted as if it had been committed on 2025-09-08\): `pasted\/mocha` would have been exposed to the `qix` account compromise only on a fresh install since \d\d:\d\d UTC on \d{4}-\d\d-\d\d \(still live at 13:30 UTC; npm removed them around \d\d:\d\d UTC\)\. Installing from that lockfile would have been safe: it pins .*`debug@4\.3\.5`/);
     assert.doesNotMatch(n.text, /Notify|#your-team/);
     assert.ok(e.locked!.length > 0 && e.locked!.every((v) => !e.versions.includes(v)), 'a WOULD_PULL lockfile pins only safe versions');
     assert.equal(t.report.minutesAhead, Math.floor((t.report.incident.advisoryAt - t.report.incident.firstExposureAt!) / 60_000)); // its own first exposure
