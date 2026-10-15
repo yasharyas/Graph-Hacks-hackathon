@@ -1,0 +1,30 @@
+# Render Blueprint: one free Docker web service (512 MB, 0.1 CPU, sleeps after 15 min idle; keep it warm, see deploy/README.md).
+# PORT is injected by Render (10000) and also set in the Dockerfile.
+services:
+  - type: web
+    name: patient-zero
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Generated once by Render, never in the repo (S6). start.sh refuses to boot without them.
+      - key: REDIS_PASSWORD
+        generateValue: true
+      - key: PZ_RO_PASSWORD
+        generateValue: true
+      - key: PZ_RW_PASSWORD
+        generateValue: true
+      # Set these in the dashboard (S6). Without them the app falls back to replay/template narration.
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GH_TOKEN # fine-grained, public repositories read-only
+        sync: false
+      - key: LLM_CHAIN
+        value: groq:qwen/qwen3.8-27b,groq:openai/gpt-oss-120b,gemini:gemini-3.5-flash-lite,replay
+      - key: LLM_DAILY_CAP
+        value: "800"

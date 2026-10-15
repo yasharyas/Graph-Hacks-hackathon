@@ -1,0 +1,40 @@
+# Local judging: `docker compose up --build`  ->  app http://localhost:8080, FalkorDB Browser http://localhost:3000
+# Secrets come from .env (copy .env.example); the ${VAR:-default} values below are throwaway dev defaults, so it also
+# runs with no .env. Only loopback ports are published and the database port is not published at all (S8).
+# To reset the graphs: docker compose down.  GROQ_API_KEY / GEMINI_API_KEY / GH_TOKEN are optional (replay mode without).
+
+services:
+  falkordb:
+    # Same pinned FalkorDB as the Dockerfile, so a baked RDB is compatible. This image also serves the Browser UI.
+    image: falkordb/falkordb@sha256:b0bdcac2cbaff989e77cb0610439b7a9289e86de033ccbbd4368b66fb680ae7a
+    environment:
+      REDIS_ARGS: --requirepass ${REDIS_PASSWORD:-pz-dev-redis}
+      # Same module limits as production (S7).
+      FALKORDB_ARGS: TIMEOUT_MAX 30000 TIMEOUT_DEFAULT 15000 RESULTSET_SIZE 50000 QUERY_MEM_CAPACITY 67108864 THREAD_COUNT 1
+      REDISCLI_AUTH: ${REDIS_PASSWORD:-pz-dev-redis}
+    ports:
+      - "127.0.0.1:${BROWSER_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build: .
+    depends_on:
+      falkordb:
+        condition: service_healthy
+    environment:
+      FALKOR_HOST: falkordb # not 127.0.0.1, so start.sh skips its own Redis but still creates the ACL users
+      FALKOR_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-pz-dev-redis}
+      PZ_RO_PASSWORD: ${PZ_RO_PASSWORD:-pz-dev-ro}
+      PZ_RW_PASSWORD: ${PZ_RW_PASSWORD:-pz-dev-rw}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GH_TOKEN: ${GH_TOKEN:-}
+      LLM_CHAIN: ${LLM_CHAIN:-groq:qwen/qwen3.8-27b,groq:openai/gpt-oss-120b,gemini:gemini-3.5-flash-lite,replay}
+      LLM_DAILY_CAP: ${LLM_DAILY_CAP:-800}
+    ports:
+      - "127.0.0.1:${APP_PORT:-8080}:10000"
