@@ -57,7 +57,7 @@ test('the Markdown says it is filtered, lists exactly the view, and a whole expo
   for (const e of report.exposures) assert.equal(md.includes(`- \`${e.repo}\` `), !e.dev, e.repo);
   assert.ok(!md.includes('CLEAN'), 'a table lists no clean repos');
   const whole = reportToMarkdown(report);
-  assert.ok(whole.includes(`Scope: whole report, ${report.exposures.length} repos.`));
+  assert.ok(whole.includes(`Scope: whole report, ${report.exposures.length} exposed repos; clean repos are only counted.`));
   assert.ok(whole.includes('CLEAN'));
 });
 

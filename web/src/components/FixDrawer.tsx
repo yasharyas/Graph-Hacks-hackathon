@@ -15,22 +15,28 @@
  * Header: the repo as words (data/repoLabel.ts: "owner/name (today's lockfile)", "your pasted lockfile (name)"), its tier and,
  * for the demo org only, its team (tagged demo). A pasted repo has no team: the server's placeholder is never shown.
  * Fix tab: which lockfile the repo was judged on (Report.scope.source), what that lockfile pins ("your lockfile pins
- * chalk@5.4.1: safe"; the first 3, malicious ones first, then "+N more"), then the package.json snippet: the overrides AND
- * each direct pin in the block it is declared in (dependencies / devDependencies), because npm rejects an override that
- * conflicts with a direct dependency. The snippet is valid JSON on its own and is what "Copy fix" and the code block's Copy
- * button copy; DIRECT_NOTE sits next to it always, because package.json usually has these blocks already and JSON keeps only
- * the last of two. Then the server's steps and PR body verbatim (nothing here reorders or rewrites them); "More actions"
- * copies those two. Notice tab: one Slack message for THIS repo, complete on its own (data/export.ts slackMessage), whose
- * Details link is a shareUrl (none for a dropped lockfile). Every untrusted string renders as text.
- * Footer, one row: Copy (the active tab), Mark remediated (+ Undo) and a "More actions" menu (copy steps, copy the PR
- * description, whole-report .md / .json, share link). The dialog is modal, so page toasts would sit dimmed and inert under
- * its scrim: every outcome (copied, exported, marked, undone) is reported by the polite status line inside it.
+ * chalk@5.4.1: safe"; the first 3, malicious ones first, then "+N more"), then, before the snippet can be copied, what the
+ * fix is (data/export.ts fixScopeNote / fixTodayNote): made for the lockfile that was judged, as it stood at the incident, so
+ * it is checked against today's package.json before it is merged; and that npm has since removed the malicious versions, so
+ * npm ci needs no change today (a LOCKED lockfile pins a removed version and has to be re-resolved). Then the package.json
+ * snippet: the overrides AND each direct pin in the block it is declared in (dependencies / devDependencies), because npm
+ * rejects an override that conflicts with a direct dependency. The snippet is valid JSON on its own and is what "Copy JSON"
+ * copies (one copy button: the bar's); DIRECT_NOTE sits next to it always, because package.json usually has these blocks
+ * already and JSON keeps only the last of two; fixPinsNote says what a version-qualified key reaches (every dependent whose
+ * range admits that version, pinned to the clean release). Then the server's steps and PR body verbatim (nothing here
+ * reorders or rewrites them); "More actions" copies those two. Notice tab: one Slack message for THIS repo, complete on its
+ * own (data/export.ts slackMessage), whose Details link is a shareUrl (none for a dropped lockfile). Every untrusted string
+ * renders as text. What the tier means is printed once, beside the chip in the header.
+ * Footer, one row that never grows: Copy (the active tab), Mark remediated (or "Remediated" + Undo) and a "More actions" menu
+ * (copy steps, copy the PR description, whole-report .md / .json, share link). The dialog is modal, so page toasts would sit
+ * dimmed and inert under its scrim: every outcome (copied, exported, marked, undone) is reported by the polite status line
+ * inside it, a pill over the foot of the body that goes after a few seconds.
  * Focus: Mark remediated hands focus to Undo, Undo hands it back to Mark remediated (the button that replaces it), so it
  * is never dropped on the page behind the dialog. In a short window (a phone held sideways) the header and footer are
  * compact so the body keeps most of the height.
  */
 import { useEffect, useId, useRef, useState } from 'react';
-import { detailsLink, DIRECT_NOTE, fixJson, lockedOf, pinTargets, slackMessage } from '../data/export.ts';
+import { detailsLink, DIRECT_NOTE, fixJson, fixPinsNote, fixScopeNote, fixTodayNote, lockedOf, pinTargets, slackMessage } from '../data/export.ts';
 import { localStamp } from '../data/clock.ts';
 import { lockNote, realTeam, repoLabel } from '../data/repoLabel.ts';
 import type { Report } from '../data/types.ts';
@@ -39,7 +45,7 @@ import { copyText } from './copy.ts';
 import { Check, Close, Copy, Download, LinkIcon } from './icons/Glyphs.tsx';
 import { IconFrame } from './icons/IconFrame.tsx';
 import { PathChain, PathChip } from './PathChip.tsx';
-import { HONEST_SEMANTICS, TIER_SUBTITLE, TierChip } from './TierChip.tsx';
+import { TIER_SUBTITLE, TierChip } from './TierChip.tsx';
 
 export type DrawerTab = 'fix' | 'notice';
 
@@ -76,6 +82,7 @@ const Dots = () => (
 const menuItem = 'flex min-h-(--control-h) w-full items-center gap-2 rounded-xs px-3 text-left text-base text-fg-0 hov:bg-bg-3';
 
 const PINS = 3; // lockfile pins shown before "+N more": a repo with 16 of them would push the fix below the fold
+const NOTE_MS = 4000; // how long the floating status stays on screen
 
 export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, canUndo, onUndo, onRemediate, running, onCancelRun, onExport, onShare }: FixDrawerProps) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -85,10 +92,10 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
   const menuRef = useRef<HTMLDivElement>(null);
   const handoff = useRef<'undo' | 'mark' | null>(null); // which button focus is owed to once the parent has swapped them
   const hadUndo = useRef<{ repo: string | null; canUndo: boolean }>({ repo: null, canUndo: false });
-  const [note, setNote] = useState('');
+  const [note, setNote] = useState({ text: '', n: 0 }); // `n` tells two identical messages apart, so the second one restarts the clock
   const [menu, setMenu] = useState(false);
   const [allPins, setAllPins] = useState(false);
-  const say = (text: string) => setNote(text);
+  const say = (text: string) => setNote((s) => ({ text, n: s.n + 1 }));
   const shown = useRef<string | null>(repo);
   if (repo) shown.current = repo; // keep the content on screen while the exit transition runs
   const id = useId();
@@ -98,11 +105,17 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
     if (!d) return;
     if (repo && !d.open) d.showModal();
     else if (!repo && d.open) d.close();
-    setNote(''); // a new repo or a closed drawer starts with a clean status line
+    say(''); // a new repo or a closed drawer starts with a clean status line
     setMenu(false);
     setAllPins(false);
     handoff.current = null;
   }, [repo]);
+  // The status floats over the foot of the body (the bar stays one row) and goes by itself: a message that stayed would hide the snippet's last lines.
+  useEffect(() => {
+    if (!note.text) return;
+    const t = setTimeout(() => setNote((s) => (s.n === note.n ? { text: '', n: s.n } : s)), NOTE_MS);
+    return () => clearTimeout(t);
+  }, [note]);
   // "Mark remediated" unmounts the button that had focus and "Undo" unmounts its own: each hands focus to the button that
   // replaces it, so it never falls to the page behind the dialog.
   useEffect(() => {
@@ -114,7 +127,7 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
   // The parent ends an Undo window without a sound: say so, once, for the repo on screen.
   useEffect(() => {
     const was = hadUndo.current;
-    if (was.repo === repo && was.canUndo && !canUndo && remediatedAt !== null) setNote('Saved for this session. Undo is no longer available.');
+    if (was.repo === repo && was.canUndo && !canUndo && remediatedAt !== null) say('Saved for this session. Undo is no longer available.');
     hadUndo.current = { repo, canUndo };
   }, [repo, canUndo, remediatedAt]);
   // The menu closes on a press outside it; Escape closes it before it closes the dialog (see onCancel).
@@ -139,7 +152,10 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
   const bad = new Set(report.incident.versions.map((v) => v.id));
   const snippet = fix ? fixJson(fix) : '';
   const blocks = fix ? [fix.direct && Object.keys(fix.direct).length && 'dependencies', fix.devDirect && Object.keys(fix.devDirect).length && 'devDependencies', 'overrides'].filter(Boolean).join(', ').replace(/, ([^,]*)$/, ' and $1') : '';
-  const qualified = fix ? Object.keys(fix.overrides).some((k) => k.lastIndexOf('@') > 0) : false;
+  // What the snippet was made for, what it pins and what is true today: said before the snippet can be copied (data/export.ts)
+  const scopeNote = fix ? fixScopeNote(fix) : '';
+  const todayNote = fix && exposure ? fixTodayNote(report.incident, exposure.tier) : '';
+  const pinsNote = fix ? fixPinsNote(fix.overrides) : null;
   const stepsText = fix ? fix.steps.map((s, i) => `${i + 1}. ${s}`).join('\n') : '';
   const slack = exposure ? slackMessage({ exposure, paths, fix, incident: report.incident, at: report.at, anonymous: guest, source: report.scope?.source, link: detailsLink(location.href, report, exposure.repo, 'notice') }) : '';
   const copyWhat = async (text: string, what: string) => say((await copyText(text, what, true)) ? `${what} copied` : `Clipboard blocked. Select the ${what.toLowerCase()} text and copy it manually.`);
@@ -169,15 +185,13 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
                 {repoLabel(r)}
               </h2>
               <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 [@media(max-height:500px)]:mt-0">
-                {/* a WOULD_PULL drawer says what the tier means once, in the paragraph below, not twice; a short window drops the gloss */}
+                {/* what the tier means sits right beside it, once (not again in the body); a short window drops the gloss */}
                 <TierChip tier={exposure.tier} dev={exposure.dev} />
                 {/* aria-hidden: the chip already carries these words for a screen reader */}
-                {exposure.tier !== 'WOULD_PULL' && (
-                  <span aria-hidden className="text-xs text-fg-1 [@media(max-height:500px)]:hidden">
-                    {TIER_SUBTITLE[exposure.tier]}
-                  </span>
-                )}
-                {team && <span className="text-xs text-fg-1">Team {team}{guest ? '' : ' (demo)'}</span>}
+                <span aria-hidden className="text-xs text-fg-1 [@media(max-height:500px)]:hidden">
+                  {TIER_SUBTITLE[exposure.tier]}
+                </span>
+                {team && <span className="text-xs text-fg-1">Team {team} (demo)</span>}
                 {exposure.synthetic && <span className="text-xs text-fg-2">sample repo</span>}
               </div>
             </div>
@@ -185,7 +199,6 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
           </div>
 
           <div className="scroll-pane min-h-0 flex-1 p-4 [@media(max-height:500px)]:p-3">
-            {exposure.tier === 'WOULD_PULL' && <p className="mb-3 text-sm text-fg-1">{HONEST_SEMANTICS}</p>}
             {lock && (
               <p className="mb-3 text-sm text-fg-1">
                 {lock.counterfactual && <span className="mr-2 rounded-xs bg-bg-3 px-1.5 py-0.5 font-mono text-xs font-medium text-fg-0">COUNTERFACTUAL</span>}
@@ -194,20 +207,20 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
             )}
             {path && (
               <div className="mb-4">
-                <p className="label-caps text-xs mb-1.5">Path {path.id}</p>
+                <h3 className="label-caps mb-1.5 text-xs">Path {path.id}</h3>
                 <PathChain path={path} badVersions={bad} />
               </div>
             )}
             {pinned.length > 0 && (
               <div className="mb-4">
-                <p className="label-caps text-xs mb-1.5">Your lockfile pins</p>
+                <h3 className="label-caps mb-1.5 text-xs">Your lockfile pins</h3>
                 <ul className="flex flex-col gap-1.5 text-sm text-fg-0">
                   {(allPins ? pinned : pinned.slice(0, PINS)).map((p) => (
                     <li key={p} className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <PathChip item={p} bad={bad.has(p)} />
                       <span className="inline-flex items-center gap-1 text-fg-1">
                         {bad.has(p) ? (
-                          'a malicious version: npm ci installs it'
+                          'a malicious version: npm ci installed it'
                         ) : (
                           <>
                             <Check size={14} className="text-tier-clean" /> safe: npm ci installs exactly this
@@ -261,20 +274,19 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
               {tab === 'fix' &&
                 (fix ? (
                   <>
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="label-caps text-xs">
-                        package.json: <span className="normal-case">{blocks}</span>
-                      </p>
-                      <Button variant="ghost" className="shrink-0 px-2" icon={<Copy size={14} />} onClick={() => void copyWhat(snippet, 'package.json snippet')}>
-                        Copy JSON
-                      </Button>
+                    {/* read before the snippet can be copied: what it was made for, and what is true today */}
+                    <div className="flex flex-col gap-2 rounded-xs border border-line-2 bg-bg-2 p-3 text-sm text-fg-0">
+                      <p>{scopeNote}</p>
+                      <p>{todayNote}</p>
                     </div>
+                    <h3 className="label-caps text-xs">
+                      package.json: <span className="normal-case">{blocks}</span>
+                    </h3>
                     <p className="text-xs text-fg-1">{DIRECT_NOTE}</p>
                     <Block text={snippet} />
-                    {qualified && <p className="text-xs text-fg-1">Each key names the exact bad version it replaces, so other versions of the same package in the tree are untouched.</p>}
-                    {guest && <p className="text-xs text-fg-1">These pins come from the lockfile above. Check them against your current package.json before applying: a version you have moved to since is not reflected.</p>}
+                    {pinsNote && <p className="text-xs text-fg-1">{pinsNote}</p>}
                     {pinTargets(fix.overrides).length > 0 && <p className="text-xs text-fg-1">Pins: <span className="font-mono">{pinTargets(fix.overrides).join(', ')}</span></p>}
-                    <p className="label-caps text-xs">Steps</p>
+                    <h3 className="label-caps text-xs">Steps</h3>
                     <ol className="list-decimal pl-5 text-fg-0">
                       {fix.steps.map((s, i) => (
                         <li key={i} className="mb-1">
@@ -282,7 +294,7 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
                         </li>
                       ))}
                     </ol>
-                    <p className="label-caps text-xs">Pull request body</p>
+                    <h3 className="label-caps text-xs">Pull request body</h3>
                     <p className="text-fg-0">{fix.prBody}</p>
                   </>
                 ) : (
@@ -313,12 +325,13 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
           </div>
 
           <div className="relative flex flex-col gap-2 border-t border-line-1 p-4 [@media(max-height:500px)]:gap-1 [@media(max-height:500px)]:p-2 [@media(max-height:500px)]:pl-4">
-            {/* in a short window the status is a pill over the foot of the body, so saying "copied" never takes height from it */}
+            {/* The status floats over the foot of the body at every size, so "copied" or "marked" never adds a row to the bar,
+                and goes by itself after a few seconds: the snippet's last lines are never covered for good. */}
             <p
               role="status"
-              className="min-h-5 text-xs text-fg-1 empty:hidden [@media(max-height:500px)]:absolute [@media(max-height:500px)]:inset-x-2 [@media(max-height:500px)]:bottom-full [@media(max-height:500px)]:mb-1 [@media(max-height:500px)]:rounded-xs [@media(max-height:500px)]:bg-bg-3 [@media(max-height:500px)]:px-2 [@media(max-height:500px)]:py-1"
+              className="absolute inset-x-4 bottom-full z-10 mb-2 rounded-xs border border-line-2 bg-bg-3 px-3 py-2 text-xs text-fg-0 shadow-popover empty:hidden [@media(max-height:500px)]:inset-x-2 [@media(max-height:500px)]:mb-1 [@media(max-height:500px)]:py-1"
             >
-              {note}
+              {note.text}
             </p>
             <div className="relative flex flex-wrap items-center gap-2">
               <Button
@@ -328,16 +341,21 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
                 disabled={tab === 'fix' ? !fix : !slack}
                 onClick={() => void (tab === 'fix' ? copyWhat(snippet, 'package.json snippet') : copyWhat(slack, 'Slack message'))}
               >
-                {tab === 'fix' ? 'Copy fix' : 'Copy message'}
+                {/* under 360px the bar keeps to one row: the second word is for screen readers there */}
+                Copy<span className="max-[359px]:sr-only"> {tab === 'fix' ? 'JSON' : 'message'}</span>
               </Button>
               {remediatedAt !== null ? (
-                <span className="inline-flex items-center gap-1.5 text-sm text-tier-clean">
-                  <Check size={16} /> remediated {localStamp(remediatedAt)}
+                <span className="inline-flex items-center gap-1 text-sm text-tier-clean">
+                  <Check size={16} />
+                  {/* the stamp is in the name and the tooltip; the bar has no room to print the date and a zone */}
+                  <span title={`Marked remediated ${localStamp(remediatedAt)}`}>
+                    Remediated<span className="sr-only"> {localStamp(remediatedAt)}</span>
+                  </span>
                   {canUndo && (
                     <button
                       ref={undoRef}
                       type="button"
-                      className="ml-1 inline-flex min-h-(--control-h) items-center rounded-xs text-link underline underline-offset-2"
+                      className="inline-flex min-h-(--control-h) min-w-(--control-h) items-center justify-center rounded-xs text-link underline underline-offset-2"
                       onClick={() => ((handoff.current = 'mark'), onUndo(r), say('Undone: not marked remediated'))}
                     >
                       Undo
