@@ -101,6 +101,7 @@ All JSON. SSE responses are `text/event-stream` with one JSON event per `data:` 
 | `POST /api/analyze` | `{ url }` or `{ lockfile }` (+ `scenario`) | SSE `AnalyzeEvent`, then call `/api/triage` with `guest` |
 | `POST /api/remediate` | `{ scenario, repo, action }` | `{ ok: true }` (scoped to the session cookie) |
 | `GET /api/plan` | `?scenario=&tool=` | `{ plan: string[] }` (`GRAPH.EXPLAIN`) |
+| `GET /api/stats` | `?scenario=` | `{ graph, nodes: {label, count}[], edges: {type, count}[], ms }` (memoized per process) |
 
 Mock streams for UI work live in `shared/fixtures/`.
 

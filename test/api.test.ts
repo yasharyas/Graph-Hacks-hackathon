@@ -45,7 +45,9 @@ async function sse<T>(res: Response): Promise<T[]> {
   return out;
 }
 const cookie = (res: Response) => res.headers.get('set-cookie')?.split(';')[0]; // "pz_sid=<hex>"
-const of = <K extends TriageEvent['type']>(evs: TriageEvent[], k: K) => evs.find((e) => e.type === k) as Extract<TriageEvent, { type: K }>;
+// the first event of a kind; a draft narration (the verdict before the analyst pick) is skipped for the final one
+const of = <K extends TriageEvent['type']>(evs: TriageEvent[], k: K) => evs.find((e) => e.type === k && !(e.type === 'narration' && e.draft)) as Extract<TriageEvent, { type: K }>;
+const final = (evs: TriageEvent[]) => evs.filter((e) => !(e.type === 'narration' && e.draft));
 async function triageRun(body: object, h: H = {}) {
   const res = await post('/api/triage', body, h);
   const evs = await sse<TriageEvent>(res);
@@ -76,6 +78,12 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
     // One "minutes ahead" everywhere: advisoryAt - firstExposureAt, computed per graph (axios: 00:21:58, not 23:59).
     assert.deepEqual(scenarios.map((s: { advisoryAt: number; firstExposureAt: number }) => Math.floor((s.advisoryAt - s.firstExposureAt) / 60_000)), [74, 105]);
     assert.deepEqual(scenarios.map((s: { firstExposureAt: number }) => new Date(s.firstExposureAt).toISOString()), ['2025-09-08T13:12:10.343Z', '2026-03-31T00:21:58.168Z']);
+    // graph stats before any triage: counts per label and edge type
+    const stats = await (await get(`/api/stats?scenario=${QIX}`)).json();
+    const count = (xs: { count: number }[], k: string, key: 'label' | 'type') => (xs as Record<string, unknown>[]).find((x) => x[key] === k)?.count;
+    assert.equal(count(stats.nodes, 'Repo', 'label'), 21);
+    assert.ok(Number(count(stats.nodes, 'Dep', 'label')) > 1000 && Number(count(stats.edges, 'ADMITS', 'type')) > 0);
+    assert.equal((await get('/api/stats?scenario=nope')).status, 400);
     const nf = await get('/api/nope', { 'x-request-id': 'attacker-chosen' });
     assert.equal(nf.status, 404);
     const body = await nf.json();
@@ -116,8 +124,12 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
     test(`triage SSE ${scenario}: start, tools, report, deterministic text + replayed note, guard over both, done; counts equal /api/exposure`, async () => {
       const { evs, report } = await triageRun({ scenario, ...(at && { at }) });
       assert.equal(evs[0].type, 'start');
-      assert.deepEqual(evs.slice(-4).map((e) => e.type), ['report', 'narration', 'guard', 'done']);
-      const tools = evs.slice(1, -4);
+      assert.deepEqual(final(evs).slice(-4).map((e) => e.type), ['report', 'narration', 'guard', 'done']);
+      const tools = final(evs).slice(1, -4);
+      // the verdict shows right after the report, before the model picks; the final narration carries the same text
+      const draft = evs[evs.findIndex((e) => e.type === 'report') + 1] as Extract<TriageEvent, { type: 'narration' }>;
+      assert.deepEqual([draft.type, draft.draft, draft.note], ['narration', true, null]);
+      assert.equal(draft.text, of(evs, 'narration').text);
       assert.ok(tools.length > 0 && tools.every((e, i) => e.type === (i % 2 ? 'tool_result' : 'tool_start')), tools.map((e) => e.type).join());
       const narration = of(evs, 'narration');
       assert.equal(narration.mode, 'replay');

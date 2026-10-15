@@ -17,7 +17,7 @@ export function evidenceSet(r: Report): Evidence {
   const entities = new Set<string>();
   const teams = new Set<string>();
   const add = (...xs: (string | null | undefined)[]) => xs.forEach((x) => x && entities.add(x));
-  add(r.incident.id, r.incident.maintainer, r.scope?.kind === 'guest' ? r.scope.label : undefined);
+  add(r.incident.id, r.incident.maintainer, r.scope?.kind === 'guest' ? r.scope.label : undefined, 'LOCKED', 'WOULD_PULL', 'MAINTAINER', 'CLEAN');
   const bad = new Set([...r.incident.versions.map((v) => v.id), ...r.exposures.flatMap((e) => e.versions), ...r.paths.map((p) => p.version)]);
   for (const nv of bad) add(nv, ...split(nv));
   for (const e of r.exposures) {

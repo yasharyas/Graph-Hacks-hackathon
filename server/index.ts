@@ -355,6 +355,20 @@ app.get('/api/plan', async (c) => {
   return c.json({ plan: await explain(orgGraph(s, prefix()), PLAN[tool as ToolName], SAMPLE) });
 });
 
+// Node and edge counts of a demo graph (immutable apart from session triage records, so counted once per process).
+const statsCache = new Map<string, Promise<{ graph: string; nodes: { label: string; count: number }[]; edges: { type: string; count: number }[]; ms: number }>>();
+const stats = (s: ScenarioId) => {
+  const g = org(s);
+  return memo(statsCache, g.name, async () => {
+    const [n, e] = [await g.ro(Q.NODE_COUNTS), await g.ro(Q.EDGE_COUNTS)];
+    return { graph: g.name, nodes: n.rows as { label: string; count: number }[], edges: e.rows as { type: string; count: number }[], ms: n.ms + e.ms };
+  });
+};
+app.get('/api/stats', async (c) => {
+  limit(c, 'stats', 60, MIN);
+  return c.json(await stats(scenarioOf(c.req.query('scenario'))));
+});
+
 app.all('/api/*', (c) => c.json({ error: 'Not found.', requestId: c.get('requestId') }, 404));
 
 app.use('/*', serveStatic({ root: './web/dist', precompressed: true }));
@@ -365,6 +379,7 @@ if (import.meta.main) {
   const port = Number(process.env.PORT ?? 8080);
   serve({ fetch: app.fetch, port }, () => console.log(`patient-zero on :${port}`));
   for (const s of SCENARIOS) timeline(s).catch((e) => console.error('timeline warm-up failed', e)); // first visitor gets it cached
+  for (const s of SCENARIOS) stats(s).catch((e) => console.error('stats warm-up failed', e));
   // Fill the path/fix memo for each scenario's default clock, so the first demo run after a cold start is fast too.
   (async () => {
     for (const s of SCENARIOS) for await (const _ of triage({ graph: org(s), scenario: s, at: DEFAULT_AT[s], signal: AbortSignal.abort() }));

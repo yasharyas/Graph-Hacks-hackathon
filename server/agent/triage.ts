@@ -118,6 +118,7 @@ export async function* triage({ graph: g, scenario, at, alert, session, signal }
     const obs = observations(report);
     let narration = { mode: 'template' as LlmMode, provider: null as string | null, note: null as string | null };
     if (obs.length >= 2) {
+      yield { type: 'narration', ...narration, text, at, draft: true }; // the verdict shows while the model picks
       try {
         const res = await chat({ messages: pickMessages(report, obs), maxTokens: 1500, signal }); // reasoning models (gpt-oss) think before the id
         const pick = parsePick(res.text, obs);

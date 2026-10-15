@@ -35,6 +35,10 @@ export async function* narrated(events: AsyncIterable<TriageEvent>, s: ScenarioI
   let checked = '';
   for await (const e of events) {
     if (e.type === 'report') [report, ev] = [e.report, evidenceSet(e.report)];
+    if (e.type === 'narration' && e.draft) {
+      yield e; // the final narration follows: replay and the guard apply to that one
+      continue;
+    }
     if (e.type === 'narration') {
       const obs = report ? observations(report) : [];
       const live = e.mode === 'live' ? obs.find((o) => o.text === e.note) : undefined;

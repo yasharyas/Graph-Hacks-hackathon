@@ -166,6 +166,22 @@ RETURN type(e) AS kind, e.range AS range, length(p) AS hops, x.depth AS depth,
 ORDER BY kind DESC, hops LIMIT 3
 ```
 
+#### `NODE_COUNTS`
+
+graph stats (the Graph stats tab, before any triage): how many nodes each demo graph holds, per label.
+
+```cypher
+MATCH (n) RETURN labels(n)[0] AS label, count(n) AS count ORDER BY count DESC
+```
+
+#### `EDGE_COUNTS`
+
+graph stats: how many relationships, per type (REQUIRES is the lockfile tree, ADMITS the time-windowed exposure).
+
+```cypher
+MATCH ()-[r]->() RETURN type(r) AS type, count(r) AS count ORDER BY count DESC
+```
+
 #### `ROUTE_OWNERS`
 
 route_owners: who to notify.

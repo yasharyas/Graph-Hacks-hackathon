@@ -192,8 +192,9 @@ describe('graph', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, ()
     const evs: TriageEvent[] = [];
     for await (const e of triage({ graph: QIX, scenario: 'qix-2025-09-08', at: QAT })) evs.push(e);
     assert.equal(evs[0].type, 'start');
-    assert.deepEqual(evs.slice(-4).map((e) => e.type), ['report', 'narration', 'guard', 'done']);
-    const tools = evs.slice(1, -4);
+    const fin = evs.filter((e) => !(e.type === 'narration' && e.draft)); // a draft verdict may precede the final narration
+    assert.deepEqual(fin.slice(-4).map((e) => e.type), ['report', 'narration', 'guard', 'done']);
+    const tools = fin.slice(1, -4);
     assert.ok(tools.every((e, i) => e.type === (i % 2 ? 'tool_result' : 'tool_start')), tools.map((e) => e.type).join(','));
     assert.deepEqual([...new Set(tools.flatMap((e) => (e.type === 'tool_start' ? [e.tool] : [])))],
       ['suspect_versions', 'incident_exposure', 'maintainer_blast_radius', 'explain_path', 'route_owners', 'draft_remediation', 'concentration_risk', 'scanner_view']);

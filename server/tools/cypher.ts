@@ -69,6 +69,11 @@ RETURN type(e) AS kind, e.range AS range, length(p) AS hops, x.depth AS depth,
   [n IN nodes(p) | n.name + '@' + n.version] AS chain, [n IN nodes(p) | n.path] AS lockPaths
 ORDER BY kind DESC, hops LIMIT 3`;
 
+// graph stats (the Graph stats tab, before any triage): how many nodes each demo graph holds, per label.
+export const NODE_COUNTS = `MATCH (n) RETURN labels(n)[0] AS label, count(n) AS count ORDER BY count DESC`;
+// graph stats: how many relationships, per type (REQUIRES is the lockfile tree, ADMITS the time-windowed exposure).
+export const EDGE_COUNTS = `MATCH ()-[r]->() RETURN type(r) AS type, count(r) AS count ORDER BY count DESC`;
+
 // route_owners: who to notify.
 export const ROUTE_OWNERS = `MATCH (r:Repo)-[:OWNED_BY]->(t:Team) WHERE r.id IN $repos
 RETURN t.name AS team, t.channel AS channel, collect(r.id) AS repos ORDER BY team`;
