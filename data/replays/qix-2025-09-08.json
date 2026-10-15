@@ -1,0 +1,6 @@
+{
+  "2025-09-08T13:30Z": {
+    "text": "Verdict: `qix-2025-09-08` incident exposes 21 repos; 1 is LOCKED, 20 would fetch malicious versions.\nNotify: `Payments`, `Docs`, `QA`, `CLI`, `Platform`, `API Clients`.\nDo: Rotate secrets and rebuild `acme/checkout-web` [E1]. Update `github/docs` [E2], `mochajs/mocha` [E3], `npm/cli` [E4], `remy/nodemon` [E5], and `appium/appium` to pin safe versions like `debug@4.4.1` and `chalk@5.6.0`.",
+    "provider": "groq:qwen/qwen3.8-27b"
+  }
+}

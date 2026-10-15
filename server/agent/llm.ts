@@ -6,7 +6,8 @@ import { safeFetch } from '../security.ts';
 export type Msg = { role: 'system' | 'user' | 'assistant' | 'tool'; content?: string | null; tool_call_id?: string; [k: string]: unknown };
 export type ToolSpec = { name: string; description: string; parameters: Record<string, unknown> };
 export type ToolCall = { id: string; name: string; args: Record<string, unknown> };
-export type ChatReq = { messages: Msg[]; tools?: ToolSpec[]; maxTokens?: number; signal?: AbortSignal };
+// `chain` overrides LLM_CHAIN for this call only (e.g. pin the provider a tool loop started on).
+export type ChatReq = { messages: Msg[]; tools?: ToolSpec[]; maxTokens?: number; signal?: AbortSignal; chain?: string };
 export type ChatRes = { text: string; toolCalls: ToolCall[]; provider: string; raw: unknown };
 export type Failure = { provider: string; reason: string };
 
@@ -79,7 +80,7 @@ async function call(base: string, key: string, model: string, req: ChatReq, fetc
 export async function chat(req: ChatReq, fetchImpl: typeof safeFetch = safeFetch): Promise<ChatRes> {
   const failures: Failure[] = [];
   // `replay` (and `template`) are non-LLM fallbacks the caller handles after this throws.
-  const chain = (process.env.LLM_CHAIN ?? DEFAULT_CHAIN).split(',').map((s) => s.trim()).filter((s) => s && s !== 'replay' && s !== 'template');
+  const chain = (req.chain ?? process.env.LLM_CHAIN ?? DEFAULT_CHAIN).split(',').map((s) => s.trim()).filter((s) => s && s !== 'replay' && s !== 'template');
   for (const provider of chain) {
     const cut = provider.indexOf(':'); // model ids contain "/" and may contain ":", so split on the first only
     const host = HOSTS.get(provider.slice(0, cut));

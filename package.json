@@ -13,7 +13,7 @@
     "build:graph": "node --env-file-if-exists=.env server/ingest/build.ts",
     "triage": "node --env-file-if-exists=.env server/agent/triage.ts",
     "mcp": "node --env-file-if-exists=.env server/mcp.ts",
-    "test": "node --test \"test/**/*.test.ts\" \"web/src/**/*.test.ts\"",
+    "test": "node --test --test-concurrency=1 \"test/**/*.test.ts\" \"web/src/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "dev:web": "vite",
     "fonts": "node web/src/design/fetch-fonts.mjs"

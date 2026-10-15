@@ -6,7 +6,7 @@ import type { ScenarioId } from '../../shared/events.ts';
 import { close, db, orgGraph, registryGraph, write } from '../graph/client.ts';
 import { createSchema } from '../graph/schema.ts';
 import { admitWindow } from './admits.ts';
-import { parseLockfile } from './lockfile.ts';
+import { parseLockfile, type Dep, type Edge } from './lockfile.ts';
 
 type Incident = {
   id: ScenarioId; title: string; compromised: string | null; alertAt: string; removedAt: string; sources: string[];
@@ -25,7 +25,7 @@ async function batch(g: string, cypher: string, rows: unknown[]) {
   for (let i = 0; i < rows.length; i += 400) await write(g, cypher, { rows: rows.slice(i, i + 400) });
 }
 
-function load() {
+export function load() {
   const org = read('data/org/acme.json') as Org;
   return {
     org,
@@ -81,16 +81,21 @@ async function buildRegistry(g: string, { incidents, packuments, osv }: Data) {
   await batch(g, 'UNWIND $rows AS r MATCH (a:Version {id: r[0]}), (b:Version {id: r[1]}) CREATE (a)-[:PULLS_IN]->(b)', incidents.flatMap((inc) => inc.pullsIn));
 }
 
-async function buildOrg(registry: string, g: string, scenario: ScenarioId, { org, incidents, manifest, packuments, maintainers }: Data) {
-  await (await db()).selectGraph(registry).copy(g);
-  const snapshotAt = Date.parse(org.scenarios[scenario]);
-  const inc = incidents.find((i) => i.id === scenario)!;
-  const removedAt = Date.parse(inc.removedAt);
-  const bad = inc.versions.map((v) => {
+// The scenario's bad versions, each with every version of its package (ADMITS needs the later releases).
+export type Bad = { id: string; name: string; version: string; publishedAt: number; all: { version: string; publishedAt: number }[] };
+export function badVersions(inc: Incident, packuments: Packuments): Bad[] {
+  return inc.versions.map((v) => {
     const [name, version] = split(v.id);
     const all = Object.entries(packuments[name].versions).map(([version, x]) => ({ version, publishedAt: Date.parse(x.publishedAt) }));
     return { id: v.id, name, version, publishedAt: Date.parse(v.publishedAt), all };
   });
+}
+
+async function buildOrg(registry: string, g: string, scenario: ScenarioId, { org, incidents, manifest, packuments, maintainers }: Data) {
+  await (await db()).selectGraph(registry).copy(g);
+  const snapshotAt = Date.parse(org.scenarios[scenario]);
+  const inc = incidents.find((i) => i.id === scenario)!;
+  const bad = badVersions(inc, packuments);
 
   // Real repos use the scenario's historical lockfile; a synthetic repo joins the scenario whose bad versions it locks.
   const repos = org.repos.flatMap((r) => {
@@ -102,29 +107,47 @@ async function buildOrg(registry: string, g: string, scenario: ScenarioId, { org
     return [{ ...r, sha: m?.sha ?? null, ...lock }];
   });
 
+  await writeRepos(g, org, scenario, snapshotAt, repos);
+  await writeMaintainers(g, repos, maintainers);
+  await writeAdmits(g, repos, bad, Date.parse(inc.removedAt));
+}
+
+// The write stages below are shared by buildOrg and guest ingest (server/ingest/guest.ts: one pasted repo, same queries).
+export type RepoIn = { id: string; team: string; synthetic: boolean; sha: string | null; deps: Dep[]; edges: Edge[] };
+const id = (repo: string, path: string) => `${repo}|${path}`;
+const entries = (repos: RepoIn[]) => repos.flatMap((r) => r.deps.map((d) => ({ ...d, id: id(r.id, d.path), repo: r.id })));
+// Every installed package (not the repo root) resolves to a Version of a Package.
+const installed = (repos: RepoIn[]) => entries(repos).filter((d) => d.path !== '' && d.version !== '');
+
+// Org, teams, repos, every lockfile entry with its REQUIRES edges, and the Version each entry resolves to.
+export async function writeRepos(g: string, org: Pick<Org, 'id' | 'name' | 'teams'>, scenario: ScenarioId, snapshotAt: number, repos: RepoIn[]) {
   await write(g, 'CREATE (:Org {id: $id, name: $name, scenario: $scenario, snapshotAt: $snapshotAt})', { id: org.id, name: org.name, scenario, snapshotAt });
   await batch(g, 'UNWIND $rows AS r CREATE (:Team {id: r.id, name: r.name, channel: r.channel})', org.teams);
   await batch(g, `UNWIND $rows AS r MATCH (o:Org), (t:Team {id: r.team})
     CREATE (o)<-[:IN_ORG]-(:Repo {id: r.id, sha: r.sha, snapshotAt: r.at, synthetic: r.synthetic, depCount: r.depCount})-[:OWNED_BY]->(t)`,
   repos.map((r) => ({ id: r.id, team: r.team, sha: r.sha, synthetic: r.synthetic, depCount: r.deps.length, at: snapshotAt })));
 
-  const id = (repo: string, path: string) => `${repo}|${path}`;
-  const deps = repos.flatMap((r) => r.deps.map((d) => ({ ...d, id: id(r.id, d.path), repo: r.id })));
-  await batch(g, `UNWIND $rows AS r CREATE (:Dep {id: r.id, repo: r.repo, path: r.path, name: r.name, version: r.version, dev: r.dev, optional: r.optional, depth: r.depth})`, deps);
+  await batch(g, `UNWIND $rows AS r CREATE (:Dep {id: r.id, repo: r.repo, path: r.path, name: r.name, version: r.version, dev: r.dev, optional: r.optional, depth: r.depth})`, entries(repos));
   await batch(g, "UNWIND $rows AS r MATCH (repo:Repo {id: r}), (d:Dep {id: r + '|'}) CREATE (repo)-[:ROOT]->(d)", repos.map((r) => r.id));
   await batch(g, 'UNWIND $rows AS r MATCH (a:Dep {id: r.from}), (b:Dep {id: r.to}) CREATE (a)-[:REQUIRES {range: r.range, kind: r.kind}]->(b)',
     repos.flatMap((r) => r.edges.map((e) => ({ from: id(r.id, e.from), to: id(r.id, e.to), range: e.range, kind: e.kind }))));
 
-  // Every installed package (not the repo root) resolves to a Version of a Package.
-  const installed = deps.filter((d) => d.path !== '' && d.version !== '');
+  const inst = installed(repos);
   await batch(g, 'UNWIND $rows AS r MERGE (p:Package {name: r.name}) MERGE (v:Version {id: r.id}) ON CREATE SET v.name = r.name, v.version = r.version MERGE (v)-[:OF]->(p)',
-    uniq(installed.map((d) => ({ id: `${d.name}@${d.version}`, name: d.name, version: d.version })), (r) => r.id));
+    uniq(inst.map((d) => ({ id: `${d.name}@${d.version}`, name: d.name, version: d.version })), (r) => r.id));
   await batch(g, 'UNWIND $rows AS r MATCH (d:Dep {id: r.dep}), (v:Version {id: r.v}) CREATE (d)-[:RESOLVES_TO]->(v)',
-    installed.map((d) => ({ dep: d.id, v: `${d.name}@${d.version}` })));
-  await batch(g, 'UNWIND $rows AS r MATCH (p:Package {name: r.p}) MERGE (m:Maintainer {name: r.m}) MERGE (m)-[:MAINTAINS]->(p)',
-    [...new Set(installed.map((d) => d.name))].flatMap((p) => (maintainers[p]?.maintainers ?? []).filter(human).map((m) => ({ m, p }))));
+    inst.map((d) => ({ dep: d.id, v: `${d.name}@${d.version}` })));
+}
 
-  // ADMITS: a declared range that resolved to a bad version while it was live (same loop as scripts/exposure-oracle.ts).
+// MAINTAINS from the committed maintainers cache only (never a live npm call).
+export async function writeMaintainers(g: string, repos: RepoIn[], maintainers: Data['maintainers']) {
+  await batch(g, 'UNWIND $rows AS r MATCH (p:Package {name: r.p}) MERGE (m:Maintainer {name: r.m}) MERGE (m)-[:MAINTAINS]->(p)',
+    [...new Set(installed(repos).map((d) => d.name))].flatMap((p) => (maintainers[p]?.maintainers ?? []).filter(human).map((m) => ({ m, p }))));
+}
+
+// ADMITS: a declared range that resolved to a bad version while it was live (same loop as scripts/exposure-oracle.ts),
+// then the package projection and PageRank for concentration_risk.
+export async function writeAdmits(g: string, repos: RepoIn[], bad: Bad[], removedAt: number) {
   const admits = repos.flatMap((r) => {
     const byPath = new Map(r.deps.map((d) => [d.path, d]));
     return r.edges.flatMap((e) => bad.flatMap((b) => {

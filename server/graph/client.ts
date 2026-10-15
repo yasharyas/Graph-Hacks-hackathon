@@ -74,3 +74,10 @@ export async function close() {
   rwDb = roDb = undefined;
   await Promise.all(all.map(async (p) => (await p).close()));
 }
+
+// GRAPH.EXPLAIN (as pz_ro) has no params argument, so they ride in FalkorDB's `CYPHER k=v` prefix.
+// Only fixed, server-chosen sample values come through here (GET /api/plan), never request data.
+export async function explain(name: string, cypher: string, params: Record<string, string | number | string[]>): Promise<string[]> {
+  const prefix = Object.entries(params).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(' ');
+  return (await reader()).selectGraph(name).explain(`CYPHER ${prefix} ${cypher}`);
+}

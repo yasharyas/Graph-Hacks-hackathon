@@ -18,7 +18,7 @@ const DAY = 86_400_000;
 // Most severe first: LOCKED, WOULD_PULL prod, WOULD_PULL dev, MAINTAINER, CLEAN; then shallowest.
 const rank = (e: Exposure) => ({ LOCKED: 0, WOULD_PULL: e.dev ? 2 : 1, MAINTAINER: 3, CLEAN: 4 })[e.tier];
 
-export async function* triage({ graph: g, scenario, at, alert, session }: { graph: Graph; scenario: ScenarioId; at: number; alert?: string; session?: string }): AsyncGenerator<TriageEvent> {
+export async function* triage({ graph: g, scenario, at, alert, session, signal }: { graph: Graph; scenario: ScenarioId; at: number; alert?: string; session?: string; signal?: AbortSignal }): AsyncGenerator<TriageEvent> {
   const t0 = performance.now();
   const runId = randomUUID();
   let n = 0;
@@ -114,7 +114,7 @@ export async function* triage({ graph: g, scenario, at, alert, session }: { grap
     const ev = evidenceSet(report);
     let narration = { mode: 'template' as LlmMode, provider: null as string | null, text: templateNarration(report) };
     try {
-      const res = await chat({ messages: narrationMessages(report) });
+      const res = await chat({ messages: narrationMessages(report), signal });
       if (res.text && !guard(res.text, ev).claims.some((c) => !c.ok && c.kind !== 'number')) narration = { mode: 'live', provider: res.provider, text: res.text };
     } catch {
       // every provider failed or none is configured: keep the template
