@@ -18,12 +18,13 @@
  * rate-limited (429, 20 s countdown), analyzing (fetch -> parse -> write -> enrich -> admits, announced politely on
  * stage change only). Server-side validation (S1) is authoritative; the client checks only explain and save a round trip.
  */
-import { useEffect, useId, useMemo, useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
-import { fixFor, plainError } from '../data/errors.ts';
+import { useDeferredValue, useEffect, useId, useMemo, useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
 import { inspectLockfile, looksLikeLockfile, MAX_LOCKFILE_BYTES, repoFromInput, TOO_BIG } from '../data/lockfile.ts';
+import { pasteProblem } from '../data/pasteError.ts';
 import type { AnalyzeState } from '../data/useAnalyze.ts';
 import { Button, IconButton } from './Button.tsx';
-import { Check, CircleAlert, Close, Upload } from './icons/Glyphs.tsx';
+import { copyText } from './copy.ts';
+import { Check, CircleAlert, Close, Copy, Upload } from './icons/Glyphs.tsx';
 import { Sheet } from './Sheet.tsx';
 
 const STAGES = [
@@ -66,26 +67,42 @@ export function PasteBox({
   const [kind, setKind] = useState<'url' | 'lockfile'>('url');
   const [drag, setDrag] = useState(false);
   const [retryIn, setRetryIn] = useState(0);
+  const [copied, setCopied] = useState(false);
+  const [done, setDone] = useState(false); // the analysis finished while the sheet is still open (App closes it a moment later)
   const fileRef = useRef<HTMLInputElement>(null);
   const urlRef = useRef<HTMLInputElement>(null);
   const lockRef = useRef<HTMLTextAreaElement>(null);
 
   const running = analyze.status === 'running';
+  // The progress block stays after the analysis ends: App closes the sheet in the same render (or a few ms later), and a block
+  // that vanished first would move the form up under a person's eyes (a layout shift) just before the sheet slides out. It
+  // is frozen through the exit and cleared when the sheet opens again or a new analysis starts.
+  const [last, setLast] = useState({ status: analyze.status, open });
+  if (last.status !== analyze.status || last.open !== open) {
+    setLast({ status: analyze.status, open });
+    if (open && !last.open) setDone(false);
+    else if (analyze.status !== last.status) setDone(analyze.status === 'ready');
+  }
+  const busy = running || done;
 
-  // 429: one analysis per 20 s, with a visible countdown.
-  const rateLimited = analyze.status === 'error' && analyze.error?.status === 429;
+  // The server's message is the cause, shown whole; what goes around it comes from data/pasteError.ts.
+  const problem = analyze.status === 'error' && analyze.error ? pasteProblem(analyze.error) : null;
+  const rateLimited = problem !== null && problem.wait > 0;
+  const wait = problem?.wait ?? 0;
   useEffect(() => {
     if (!rateLimited) return;
-    setRetryIn(20);
+    setRetryIn(wait);
     const t = setInterval(() => setRetryIn((n) => Math.max(0, n - 1)), 1000);
     return () => clearInterval(t);
-  }, [rateLimited]);
-  const blocked = running || retryIn > 0;
+  }, [rateLimited, wait]);
+  const blocked = busy || retryIn > 0;
 
   const repo = repoFromInput(url);
   const urlError = urlTouched && 'error' in repo ? repo.error : null;
   const urlNote = !urlError && url.trim() && 'url' in repo && repo.url !== url.trim() ? repo.url : null;
-  const check = useMemo(() => (lock.trim() ? inspectLockfile('pasted lockfile', lock) : null), [lock]);
+  // The check parses the whole text: run it for the value React has caught up with, not for every keystroke of a big one.
+  const deferredLock = useDeferredValue(lock);
+  const check = useMemo(() => (deferredLock.trim() ? inspectLockfile('pasted lockfile', deferredLock) : null), [deferredLock]);
   const lockError = lockTouched ? (check?.problem ?? null) : null;
   const ok = check && !check.problem ? check : lock.trim() ? null : taken; // an emptied field has nothing parsed
 
@@ -154,8 +171,11 @@ export function PasteBox({
   const stages = kind === 'url' ? STAGES : STAGES.slice(1); // a pasted lockfile has nothing to fetch
   const at = stages.findIndex((s) => s.id === analyze.stage?.stage);
   const progress = analyze.stage ? (at + analyze.stage.done / Math.max(1, analyze.stage.total)) / stages.length : 0;
-  const serverError = analyze.status === 'error' && analyze.error ? { ...analyze.error, message: plainError(analyze.error), fix: fixFor(analyze.error, 'analyze') } : null;
   const shownLockError = fileProblem ?? lockError;
+  const copyCommand = async (cmd: string) => {
+    setCopied(await copyText(cmd, 'Command', true)); // quiet: a toast would sit under this modal's scrim
+    setTimeout(() => setCopied(false), 2500);
+  };
 
   return (
     <Sheet id="paste-panel" open={open} onClose={onClose} labelledBy={`${id}-title`} onDragOver={(e) => (e.preventDefault(), setDrag(true))} onDragLeave={() => setDrag(false)} onDrop={onDrop}>
@@ -167,18 +187,29 @@ export function PasteBox({
           <IconButton label="Close" icon={<Close size={20} />} onClick={onClose} />
         </div>
 
-        {(serverError || running) && (
+        {(problem || busy) && (
           <div className="min-w-0 border-b border-line-1 bg-bg-2 p-4">
-            {serverError && (
+            {problem && (
               <div role="alert" className="flex flex-col gap-1.5 text-sm">
+                {/* the server's own sentence, whole: it already says what is wrong and what to run */}
                 <p className="flex items-start gap-2 text-fg-0">
                   <CircleAlert size={16} className="mt-0.5 shrink-0 text-fg-1" />
-                  {serverError.message}
+                  {problem.message}
                 </p>
-                {serverError.fix && <p className="text-fg-1">{serverError.fix}</p>}
-                {serverError.requestId && (
+                {problem.command && (
+                  <p className="flex flex-wrap items-center gap-2">
+                    <code className="rounded-xs bg-bg-3 px-2 py-1 font-mono text-xs text-fg-0 select-all">{problem.command}</code>
+                    <Button className="px-2.5" icon={<Copy size={14} />} aria-label="Copy command" onClick={() => void copyCommand(problem.command!)}>
+                      Copy
+                    </Button>
+                    <span role="status" className="text-xs text-fg-1">
+                      {copied ? 'Copied' : ''}
+                    </span>
+                  </p>
+                )}
+                {problem.requestId && (
                   <p className="font-mono text-xs text-fg-2">
-                    request <span className="select-all text-fg-1">{serverError.requestId}</span>
+                    request <span className="select-all text-fg-1">{problem.requestId}</span>
                   </p>
                 )}
                 <p className="flex flex-wrap items-center gap-2 text-fg-1">
@@ -197,26 +228,29 @@ export function PasteBox({
                 </p>
               </div>
             )}
-            {running && (
+            {busy && (
               <div>
                 <div className="h-1 overflow-hidden rounded-xs bg-bg-3" aria-hidden>
-                  <div className="h-full origin-left bg-fg-0 transition-transform duration-(--dur-base) ease-out" style={{ transform: `scaleX(${progress})` }} />
+                  <div className="h-full origin-left bg-fg-0 transition-transform duration-(--dur-base) ease-out" style={{ transform: `scaleX(${done ? 1 : progress})` }} />
                 </div>
+                {/* every mark is the same width, so a finished stage never re-wraps the row */}
                 <ol className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
                   {stages.map((s) => {
-                    const state = at < 0 ? 'todo' : stages.indexOf(s) < at ? 'done' : stages.indexOf(s) === at ? 'now' : 'todo';
+                    const state = done ? 'done' : at < 0 ? 'todo' : stages.indexOf(s) < at ? 'done' : stages.indexOf(s) === at ? 'now' : 'todo';
                     return (
                       <li key={s.id} aria-current={state === 'now' ? 'step' : undefined} className={`inline-flex items-center gap-1 ${state === 'now' ? 'text-fg-0' : state === 'done' ? 'text-tier-clean' : 'text-fg-2'}`}>
-                        {state === 'done' ? <Check size={12} /> : <span aria-hidden className={`size-1.5 rounded-full ${state === 'now' ? 'bg-fg-0' : 'bg-line-3'}`} />}
+                        <span aria-hidden className="grid size-3 shrink-0 place-items-center">
+                          {state === 'done' ? <Check size={12} /> : <span className={`size-1.5 rounded-full ${state === 'now' ? 'bg-fg-0' : 'bg-line-3'}`} />}
+                        </span>
                         {s.label}
                       </li>
                     );
                   })}
                 </ol>
-                {/* announced on stage changes only: the counter is aria-hidden */}
-                <p role="status" className="mt-1 font-mono text-xs text-fg-1">
+                {/* announced on stage changes only: the counter is aria-hidden. Two lines are kept for it, so a longer step never moves the form. */}
+                <p role="status" className="mt-1 min-h-9 font-mono text-xs text-fg-1">
                   {taken && kind === 'lockfile' ? `Parsed ${taken.packages.toLocaleString('en-US')} packages. ` : ''}
-                  {step < 0 ? 'Starting' : `Step ${at + 1} of ${stages.length}: ${STAGES[step]!.label.toLowerCase()}`}
+                  {done ? 'Done. Opening the result' : step < 0 ? 'Starting' : `Step ${at + 1} of ${stages.length}: ${STAGES[step]!.label.toLowerCase()}`}
                 </p>
               </div>
             )}
@@ -254,7 +288,7 @@ export function PasteBox({
                   onPaste={onPasteUrl}
                   onBlur={() => url.trim() && setUrlTouched(true)}
                 />
-                <Button type="submit" variant="primary" loading={running && kind === 'url'} disabled={blocked}>
+                <Button type="submit" variant="primary" loading={busy && kind === 'url'} disabled={blocked}>
                   {retryIn > 0 ? `Retry in ${retryIn} s` : 'Analyze'}
                 </Button>
               </div>
@@ -284,12 +318,19 @@ export function PasteBox({
                 aria-invalid={shownLockError ? true : undefined}
                 aria-describedby={shownLockError ? `${id}-lock-err` : ok ? `${id}-lock-ok` : undefined}
                 onFocus={() => url.trim() || setUrlTouched(false)} // an empty repo field is not an error while the lockfile is being filled in
-                onChange={(e) => (setLock(e.target.value), setFileProblem(null))}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  // A lockfile too big to read in a textarea arriving as one input event (an IME, a drag of text, a test harness) is
+                  // taken whole, like a paste: the box never holds it, so no keystroke re-renders, re-measures or re-parses 100 kB.
+                  if (v.length > SHOW_MAX) return blocked ? undefined : take('pasted lockfile', v);
+                  setLock(v);
+                  setFileProblem(null);
+                }}
                 onPaste={onPasteLock}
                 onBlur={() => lock.trim() && setLockTouched(true)}
               />
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <Button loading={running && kind === 'lockfile'} disabled={blocked || !lock.trim()} onClick={() => analyzeLock()}>
+                <Button loading={busy && kind === 'lockfile'} disabled={blocked || !lock.trim()} onClick={() => analyzeLock()}>
                   Analyze lockfile
                 </Button>
                 <Button icon={<Upload size={16} />} onClick={() => fileRef.current?.click()} disabled={blocked}>

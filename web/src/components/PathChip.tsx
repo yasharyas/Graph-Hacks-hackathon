@@ -5,17 +5,20 @@
  * HopDots props: hops. Dot per hop, capped at 5 then +N.
  * Separators are inline SVG arrows (Martian Mono has no U+2192): single = REQUIRES/RESOLVES_TO, bar = ADMITS.
  */
+import { repoShort } from '../data/repoLabel.ts';
 import type { ExposurePath } from '../data/types.ts';
 import { ArrowRight, ArrowRightToLine } from './icons/Glyphs.tsx';
 
-/** "name@1.2.3" -> ["name", "1.2.3"]; scoped "@a/b@1.0.0" and repo ids ("owner/name") are handled. */
+/** "name@1.2.3" -> ["name", "1.2.3"]; scoped "@a/b@1.0.0" and repo ids ("owner/name") are handled. "@HEAD" (a pasted repo read at today's lockfile) is not a version. */
 export function splitRef(ref: string): [name: string, version: string | null] {
+  if (ref.endsWith('@HEAD')) return [ref.slice(0, -'@HEAD'.length), null];
   const i = ref.lastIndexOf('@');
   return i > 0 ? [ref.slice(0, i), ref.slice(i + 1)] : [ref, null];
 }
 
-export function PathChip({ item, bad = false }: { item: string; bad?: boolean }) {
-  const [name, version] = splitRef(item);
+/** `label`: draw this instead of the name (and no version): the root repo of a chain, in plain words. */
+export function PathChip({ item, bad = false, label }: { item: string; bad?: boolean; label?: string }) {
+  const [name, version] = label === undefined ? splitRef(item) : [label, null];
   return (
     <span className="inline-flex max-w-full items-center rounded-xs bg-bg-2 px-1.5 py-0.5 font-mono text-xs break-words">
       <span className="text-fg-0">{name}</span>
@@ -66,7 +69,7 @@ export function PathChain({
               ) : (
                 <ArrowRight size={12} className="text-fg-2" title="requires" />
               ))}
-            <PathChip item={item} bad={badVersions.has(item)} />
+            <PathChip item={item} bad={badVersions.has(item)} label={item === path.repo ? repoShort(item) : undefined} />
           </span>
         );
       })}

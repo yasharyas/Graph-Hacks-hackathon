@@ -29,7 +29,8 @@ export function TierChip({ tier, dev = false, showSubtitle = false, tip = false 
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
       <span className={tip ? 'tip-host inline-flex' : 'inline-flex'}>
-        <span className={`inline-flex h-[18px] items-center gap-1.5 rounded-xs px-1.5 font-mono text-xs leading-none font-medium ${STYLE[tier]}`}>
+        {/* never wraps: "WOULD_PU / LL" in a narrow cell (a tool card's table) is worse than a cell that grows */}
+        <span className={`inline-flex h-[18px] shrink-0 items-center gap-1.5 rounded-xs px-1.5 font-mono text-xs leading-none font-medium whitespace-nowrap ${STYLE[tier]}`}>
           <span aria-hidden className="size-1.5 rounded-full bg-current" />
           {tier}
           <span className="sr-only">

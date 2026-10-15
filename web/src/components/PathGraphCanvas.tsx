@@ -30,6 +30,7 @@ import ForceGraph2D, { type ForceGraphMethods, type NodeObject } from 'react-for
 import type { Exposure, ExposurePath, IncidentMeta } from '../data/types.ts';
 import { motionTokens } from './icons/motionTokens.ts';
 import { splitRef } from './PathChip.tsx';
+import { repoLabel, repoShort } from '../data/repoLabel.ts';
 
 export type NodeType = 'maintainer' | 'bad' | 'dep' | 'repo' | 'team';
 type GNode = { id: string; type: NodeType; label: string; fx?: number; fy?: number };
@@ -59,8 +60,14 @@ const PLACES: Record<NodeType, Side[]> = {
 const CHAIN_REPO_PLACES: Side[] = ['above', 'below', 'right'];
 type Box = [x0: number, y0: number, x1: number, y1: number, owner: string];
 const R: Record<NodeType, number> = { maintainer: 9, bad: 6, dep: 3.5, repo: 6, team: 6.5 };
-/** Radius in graph units: a node never draws smaller than 4 screen px, so a short pane's shrunken graph stays legible. */
-const rad = (t: NodeType, scale: number) => Math.max(R[t], 4 / scale);
+/**
+ * Radius in graph units: a node never draws smaller than 4 screen px, so a short pane's shrunken graph stays legible. Repos
+ * are the exception when their rows are packed tighter than 8 px (21 repos in a 210 px pane): there the square shrinks to leave
+ * a gap, down to 1.5 px, instead of merging with its neighbours into one bar.
+ */
+const rad = (t: NodeType, scale: number) => Math.max(R[t], (t === 'repo' ? Math.min(4, Math.max(1.5, (ROW_PX * scale) / 2 - 1)) : 4) / scale);
+/** Vertical padding of the fit: a short pane cannot spare 40 px above and below (labels overhang a node by 8). */
+const padY = (height: number) => (height < 300 ? 20 : FIT.y);
 const GAP_PX = 130; // screen gap between two columns, at most: room for a 17-character label
 const ROW_PX = 24; // vertical pitch of a row: a 14px label fits under its node
 const FIT = { left: 56, right: 84, y: 40, maxK: 1.2 }; // screen-px padding (labels overhang their nodes) and the zoom ceiling
@@ -125,7 +132,7 @@ export function buildGraph(exposures: Exposure[], paths: ExposurePath[], inciden
 
   // Repos are labelled by name alone unless two share it ("cli" twice), then by owner/name.
   const names = new Map<string, number>();
-  const short = (id: string) => id.split('/')[1] ?? id;
+  const short = (id: string) => repoShort(id).split('/').pop() ?? id;
   for (const n of nodes.values()) if (n.type === 'repo') names.set(short(n.id), (names.get(short(n.id)) ?? 0) + 1);
   for (const n of nodes.values()) if (n.type === 'repo' && names.get(short(n.id))! < 2) n.label = short(n.id);
 
@@ -230,7 +237,7 @@ export default function PathGraphCanvas({ exposures, paths, incident, selectedRe
   // whatever its shape (21 repos in one column, or 10 repos behind 3 dependency hops). Snapped to 8 so a drag-resize
   // does not rebuild the graph on every pixel.
   const rows = new Set([...exposures.map((e) => e.repo), ...paths.map((p) => p.repo)]).size || 1;
-  const rowScale = Math.max(0.1, Math.min(FIT.maxK, (height - 2 * FIT.y) / (rows * ROW_PX)));
+  const rowScale = Math.max(0.1, Math.min(FIT.maxK, (height - 2 * padY(height)) / (rows * ROW_PX)));
   const colPx = Math.max(8, Math.round(Math.min(GAP_PX, (width - FIT.left - FIT.right) / columnGaps(exposures, paths, incident)) / rowScale / 8) * 8);
 
   const graphKey = useMemo(() => exposures.map((e) => `${e.repo}:${e.versions.length}`).join() + '|' + paths.map((p) => p.id).join(), [exposures, paths]);
@@ -266,7 +273,7 @@ export default function PathGraphCanvas({ exposures, paths, incident, selectedRe
     const ys = ns.map((n) => n.y!);
     const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
     box.current = { x0, x1 };
-    const k = Math.max(0.05, Math.min((width - FIT.left - FIT.right) / Math.max(x1 - x0, 1), (height - 2 * FIT.y) / Math.max(y1 - y0, 1), FIT.maxK));
+    const k = Math.max(0.05, Math.min((width - FIT.left - FIT.right) / Math.max(x1 - x0, 1), (height - 2 * padY(height)) / Math.max(y1 - y0, 1), FIT.maxK));
     g.zoom(k, 0);
     // The right margin is wider (team labels sit right of their node), so the box centres left of the pane centre.
     g.centerAt((x0 + x1) / 2 - (FIT.left - FIT.right) / (2 * k), (y0 + y1) / 2, 0);
@@ -275,7 +282,7 @@ export default function PathGraphCanvas({ exposures, paths, incident, selectedRe
   // Canvas text does not repaint when a webfont arrives: ask for the labels' fonts, then re-render to redraw.
   const [, fontsReady] = useState(false);
   useEffect(() => {
-    void Promise.all([document.fonts.load(`11px ${tok.mono}`), document.fonts.load(`500 12px ${tok.sans}`)]).then(() => fontsReady(true));
+    void Promise.all([document.fonts.load(`12px ${tok.mono}`), document.fonts.load(`500 12px ${tok.sans}`)]).then(() => fontsReady(true));
   }, [tok]);
 
   // Particles: on the selected chain for a bounded time, on every link during the landing autoplay, never under reduced motion.
@@ -423,7 +430,7 @@ export default function PathGraphCanvas({ exposures, paths, incident, selectedRe
     ctx.save();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.textBaseline = 'top';
-    const font = (n: GNode) => (n.type === 'maintainer' || n.type === 'team' ? `500 12px ${tok.sans}` : `11px ${tok.mono}`);
+    const font = (n: GNode) => (n.type === 'maintainer' || n.type === 'team' ? `500 12px ${tok.sans}` : `12px ${tok.mono}`);
     // Each label tries its preferred sides in order and takes the first spot that overlaps no placed label and no
     // fully-opaque node; if none is free it is skipped, so there is never label soup.
     const nodes = (graph.nodes as NodeObject<GNode>[]).filter((n) => n.x !== undefined && n.y !== undefined);
@@ -439,7 +446,8 @@ export default function PathGraphCanvas({ exposures, paths, incident, selectedRe
       !placed.some((p) => p[4] !== self && rect[0]! < p[2]! && rect[2]! > p[0]! && rect[1]! < p[3]! && rect[3]! > p[1]!);
     const labelled = nodes
       .filter((n) => n.id !== hover && (chain ? chain.nodes.has(n.id) : n.type === 'repo' || n.type === 'bad' || n.type === 'maintainer'))
-      .sort((a, b) => LABEL_RANK[a.type] - LABEL_RANK[b.type]);
+      // by kind, then the LOCKED repos (the worst finding always gets its name when the rows are too tight to name them all)
+      .sort((a, b) => LABEL_RANK[a.type] - LABEL_RANK[b.type] || Number(byRepo.get(b.id)?.tier === 'LOCKED') - Number(byRepo.get(a.id)?.tier === 'LOCKED'));
     for (const n of labelled) {
       const text = labelText(n);
       ctx.font = font(n);
@@ -469,9 +477,9 @@ export default function PathGraphCanvas({ exposures, paths, incident, selectedRe
     if (hn && hn.x !== undefined && hn.y !== undefined) {
       const detail = hoverDetail(hn);
       ctx.font = font(hn);
-      const title = hn.type === 'repo' || hn.type === 'bad' || hn.type === 'dep' ? hn.id : hn.label;
+      const title = hn.type === 'repo' ? repoLabel(hn.id) : hn.type === 'bad' || hn.type === 'dep' ? hn.id : hn.label;
       const w1 = ctx.measureText(title).width;
-      ctx.font = `11px ${tok.sans}`;
+      ctx.font = `12px ${tok.sans}`;
       const w = Math.min(width - 8, Math.max(w1, ctx.measureText(detail).width) + 16);
       const { x: sx, y: sy } = g.graph2ScreenCoords(hn.x, hn.y);
       const rr = rad(hn.type, k) * k;
@@ -489,7 +497,7 @@ export default function PathGraphCanvas({ exposures, paths, incident, selectedRe
       ctx.font = font(hn);
       ctx.fillText(title, left + 8, top + 5, w - 16);
       ctx.fillStyle = tok.label;
-      ctx.font = `11px ${tok.sans}`;
+      ctx.font = `12px ${tok.sans}`;
       ctx.fillText(detail, left + 8, top + 21, w - 16);
     }
 

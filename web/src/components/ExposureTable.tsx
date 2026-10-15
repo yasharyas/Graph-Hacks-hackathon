@@ -25,9 +25,11 @@
  * Repo names are buttons (the accessible name of the row); the row click is a convenience.
  * Untrusted strings (repo, team, package names) render as text only.
  */
-import { useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { Fragment, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { localStamp, localTime } from '../data/clock.ts';
-import { HEAD_NOTE, isHead, plural } from '../data/format.ts';
+import { plural } from '../data/format.ts';
+import { lockNote, realTeam, repoLabel } from '../data/repoLabel.ts';
+import { viewLabel, type ReportView } from '../data/reportView.ts';
 import type { Exposure, ExposurePath, Tier } from '../data/types.ts';
 import { Button } from './Button.tsx';
 import { EmptyState } from './EmptyState.tsx';
@@ -62,7 +64,8 @@ export interface ExposureTableProps {
   onSelect: (repo: string) => void;
   onOpenFix: (repo: string) => void;
   onUndo: (repo: string) => void;
-  onExport?: (format: 'md' | 'json') => string;
+  /** `view` is set while a filter hides rows: the repos shown, in table order, and the filter in words. */
+  onExport?: (format: 'md' | 'json', view?: ReportView) => string;
 }
 
 /** `name@1.2.3` on one line: the name truncates, the version never does. */
@@ -128,15 +131,19 @@ function TierHelp() {
         }
       }}
     >
+      {/* Named by text, not by an aria-label that differs from what is drawn (WCAG 2.5.3): the "?" is a decoration, the name is
+          words. The circle stays 24px; the button around it is the 44px touch target on a coarse pointer. */}
       <button
         type="button"
         aria-expanded={open}
         aria-controls={open ? id : undefined}
-        aria-label="What the tiers mean"
         onClick={() => setOpen((o) => !o)}
-        className="inline-flex size-6 items-center justify-center rounded-full border border-line-3 text-xs font-medium text-fg-1 aria-expanded:border-fg-0 aria-expanded:text-fg-0 hov:text-fg-0"
+        className="group inline-flex size-6 items-center justify-center rounded-full pointer-coarse:size-11 hov:bg-bg-3"
       >
-        ?
+        <span aria-hidden className="inline-flex size-6 items-center justify-center rounded-full border border-line-3 text-xs font-medium text-fg-1 group-aria-expanded:border-fg-0 group-aria-expanded:text-fg-0">
+          ?
+        </span>
+        <span className="sr-only">What the tiers mean</span>
       </button>
       {open && (
         <dl id={id} className="absolute top-full left-0 z-(--z-dropdown) mt-1 flex w-72 max-w-[calc(100vw-2rem)] flex-col gap-2 rounded-sm bg-bg-2 p-3 text-left text-xs normal-case shadow-popover">
@@ -156,13 +163,16 @@ function TierHelp() {
 
 const menuItem = 'flex min-h-(--control-h) w-full items-center gap-2 rounded-xs px-3 text-left text-base text-fg-0 hov:bg-bg-3';
 
-/** "Export report": the whole run as Markdown or JSON, from the table, so it is not hidden inside one repo's drawer. */
-function ExportMenu({ onExport }: { onExport: (format: 'md' | 'json') => string }) {
+/**
+ * "Export report": the run as Markdown or JSON, from the table, so it is not hidden inside one repo's drawer. While a filter
+ * hides rows the export holds exactly the rows shown (`view`), and the menu, the toast and the file all say so.
+ */
+function ExportMenu({ onExport, view, total }: { onExport: (format: 'md' | 'json', view?: ReportView) => string; view: ReportView | undefined; total: number }) {
   const [open, setOpen] = useState(false);
   const id = useId();
   const btn = useRef<HTMLButtonElement>(null);
   const run = (format: 'md' | 'json') => {
-    toast({ message: `Exported ${onExport(format)}`, tone: 'success' });
+    toast({ message: `Exported ${onExport(format, view)}${view ? ` (${view.label})` : ''}`, tone: 'success' });
     setOpen(false);
     btn.current?.focus();
   };
@@ -185,7 +195,8 @@ function ExportMenu({ onExport }: { onExport: (format: 'md' | 'json') => string 
         Export
       </Button>
       {open && (
-        <div id={id} role="group" aria-label="Export report" className="absolute top-full right-0 z-(--z-dropdown) mt-1 w-52 origin-top-right animate-enter rounded-sm border border-line-2 bg-bg-2 p-1 shadow-popover">
+        <div id={id} role="group" aria-label="Export report" className="absolute top-full right-0 z-(--z-dropdown) mt-1 w-60 origin-top-right animate-enter rounded-sm border border-line-2 bg-bg-2 p-1 shadow-popover">
+          <p className="px-3 py-1 text-xs text-fg-1">{view ? `Only the rows shown: ${view.label}.` : `The whole report, ${plural(total, 'repo')}.`}</p>
           <button type="button" className={menuItem} onClick={() => run('md')}>
             <Download size={16} /> Report (.md)
           </button>
@@ -204,6 +215,9 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'tier', dir: 1 });
   const [active, setActive] = useState<string | null>(null); // the row that holds the one tab stop
+  const root = useRef<HTMLElement>(null);
+  const owed = useRef<string | null>(null); // the row whose Undo was pressed: focus is owed to its repo button once the Undo is gone
+  const [undone, setUndone] = useState('');
 
   const devOnly = exposures.filter((e) => e.dev).length;
   const rows = useMemo(() => {
@@ -242,6 +256,24 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
     next?.focus();
   };
 
+  // The Undo button unmounts when the mark goes: focus would fall to <body> and nothing would say what happened. Land on the
+  // row's repo button (the table's one tab stop for it) and announce it.
+  useEffect(() => {
+    const repo = owed.current;
+    if (!repo || remediated[repo] !== undefined) return;
+    owed.current = null;
+    setActive(repo);
+    [...(root.current?.querySelectorAll<HTMLElement>('[data-repo]') ?? [])]
+      .find((row) => row.dataset.repo === repo && row.offsetParent !== null)
+      ?.querySelector<HTMLElement>('[data-nav="repo"]')
+      ?.focus();
+  }, [remediated, undoable]);
+  const undoRow = (repo: string) => {
+    owed.current = repo;
+    setUndone(`Undone: ${repo} is open again.`);
+    onUndo(repo);
+  };
+
   const toggleSort = (key: SortKey) => setSort((s) => (s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: 1 }));
   const ariaSort = (key: SortKey) => (sort.key === key ? (sort.dir === 1 ? 'ascending' : 'descending') : 'none');
 
@@ -254,7 +286,7 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
       const direct = path.hops === 0 && path.chain.length <= 2;
       if (dense) return <PathText path={path} direct={direct} hops={path.hops} badVersions={badVersions} />;
       return (
-        <span className="inline-flex max-w-full items-center gap-x-2">
+        <span className="flex max-w-full flex-wrap items-center gap-x-2 gap-y-1">
           {direct ? (
             <span className="inline-flex flex-wrap items-center gap-1">
               {path.range && <span className="font-mono text-xs text-warn">{path.range}</span>}
@@ -274,7 +306,7 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
     const item = e.versions[0] ?? e.packages[0];
     if (item && dense) return <PathText nodes={[item]} hops={e.depth} badVersions={badVersions} />;
     return item ? (
-      <span className="inline-flex max-w-full items-center gap-x-2">
+      <span className="flex max-w-full flex-wrap items-center gap-x-2 gap-y-1">
         <PathChip item={item} bad={badVersions.has(item)} />
         {e.packages.length > 1 && <span className="shrink-0 text-xs text-fg-1">+{e.packages.length - 1}</span>}
         <span className="shrink-0 [&_span]:text-fg-1">
@@ -287,23 +319,24 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
   /** `showTeam`: the owner on the second line (phone cards). In the table the owner sits under the tier chip instead. */
   const repoCell = (e: Exposure, showTeam: boolean) => {
     const done = remediated[e.repo] ?? e.remediated?.at;
-    const note = showTeam && e.team;
+    const note = showTeam && realTeam(e.team);
+    const lock = lockNote(undefined, e.repo); // only a pasted repo (today's or pasted lockfile) is a counterfactual
     return (
       <span className="flex min-w-0 flex-col items-start">
         <button
           type="button"
           data-nav="repo"
           tabIndex={stop(e.repo)}
-          title={e.repo}
+          title={repoLabel(e.repo)}
           aria-current={selectedRepo === e.repo ? 'true' : undefined}
           onClick={(ev) => (ev.stopPropagation(), onSelect(e.repo))}
-          className={`max-w-full scroll-mt-10 truncate rounded-xs text-left text-sm leading-[18px] whitespace-nowrap pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:py-2${done ? 'text-fg-2 line-through' : 'text-link'} hov:text-fg-0`}
+          className={`max-w-full scroll-mt-10 truncate rounded-xs text-left text-sm leading-[18px] whitespace-nowrap pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:py-2 ${done ? 'text-fg-2 line-through' : 'text-link'} hov:text-fg-0`}
         >
-          {e.repo}
+          {repoLabel(e.repo)}
         </button>
         {(note || e.synthetic || e.dev) && (
           <span className={`flex max-w-full items-center gap-x-1.5 overflow-hidden whitespace-nowrap text-fg-1 ${LINE}`}>
-            {note && <span className="truncate">{e.team}</span>}
+            {note && <span className="truncate">{note}</span>}
             {e.synthetic && <span className={TAG}>sample repo</span>}
             {e.dev && (
               <span className={TAG}>
@@ -312,9 +345,9 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
             )}
           </span>
         )}
-        {isHead(e.repo) && (
+        {lock && (
           <span className={`${LINE} text-fg-1`}>
-            current lockfile, counterfactual<span className="sr-only">. {HEAD_NOTE}</span>
+            counterfactual<span className="sr-only">. {lock.text}</span>
           </span>
         )}
       </span>
@@ -328,7 +361,7 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
       return (
         <span className="flex min-w-0 flex-col items-start">
           <TierChip tier={e.tier} tip />
-          {owner && e.team && <span className={`max-w-full truncate text-fg-1 md:max-xl:hidden ${LINE}`} title={e.team}>{e.team}</span>}
+          {owner && realTeam(e.team) && <span className={`max-w-full truncate text-fg-1 md:max-xl:hidden ${LINE}`} title={e.team ?? undefined}>{e.team}</span>}
         </span>
       );
     }
@@ -337,11 +370,35 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
         <Check size={14} />
         <span title={`Marked remediated ${localStamp(done)}`}>remediated {localTime(done)}</span>
         {undoable.has(e.repo) && (
-          <button type="button" className="inline-flex items-center gap-1 rounded-xs text-link underline underline-offset-2 pointer-coarse:min-h-11" onClick={(ev) => (ev.stopPropagation(), onUndo(e.repo))}>
+          <button
+            type="button"
+            aria-label={`Undo remediated mark for ${e.repo}`}
+            className="inline-flex items-center gap-1 rounded-xs text-link underline underline-offset-2 pointer-coarse:min-h-11"
+            onClick={(ev) => (ev.stopPropagation(), undoRow(e.repo))}
+          >
             <Undo size={12} /> Undo
           </button>
         )}
       </span>
+    );
+  };
+
+  /** The selected repo's whole path (or what it reaches, when no path was drafted), for the widths where the graph is another tab. */
+  const fullPath = (e: Exposure, className = '') => {
+    const path = pathFor(e);
+    return (
+      <div className={`flex flex-col items-start gap-1 ${className}`}>
+        <p className="label-caps text-xs">{path ? `Path ${path.id}` : 'Reaches'}</p>
+        {path ? (
+          <PathChain path={path} badVersions={badVersions} />
+        ) : (
+          <span className="inline-flex flex-wrap gap-1">
+            {(e.versions.length ? e.versions : e.packages).slice(0, 5).map((v) => (
+              <PathChip key={v} item={v} bad={badVersions.has(v)} />
+            ))}
+          </span>
+        )}
+      </div>
     );
   };
 
@@ -365,7 +422,7 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
   // A plain function (not a component) so the header buttons keep focus across re-renders.
   const sortTh = (k: SortKey, label: string, className = '', extra?: ReactNode) => (
     <th key={k} scope="col" aria-sort={ariaSort(k)} className={`sticky top-0 z-(--z-sticky) bg-bg-2 px-2 py-1 text-left ${className}`}>
-      <button type="button" onClick={() => toggleSort(k)} className="label-caps inline-flex items-center gap-1 rounded-xs text-xs">
+      <button type="button" onClick={() => toggleSort(k)} className="label-caps inline-flex items-center gap-1 rounded-xs text-xs pointer-coarse:min-h-11 pointer-coarse:min-w-11">
         {label}
         {sort.key === k && <ChevronDown size={12} className={sort.dir === 1 ? '' : 'rotate-180'} />}
       </button>
@@ -375,9 +432,12 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
 
   const filtered = rows.length !== exposures.length;
   const shown = filtered ? `${rows.length} of ${exposures.length} shown` : plural(exposures.length, 'repo');
+  // What an export must hold while a filter hides rows: exactly these repos, in this order, and the filter in words.
+  const view: ReportView | undefined = filtered ? { repos: rows.map((r) => r.repo), label: viewLabel({ prodOnly, tier, query, shown: rows.length, total: exposures.length }) } : undefined;
+  const clearFilters = () => (setProdOnly(false), setTier('ALL'), setQuery(''));
 
   return (
-    <section aria-label="Exposed repos" className="flex flex-col" onFocus={follow} onKeyDown={arrows}>
+    <section ref={root} aria-label="Exposed repos" className="flex flex-col" onFocus={follow} onKeyDown={arrows}>
       <div className="flex flex-wrap items-center gap-2 border-b border-line-1 px-3 py-2">
         <Button
           aria-pressed={prodOnly}
@@ -396,10 +456,13 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
           ))}
         </select>
         <input aria-label="Filter repos or teams" placeholder="Repo or team" className="field min-w-28 flex-1 basis-28" type="search" value={query} onChange={(e) => setQuery(e.target.value)} />
-        {onExport && <ExportMenu onExport={onExport} />}
+        {onExport && <ExportMenu onExport={onExport} view={view} total={exposures.length} />}
         {/* The count is visible only while a filter is on (the summary above already says "21 of 21 exposed"); it always announces. */}
         <p aria-live="polite" className={filtered ? 'shrink-0 text-xs text-fg-1 tabular-nums' : 'sr-only'}>
           {shown}
+        </p>
+        <p role="status" className="sr-only">
+          {undone}
         </p>
       </div>
 
@@ -413,7 +476,13 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
                 ? 'Every exposed repo here reaches the bad version through dev dependencies only.'
                 : 'No repo matches these filters.'
           }
-          action={prodOnly && devOnly ? { label: `Show dev-only (${devOnly})`, onClick: () => setProdOnly(false) } : undefined}
+          action={
+            exposures.length === 0
+              ? undefined
+              : prodOnly && devOnly && tier === 'ALL' && !query.trim()
+                ? { label: `Show dev-only (${devOnly})`, onClick: () => setProdOnly(false) }
+                : { label: 'Clear filters', onClick: clearFilters }
+          }
         />
       ) : (
         <>
@@ -443,41 +512,53 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
               {rows.map((e) => {
                 const selected = selectedRepo === e.repo;
                 return (
-                  <tr key={e.repo} data-repo={e.repo} onClick={() => onSelect(e.repo)} className={`cursor-pointer border-b border-line-1 hov:bg-bg-3 ${selected ? `bg-bg-3 ${FORCED_ROW}` : ''}`}>
-                    <td className={`py-[3px] pr-2 pl-3 align-top ${selected ? `${BAR[e.tier]} ${FORCED_EDGE}` : ''}`}>{repoCell(e, false)}</td>
-                    <td className="px-2 py-[3px] align-top">{tierCell(e, true)}</td>
-                    <td className="px-2 py-[3px] align-top">{hopCell(e, true)}</td>
-                    <td className="hidden px-2 py-[3px] align-top text-fg-1 md:table-cell xl:hidden">
-                      <span className={`block truncate ${LINE}`} title={e.team ?? undefined}>
-                        {e.team ?? '–'}
-                      </span>
-                    </td>
-                    <td className="py-[3px] pr-3 pl-1 text-right align-top">{fixButton(e)}</td>
-                  </tr>
+                  <Fragment key={e.repo}>
+                    <tr data-repo={e.repo} onClick={() => onSelect(e.repo)} className={`cursor-pointer ${selected ? 'max-lg:border-b-0' : ''} border-b border-line-1 hov:bg-bg-3 ${selected ? `bg-bg-3 ${FORCED_ROW}` : ''}`}>
+                      <td className={`py-[3px] pr-2 pl-3 align-top ${selected ? `${BAR[e.tier]} ${FORCED_EDGE}` : ''}`}>{repoCell(e, false)}</td>
+                      <td className="px-2 py-[3px] align-top">{tierCell(e, true)}</td>
+                      <td className="px-2 py-[3px] align-top">{hopCell(e, true)}</td>
+                      <td className="hidden px-2 py-[3px] align-top text-fg-1 md:table-cell xl:hidden">
+                        <span className={`block truncate ${LINE}`} title={realTeam(e.team) ?? undefined}>
+                          {realTeam(e.team) ?? '–'}
+                        </span>
+                      </td>
+                      <td className="py-[3px] pr-3 pl-1 text-right align-top">{fixButton(e)}</td>
+                    </tr>
+                    {/* Below 1024px the graph is another tab, so the selected row shows its whole path under itself (the phone cards do too). */}
+                    {selected && (
+                      <tr className="border-b border-line-1 bg-bg-3 lg:hidden">
+                        <td colSpan={5} className="px-3 pb-2">
+                          {fullPath(e)}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 );
               })}
             </tbody>
           </table>
 
-          <ul className="flex flex-col md:hidden">
-            {rows.map((e) => (
-              <li
-                key={e.repo}
-                data-repo={e.repo}
-                onClick={() => onSelect(e.repo)}
-                className={`flex flex-col gap-2 border-b border-line-1 p-3 ${selectedRepo === e.repo ? `bg-bg-3 ${BAR[e.tier]} ${FORCED_ROW}` : ''}`}
-              >
-                {repoCell(e, true)}
-                <div className="flex flex-col items-start gap-1">
-                  {tierCell(e)}
-                  {/* Printed, not hover: touch has no tooltip. WOULD_PULL's honest-semantics line already says what the tier means. */}
-                  <span className="text-xs text-fg-1">{e.tier === 'WOULD_PULL' ? HONEST_SEMANTICS : TIER_SUBTITLE[e.tier]}</span>
-                </div>
-                {hopCell(e)}
-                {e.tier !== 'MAINTAINER' && <div>{fixButton(e)}</div>}
-              </li>
-            ))}
-          </ul>
+          <div className="md:hidden">
+            {/* Printed, not hover: touch has no tooltip. Said once for the list, not on every WOULD_PULL card. */}
+            {rows.some((e) => e.tier === 'WOULD_PULL') && <p className="border-b border-line-1 px-3 py-2 text-xs text-fg-1">{HONEST_SEMANTICS}</p>}
+            <ul className="flex flex-col">
+              {rows.map((e) => {
+                const selected = selectedRepo === e.repo;
+                return (
+                  <li key={e.repo} data-repo={e.repo} onClick={() => onSelect(e.repo)} className={`flex flex-col gap-2 border-b border-line-1 p-3 ${selected ? `bg-bg-3 ${BAR[e.tier]} ${FORCED_ROW}` : ''}`}>
+                    {repoCell(e, true)}
+                    <div className="flex flex-col items-start gap-1">
+                      {tierCell(e)}
+                      <span className="text-xs text-fg-1">{TIER_SUBTITLE[e.tier]}</span>
+                    </div>
+                    {hopCell(e)}
+                    {selected && fullPath(e, 'rounded-xs bg-bg-2 p-2')}
+                    {e.tier !== 'MAINTAINER' && <div>{fixButton(e)}</div>}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
         </>
       )}
     </section>

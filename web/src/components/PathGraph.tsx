@@ -14,6 +14,7 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import type { Exposure, ExposurePath, IncidentMeta } from '../data/types.ts';
 import { EmptyState } from './EmptyState.tsx';
+import { repoLabel, repoShort } from '../data/repoLabel.ts';
 import { PathChip } from './PathChip.tsx';
 
 const Canvas = lazy(() => import('./PathGraphCanvas.tsx'));
@@ -90,7 +91,7 @@ function CompactPath({ path, badVersions, team }: { path: ExposurePath; badVersi
               aria-hidden
               className={`absolute top-1 left-0 size-3 rounded-full border-2 ${isBad ? 'border-graph-bad bg-graph-bad' : i === 0 ? 'border-graph-repo' : 'border-graph-dep'}`}
             />
-            <PathChip item={item} bad={isBad} />
+            <PathChip item={item} bad={isBad} label={i === 0 ? repoShort(item) : undefined} />
             <span className="text-xs text-fg-1">{role}</span>
           </li>
         );
@@ -117,7 +118,7 @@ export function PathGraph({ exposures, paths, incident, selectedRepo, playing, o
   const shownPath = selectedRepo ? paths.find((p) => p.repo === selectedRepo) : paths[0];
   const selected = exposures.find((e) => e.repo === selectedRepo);
   const label = selectedRepo
-    ? `Path graph. Selected: ${selectedRepo}.${shownPath ? ` Path: ${shownPath.chain.join(', then ')}${shownPath.chain.at(-1) === shownPath.version ? '' : `, then ${shownPath.version}`}.` : selected ? ` Reaches ${versionsText(selected.versions)}.` : ''}`
+    ? `Path graph. Selected: ${repoLabel(selectedRepo)}.${shownPath ? ` Path: ${shownPath.chain.map((c, i) => (i === 0 ? repoShort(c) : c)).join(', then ')}${shownPath.chain.at(-1) === shownPath.version ? '' : `, then ${shownPath.version}`}.` : selected ? ` Reaches ${versionsText(selected.versions)}.` : ''}`
     : `Path graph of ${exposures.length} exposed repos. ${paths.length ? 'Select a repo in the table to highlight its path.' : 'Run a triage, then select a repo in the table to highlight its path.'}`;
   // The canvas draws the 3 most widely shared versions for repos without a drafted path (buildGraph).
   const capped = exposures.some((e) => e.versions.length > 3 && !paths.some((p) => p.repo === e.repo));
@@ -188,7 +189,7 @@ export function PathGraph({ exposures, paths, incident, selectedRepo, playing, o
             <CompactPath path={shownPath} badVersions={bad} team={(selected ?? exposures.find((e) => e.repo === shownPath.repo))?.team ?? null} />
           ) : selected ? (
             <div className="flex flex-col items-start gap-2">
-              <PathChip item={selected.repo} />
+              <PathChip item={selected.repo} label={repoShort(selected.repo)} />
               <p className="text-sm text-fg-1">No drafted path for this repo. It reaches:</p>
               <div className="flex flex-wrap gap-1">
                 {selected.versions.slice(0, 5).map((v) => (
@@ -211,7 +212,7 @@ export function PathGraph({ exposures, paths, incident, selectedRepo, playing, o
           const deps = p ? p.chain.slice(1).filter((id) => id !== p.version) : [];
           return (
             <li key={e.repo}>
-              {e.repo} ({e.tier}):{' '}
+              {repoLabel(e.repo)} ({e.tier}):{' '}
               {p ? `reaches ${p.version}${deps.length ? ` via ${deps.join(', then ')}` : ', declared directly'}${p.range ? ` (range ${p.range})` : ''}` : `reaches ${versionsText(e.versions)}`}
             </li>
           );
