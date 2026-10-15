@@ -168,10 +168,10 @@ ORDER BY kind DESC, hops LIMIT 3
 
 #### `NODE_COUNTS`
 
-graph stats (the Graph stats tab, before any triage): how many nodes each demo graph holds, per label.
+graph stats (the Graph stats tab, before any triage): how many nodes each demo graph holds, per label (visitors' session Triage records left out).
 
 ```cypher
-MATCH (n) RETURN labels(n)[0] AS label, count(n) AS count ORDER BY count DESC
+MATCH (n) WHERE NOT n:Triage RETURN labels(n)[0] AS label, count(n) AS count ORDER BY count DESC
 ```
 
 #### `EDGE_COUNTS`
@@ -179,7 +179,7 @@ MATCH (n) RETURN labels(n)[0] AS label, count(n) AS count ORDER BY count DESC
 graph stats: how many relationships, per type (REQUIRES is the lockfile tree, ADMITS the time-windowed exposure).
 
 ```cypher
-MATCH ()-[r]->() RETURN type(r) AS type, count(r) AS count ORDER BY count DESC
+MATCH ()-[r]->() WHERE NOT type(r) IN ['FOR', 'ASSESSED'] RETURN type(r) AS type, count(r) AS count ORDER BY count DESC
 ```
 
 #### `ROUTE_OWNERS`

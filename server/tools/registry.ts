@@ -47,16 +47,21 @@ export const minutesAhead = (i: IncidentMeta) => (i.firstExposureAt == null ? 0 
 // On a 0.1-CPU host the 21 shortestPath walks and 21 safe-version picks are most of a triage, and on the read-only demo
 // org graphs their answers never change: they are memoized there per process, and the result says `cached`. Guest
 // graphs belong to one visitor and always run live.
+// Only the exact demo org graph names (never a guest graph, whatever the configured prefix), and only short keys: Ask's
+// model can pick other arguments, which must not grow the memo (they still run, just live).
 const memo = new Map<string, ToolResult>();
-const memoKey = (g: Graph, tool: ToolName, params: object) => (g.name.includes('_acme_') ? `${g.name}|${tool}|${JSON.stringify(params)}` : null);
+const memoKey = (g: Graph, tool: ToolName, params: object) => {
+  const key = /_acme_(qix|axios)$/.test(g.name) ? `${g.name}|${tool}|${JSON.stringify(params)}` : null;
+  return key && key.length <= 512 ? key : null;
+};
 const fromMemo = (key: string | null): ToolResult | undefined => {
   const r = key ? memo.get(key) : undefined;
-  return r && { ...r, cached: true };
+  return r && { ...r, rows: r.rows.map((x) => ({ ...x })), cached: true }; // callers tag rows (path ids): never the shared copy
 };
 function toMemo(key: string | null, r: ToolResult) {
   if (key) {
-    if (memo.size >= 5000) memo.clear(); // ponytail: crude bound, keys are server-normalized params
-    memo.set(key, r);
+    if (memo.size >= 2000) memo.delete(memo.keys().next().value!); // oldest first
+    memo.set(key, { ...r, rows: r.rows.map((x) => ({ ...x })) });
   }
   return r;
 }
