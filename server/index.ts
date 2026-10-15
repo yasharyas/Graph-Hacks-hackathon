@@ -119,8 +119,10 @@ function ip(c: C) {
     return 'unknown'; // app.request() in tests has no socket
   }
 }
+// Local dev only: several tools share one localhost address, so PZ_RATE_SCALE can raise limits. Ignored in production.
+const RATE_SCALE = process.env.NODE_ENV === 'production' ? 1 : Math.max(1, Math.min(100, Number(process.env.PZ_RATE_SCALE) || 1));
 function limit(c: C, name: string, max: number, windowMs: number) {
-  if (limited(`${name}:${clientKey(ip(c))}`, max, windowMs)) throw new HttpError(429, 'Too many requests. Wait a moment and try again.');
+  if (limited(`${name}:${clientKey(ip(c))}`, max * RATE_SCALE, windowMs)) throw new HttpError(429, 'Too many requests. Wait a moment and try again.');
 }
 
 // ---------- SSE ----------
