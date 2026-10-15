@@ -1,0 +1,213 @@
+// Tool registry shared by the triage playbook, the Ask loop and MCP. Each tool = Cypher from cypher.ts (GRAPH.RO_QUERY
+// via Graph.ro) + a one-line summary for the card and the LLM. recordTriage is the only write and is never a tool.
+import { randomUUID } from 'node:crypto';
+import type { Exposure, ExposurePath, Remediation, ScannerHit, Tier, ToolName, ToolResult } from '../../shared/events.ts';
+import { write } from '../graph/client.ts';
+import { safeVersion } from '../ingest/admits.ts';
+import * as Q from './cypher.ts';
+import type { Graph, ToolDef } from './types.ts';
+
+type Row = Record<string, any>;
+export const rowsOf = <R>(r: ToolResult) => r.rows as unknown as R[];
+export type ExposureRow = Exposure & { since: number | null }; // since: when this repo first became exposed (null if CLEAN)
+export type PathRow = Omit<ExposurePath, 'id'> & { depth: number };
+
+// LLM-supplied arguments are untrusted (S1): coerce and cap. They only ever reach Cypher as $params (S3).
+const str = (x: unknown, max = 214) => String(x ?? '').slice(0, max);
+const strs = (x: unknown, max = 50) => (Array.isArray(x) ? x : x == null ? [] : [x]).slice(0, max).map((v) => str(v));
+function time(x: unknown): number {
+  const t = typeof x === 'number' ? x : Date.parse(str(x, 40));
+  if (!Number.isFinite(t)) throw new Error('Expected a time: epoch ms or ISO 8601');
+  return t;
+}
+export const utc = (t: number) => new Date(t).toISOString().slice(0, 16).replace('T', ' ') + 'Z';
+const few = (xs: unknown[], n = 3) => xs.slice(0, n).join(', ') + (xs.length > n ? ` +${xs.length - n} more` : '');
+const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
+const nameOf = (nv: string) => nv.slice(0, nv.lastIndexOf('@'));
+
+// One tool call: runs queries, records each distinct Cypher verbatim, sums FalkorDB's internal time.
+function call(g: Graph) {
+  const cypher: string[] = [];
+  let ms = 0;
+  return {
+    q: async (text: string, params: Record<string, unknown>) => {
+      const r = await g.ro(text, params);
+      if (!cypher.includes(text)) cypher.push(text);
+      ms += r.ms;
+      return r.rows as Row[];
+    },
+    result: (tool: ToolName, params: Record<string, unknown>, summary: string, rows: object[], evidence: unknown[]): ToolResult =>
+      ({ tool, summary, rows: rows as Row[], evidence: [...new Set(evidence.filter((e): e is string => typeof e === 'string' && e !== ''))], cypher, params, ms: Math.round(ms * 1000) / 1000 }),
+  };
+}
+
+const obj = (properties: Record<string, unknown>, required: string[]) => ({ type: 'object' as const, properties, required, additionalProperties: false as const });
+const S = (description: string) => ({ type: 'string', description });
+const AT = S('Scenario time, ISO 8601, e.g. 2025-09-08T13:30:00Z');
+const LIST = (description: string) => ({ type: 'array', items: { type: 'string' }, description });
+
+export async function findTarget(g: Graph, p: { q: unknown }) {
+  const terms = [...new Set((str(p.q, 500).toLowerCase().match(/[a-z0-9@._/~-]+/g) ?? []).map((t) => t.replace(/[.,]+$/, '')))].filter((t) => t.length > 1).slice(0, 20);
+  const c = call(g);
+  const rows = terms.length ? await c.q(Q.FIND_TARGET, { terms }) : [];
+  const summary = rows.length ? `found ${rows.map((r) => `${r.label.toLowerCase()} ${r.id}`).join(', ')}` : 'no known package, maintainer, version or incident in the text';
+  return c.result('find_target', { terms }, summary, rows, rows.map((r) => r.id));
+}
+
+export async function suspectVersions(g: Graph, p: { maintainer: unknown; since: unknown; until: unknown }) {
+  const params = { maintainer: str(p.maintainer), since: time(p.since), until: time(p.until) };
+  const c = call(g);
+  const rows = await c.q(Q.SUSPECT_VERSIONS, params);
+  const removed = rows.filter((r) => r.removed).length;
+  const summary = `${plural(rows.length, 'version')} of ${params.maintainer}'s packages published ${utc(params.since)} to ${utc(params.until)}`
+    + (rows.length ? `: ${few(rows.map((r) => r.version))}` : '') + (removed ? `; ${removed} later removed from npm` : '');
+  return c.result('suspect_versions', params, summary, rows, [params.maintainer, ...rows.map((r) => r.version)]);
+}
+
+const RANK: Record<Tier, number> = { LOCKED: 0, WOULD_PULL: 1, MAINTAINER: 2, CLEAN: 3 };
+export async function incidentExposure(g: Graph, p: { incident: unknown; at: unknown }) {
+  const params = { incident: str(p.incident), at: time(p.at) };
+  const c = call(g);
+  const repos = await c.q(Q.REPOS, {});
+  const hits: Row[] = [
+    ...(await c.q(Q.EXPOSURE_LOCKED, params)).map((h) => ({ ...h, tier: 'LOCKED' as const })),
+    ...(await c.q(Q.EXPOSURE_ADMITS, params)).map((h) => ({ ...h, tier: 'WOULD_PULL' as const })),
+  ];
+  const rows = repos.map((r): ExposureRow => {
+    const own = hits.filter((h) => h.repo === r.repo);
+    const locked = own.filter((h) => h.tier === 'LOCKED');
+    const admits = own.filter((h) => h.tier === 'WOULD_PULL');
+    // Versions shallowest first, locked ones first; publish order breaks ties.
+    const order = [...own].sort((a, b) => +(b.tier === 'LOCKED') - +(a.tier === 'LOCKED') || a.depth - b.depth || a.since - b.since);
+    // A lockfile can't predate any version it locks; otherwise exposure starts at the first bad publish a range admits.
+    const since = locked.length ? Math.max(...locked.map((h) => h.since)) : Math.min(...admits.map((h) => h.since));
+    return {
+      repo: r.repo, synthetic: !!r.synthetic, team: r.team ?? null,
+      tier: locked.length ? 'LOCKED' : admits.length ? 'WOULD_PULL' : 'CLEAN',
+      versions: [...new Set(order.map((h) => h.version as string))],
+      depth: own.length ? Math.min(...own.map((h) => h.depth)) : 0,
+      dev: own.length > 0 && own.every((h) => h.devFlags.every(Boolean)),
+      ranges: [...new Set(admits.flatMap((h) => h.ranges as string[]))],
+      packages: [], remediated: null, since: Number.isFinite(since) ? since : null,
+    };
+  }).sort((a, b) => RANK[a.tier] - RANK[b.tier] || a.depth - b.depth || a.repo.localeCompare(b.repo));
+  const n = (t: Tier) => rows.filter((r) => r.tier === t).length;
+  const exposed = rows.filter((r) => r.tier !== 'CLEAN');
+  const summary = `at ${utc(params.at)}: ${n('LOCKED')} LOCKED, ${n('WOULD_PULL')} WOULD_PULL, ${n('CLEAN')} CLEAN of ${plural(rows.length, 'repo')}`
+    + (exposed.length ? `; e.g. ${few(exposed.map((r) => r.repo))}` : '');
+  return c.result('incident_exposure', params, summary, rows, exposed.flatMap((r) => [r.repo, r.team, ...r.versions, ...r.ranges]));
+}
+
+export async function maintainerBlastRadius(g: Graph, p: { maintainer: unknown }) {
+  const params = { maintainer: str(p.maintainer) };
+  const c = call(g);
+  const rows = (await c.q(Q.MAINTAINER_BLAST_RADIUS, params)).map((r) => ({ repo: r.repo, packages: r.packages, sample: r.sample, shallowest: r.shallowest, dev: r.devFlags.every(Boolean) }));
+  const summary = `${params.maintainer}'s packages are in ${plural(rows.length, 'repo')}' lockfiles` + (rows.length ? `; most: ${rows[0].repo} (${plural(rows[0].packages, 'package')})` : '');
+  return c.result('maintainer_blast_radius', params, summary, rows, [params.maintainer, ...rows.flatMap((r) => [r.repo, ...r.sample])]);
+}
+
+export async function explainPath(g: Graph, p: { repo: unknown; version: unknown; at: unknown }) {
+  const params = { repo: str(p.repo), version: str(p.version), at: time(p.at) };
+  const c = call(g);
+  const rows = (await c.q(Q.EXPLAIN_PATH, params)).map((r): PathRow => ({
+    repo: params.repo, version: params.version, kind: r.kind, range: r.range ?? null, hops: r.hops, depth: r.depth,
+    chain: [params.repo, ...r.chain.slice(1)], lockPaths: r.lockPaths,
+  }));
+  const b = rows[0];
+  const summary = !b ? `no path from ${params.repo} to ${params.version} at ${utc(params.at)}`
+    : b.kind === 'RESOLVES_TO'
+      ? `${params.repo} locks ${params.version}${b.hops > 1 ? `, ${b.hops} hops deep via ${b.chain.slice(1, -1).join(' > ')}` : ' as a direct dependency'}`
+      : `${params.repo} declares ${b.range}, admitting ${params.version}${b.hops ? ` at ${b.chain.at(-1)}, ${plural(b.hops, 'hop')} deep` : ' at the root'}`;
+  return c.result('explain_path', params, summary, rows, rows.flatMap((r) => [r.repo, r.version, r.range, ...r.chain]));
+}
+
+export async function routeOwners(g: Graph, p: { repos: unknown }) {
+  const params = { repos: strs(p.repos, 200) };
+  const c = call(g);
+  const rows = await c.q(Q.ROUTE_OWNERS, params);
+  const summary = `${plural(rows.length, 'team')} to notify: ${few(rows.map((r) => `${r.team} (${r.repos.length})`), 6)}`;
+  return c.result('route_owners', params, summary, rows, rows.flatMap((r) => [r.team, r.channel, ...r.repos]));
+}
+
+export async function concentrationRisk(g: Graph, p: { top?: unknown }) {
+  const params = { top: Math.min(10, Math.max(1, Math.trunc(Number(p.top) || 3))) };
+  const c = call(g);
+  const rows = await c.q(Q.CONCENTRATION_RISK, params);
+  const summary = `top ${rows.length} maintainers by PageRank influence: ${rows.map((r) => `${r.maintainer} (${r.packages} packages, ${r.reposReached} repos)`).join(', ')}`;
+  return c.result('concentration_risk', params, summary, rows, rows.map((r) => r.maintainer));
+}
+
+export async function draftRemediation(g: Graph, p: { repo: unknown; versions: unknown; at: unknown }) {
+  const params = { repo: str(p.repo), versions: strs(p.versions, 20), at: time(p.at) };
+  const c = call(g);
+  const versions = await c.q(Q.REMEDIATION_VERSIONS, params);
+  const ranges = await c.q(Q.REMEDIATION_RANGES, params);
+  const overrides: Record<string, string> = {};
+  const notes: string[] = [];
+  for (const bad of params.versions) {
+    const name = nameOf(bad);
+    const vs = versions.filter((v) => v.bad === bad).map((v) => ({ version: v.version, publishedAt: v.publishedAt, malicious: v.malicious }));
+    const mine = ranges.filter((r) => r.bad === bad);
+    const pin = safeVersion([...new Set(mine.map((r) => r.range as string))], vs, params.at) ?? safeVersion([], vs, params.at); // no version fits every range: latest clean
+    if (!pin) notes.push(`${name} had no clean release at ${utc(params.at)}: remove it, or pin the package that pulls it in`);
+    else if (overrides[name] && overrides[name] !== pin) notes.push(`${bad} also appears: replace it with ${name}@${pin}, scoping that override under the dependency that pulls it in`);
+    else {
+      overrides[name] = pin;
+      if (mine.some((r) => r.direct)) notes.push(`Set the root dependency on ${name} to ${pin} too: npm rejects an override that conflicts with a direct dependency`);
+    }
+  }
+  const locked = ranges.some((r) => r.kind === 'RESOLVES_TO');
+  const pins = Object.entries(overrides).map(([n, v]) => `${n}@${v}`);
+  const missing = params.versions.map(nameOf).filter((n, i, a) => !overrides[n] && a.indexOf(n) === i);
+  const steps = [
+    pins.length ? `Add "overrides" pinning ${pins.join(', ')} to package.json and regenerate the lockfile` : '',
+    ...new Set(notes),
+    locked ? 'Rotate secrets that builds and CI could read since the first malicious publish' : '',
+    locked ? 'Rebuild and redeploy anything built from this lockfile during the window' : 'Until the overrides land, install with npm ci from the committed lockfile, which never resolved the bad version',
+  ].filter(Boolean);
+  const prBody = `${locked ? 'The lockfile resolves' : 'Declared ranges admit'} ${params.versions.join(', ')}. `
+    + (pins.length ? `This pins ${pins.join(', ')} via overrides.` : 'No clean version to pin yet.');
+  const row: Remediation = { repo: params.repo, overrides, steps, prBody };
+  const summary = `${params.repo}: ${pins.length ? `pin ${pins.join(', ')}` : 'nothing safe to pin'}${missing.length ? `; no clean ${missing.join(', ')}` : ''}${locked ? '; rotate secrets and rebuild' : ''}`;
+  return c.result('draft_remediation', params, summary, [row], [params.repo, ...pins, ...Object.keys(overrides)]);
+}
+
+// scanner_view also returns grepCount (the other "graph off" baseline) for the report.
+export async function scannerView(g: Graph, p: { incident: unknown; at: unknown }) {
+  const params = { incident: str(p.incident), at: time(p.at) };
+  const c = call(g);
+  const rows = (await c.q(Q.SCANNER_VIEW, params)) as ScannerHit[];
+  const grepCount = Number((await c.q(Q.NAME_GREP, params))[0]?.repos ?? 0);
+  const summary = `advisory scanner at ${utc(params.at)}: ${plural(rows.length, 'hit')}${rows.length ? ` (${few(rows.map((r) => `${r.repo} ${r.version}`))})` : ''}; name grep: ${plural(grepCount, 'repo')} mention a bad package name, with no version, path or owner`;
+  return { result: c.result('scanner_view', params, summary, rows, rows.flatMap((r) => [r.repo, r.version])), grepCount };
+}
+
+export async function recallTriage(g: Graph, p: { session: unknown; incident: unknown }) {
+  const params = { session: str(p.session, 64), incident: str(p.incident) };
+  const c = call(g);
+  const seen = new Set<string>();
+  const rows = (await c.q(Q.RECALL_TRIAGE, params)).filter((r) => !seen.has(r.repo) && seen.add(r.repo)); // latest per repo
+  const done = rows.filter((r) => r.action === 'remediated');
+  const summary = rows.length ? `${plural(rows.length, 'repo')} assessed earlier in this session; ${done.length} marked remediated${done.length ? `: ${few(done.map((r) => r.repo))}` : ''}` : 'no earlier assessments in this session';
+  return c.result('recall_triage', { incident: params.incident }, summary, rows, rows.map((r) => r.repo)); // the session id stays server-side
+}
+
+// Server only (S10): triage memory and "mark remediated", scoped to the caller's anonymous session id.
+export async function recordTriage(graphName: string, t: { session: string; incident: string; at: number; summary: string; assessed: { repo: string; tier: Tier; action: string | null }[] }) {
+  const id = randomUUID();
+  await write(graphName, Q.RECORD_TRIAGE, { id, session: str(t.session, 64), incident: str(t.incident), at: t.at, summary: str(t.summary, 500), assessed: t.assessed.slice(0, 200) });
+  return id;
+}
+
+export const TOOLS: Record<ToolName, ToolDef<any>> = {
+  find_target: { name: 'find_target', description: 'Find known maintainers, packages, name@version ids and incidents mentioned in free text (e.g. an alert).', parameters: obj({ q: S('Free text, e.g. "debug@4.4.2 and chalk hijacked"') }, ['q']), run: findTarget },
+  suspect_versions: { name: 'suspect_versions', description: "Versions of a maintainer's packages published in a time window: catches hijacked releases before any advisory exists.", parameters: obj({ maintainer: S('npm username'), since: AT, until: AT }, ['maintainer', 'since', 'until']), run: suspectVersions },
+  incident_exposure: { name: 'incident_exposure', description: 'Tier every repo at a moment: LOCKED (lockfile resolves a malicious version), WOULD_PULL (a declared range resolved to one while it was live), CLEAN.', parameters: obj({ incident: S('Incident id, e.g. qix-2025-09-08'), at: AT }, ['incident', 'at']), run: incidentExposure },
+  maintainer_blast_radius: { name: 'maintainer_blast_radius', description: "Repos whose lockfiles contain any package the maintainer publishes (MAINTAINER tier), with the shallowest depth.", parameters: obj({ maintainer: S('npm username') }, ['maintainer']), run: maintainerBlastRadius },
+  explain_path: { name: 'explain_path', description: 'Exact lockfile chain from a repo root to the entry that locks a version or declares a range admitting it.', parameters: obj({ repo: S('owner/name'), version: S('name@version'), at: AT }, ['repo', 'version', 'at']), run: explainPath },
+  route_owners: { name: 'route_owners', description: 'Owning team and channel for each repo, grouped by team.', parameters: obj({ repos: LIST('owner/name ids') }, ['repos']), run: routeOwners },
+  concentration_risk: { name: 'concentration_risk', description: 'Maintainers whose packages carry the most PageRank across the org dependency graph: who could be the next compromised account.', parameters: obj({ top: { type: 'integer', minimum: 1, maximum: 10, description: 'How many maintainers' } }, []), run: concentrationRisk },
+  draft_remediation: { name: 'draft_remediation', description: 'Safe "overrides" pins (highest clean version live at the time that every affected range accepts) and steps for one repo.', parameters: obj({ repo: S('owner/name'), versions: LIST('malicious name@version ids in this repo'), at: AT }, ['repo', 'versions', 'at']), run: draftRemediation },
+  scanner_view: { name: 'scanner_view', description: 'What an advisory-based scanner reports at a moment (lockfile x published OSV records), plus a plain name grep.', parameters: obj({ incident: S('Incident id'), at: AT }, ['incident', 'at']), run: async (g, p) => (await scannerView(g, p)).result },
+  recall_triage: { name: 'recall_triage', description: 'Earlier assessments and remediation marks for this incident in the current session.', parameters: obj({ session: S('Session id (supplied by the server)'), incident: S('Incident id') }, ['session', 'incident']), run: recallTriage },
+};

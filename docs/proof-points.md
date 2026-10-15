@@ -16,6 +16,13 @@ The only numbers the README, video, blog and posts may quote. Each line names it
 - axios at 01:30Z: **9 of 20** repos; `louislam/uptime-kuma` declares `axios ~0.30.3` directly, which resolved to the malicious 0.30.4.
 - Wording rule: "would have fetched on a fresh resolve", never "was compromised". `npm ci` with a committed lockfile was safe.
 
+## Graph-confirmed (source: `node server/agent/triage.ts <scenario> <atISO>` against the built graphs; matches the oracle exactly)
+
+- qix at 13:30Z (21 repos incl. synthetic `acme/checkout-web`): LOCKED 1, WOULD_PULL 20, CLEAN 0; app shows **74 min** ahead.
+- axios at 01:30Z (21 repos incl. synthetic `acme/billing-api`): LOCKED 1, WOULD_PULL 9, CLEAN 11; app shows **105 min** ahead (to the campaign's first OSV record, MAL-2026-2306).
+- Graph size: `pz_acme_qix` 46,810 nodes / 123,426 edges / 24 MB, built in ~3.3 s. Baked RDB 11.6 MB.
+- Top maintainer concentration (PageRank mass): sindresorhus, ljharb, types.
+
 ## Data scope
 
 - 20 real public repos + 2 synthetic (badged), lockfiles as of 2025-09-08T13:00Z and 2026-03-31T00:00Z.
