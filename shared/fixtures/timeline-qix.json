@@ -1,0 +1,855 @@
+{
+  "note": "MOCK data for UI development only.",
+  "incident": {
+    "id": "qix-2025-09-08",
+    "title": "npm account qix phished: 19 packages hijacked",
+    "maintainer": "qix",
+    "firstPublishAt": 1757337130000,
+    "alertAt": 1757337360000,
+    "advisoryAt": 1757341611000,
+    "removedAt": 1757344500000,
+    "versions": [
+      {
+        "id": "ansi-styles@6.2.2",
+        "publishedAt": 1757337130000
+      },
+      {
+        "id": "debug@4.4.2",
+        "publishedAt": 1757337159000
+      },
+      {
+        "id": "chalk@5.6.1",
+        "publishedAt": 1757337185000
+      },
+      {
+        "id": "supports-color@10.2.1",
+        "publishedAt": 1757337220000
+      },
+      {
+        "id": "strip-ansi@7.1.1",
+        "publishedAt": 1757337250000
+      },
+      {
+        "id": "ansi-regex@6.2.1",
+        "publishedAt": 1757337280000
+      },
+      {
+        "id": "wrap-ansi@9.0.1",
+        "publishedAt": 1757337310000
+      },
+      {
+        "id": "color-convert@3.1.1",
+        "publishedAt": 1757337340000
+      },
+      {
+        "id": "color-name@2.0.1",
+        "publishedAt": 1757337370000
+      },
+      {
+        "id": "is-arrayish@0.3.3",
+        "publishedAt": 1757337400000
+      },
+      {
+        "id": "color@5.0.1",
+        "publishedAt": 1757337430000
+      },
+      {
+        "id": "slice-ansi@7.1.1",
+        "publishedAt": 1757337460000
+      },
+      {
+        "id": "error-ex@1.3.3",
+        "publishedAt": 1757337490000
+      },
+      {
+        "id": "color-string@2.1.1",
+        "publishedAt": 1757337520000
+      },
+      {
+        "id": "simple-swizzle@0.2.3",
+        "publishedAt": 1757337550000
+      },
+      {
+        "id": "supports-hyperlinks@4.1.1",
+        "publishedAt": 1757337580000
+      },
+      {
+        "id": "has-ansi@6.0.1",
+        "publishedAt": 1757337600000
+      },
+      {
+        "id": "chalk-template@1.1.1",
+        "publishedAt": 1757337615000
+      },
+      {
+        "id": "backslash@0.2.1",
+        "publishedAt": 1757337631000
+      }
+    ],
+    "sources": [
+      "https://www.aikido.dev/blog/npm-debug-and-chalk-packages-compromised"
+    ]
+  },
+  "points": [
+    {
+      "at": 1757336400000,
+      "counts": {
+        "LOCKED": 0,
+        "WOULD_PULL": 0,
+        "MAINTAINER": 0,
+        "CLEAN": 17
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757336520000,
+      "counts": {
+        "LOCKED": 0,
+        "WOULD_PULL": 0,
+        "MAINTAINER": 0,
+        "CLEAN": 17
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757336640000,
+      "counts": {
+        "LOCKED": 0,
+        "WOULD_PULL": 0,
+        "MAINTAINER": 0,
+        "CLEAN": 17
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757336760000,
+      "counts": {
+        "LOCKED": 0,
+        "WOULD_PULL": 0,
+        "MAINTAINER": 0,
+        "CLEAN": 17
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757336880000,
+      "counts": {
+        "LOCKED": 0,
+        "WOULD_PULL": 0,
+        "MAINTAINER": 0,
+        "CLEAN": 17
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757337000000,
+      "counts": {
+        "LOCKED": 0,
+        "WOULD_PULL": 0,
+        "MAINTAINER": 0,
+        "CLEAN": 17
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757337120000,
+      "counts": {
+        "LOCKED": 0,
+        "WOULD_PULL": 0,
+        "MAINTAINER": 0,
+        "CLEAN": 17
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757337240000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 1,
+        "MAINTAINER": 0,
+        "CLEAN": 15
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757337360000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 2,
+        "MAINTAINER": 1,
+        "CLEAN": 13
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757337480000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 3,
+        "MAINTAINER": 1,
+        "CLEAN": 12
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757337600000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757337720000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757337840000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757337960000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757338080000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757338200000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757338320000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757338440000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757338560000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757338680000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757338800000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757338920000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757339040000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757339160000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757339280000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757339400000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757339520000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757339640000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757339760000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757339880000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757340000000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757340120000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757340240000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757340360000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757340480000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757340600000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757340720000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757340840000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757340960000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757341080000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757341200000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757341320000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757341440000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757341560000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 0
+    },
+    {
+      "at": 1757341680000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757341800000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757341920000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757342040000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757342160000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757342280000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757342400000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757342520000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757342640000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757342760000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757342880000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757343000000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757343120000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757343240000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757343360000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757343480000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757343600000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757343720000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757343840000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757343960000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757344080000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757344200000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757344320000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757344440000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 4,
+        "MAINTAINER": 1,
+        "CLEAN": 11
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757344560000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 0,
+        "MAINTAINER": 1,
+        "CLEAN": 15
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757344680000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 0,
+        "MAINTAINER": 1,
+        "CLEAN": 15
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757344800000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 0,
+        "MAINTAINER": 1,
+        "CLEAN": 15
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757344920000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 0,
+        "MAINTAINER": 1,
+        "CLEAN": 15
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757345040000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 0,
+        "MAINTAINER": 1,
+        "CLEAN": 15
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757345160000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 0,
+        "MAINTAINER": 1,
+        "CLEAN": 15
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757345280000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 0,
+        "MAINTAINER": 1,
+        "CLEAN": 15
+      },
+      "scanner": 1
+    },
+    {
+      "at": 1757345400000,
+      "counts": {
+        "LOCKED": 1,
+        "WOULD_PULL": 0,
+        "MAINTAINER": 1,
+        "CLEAN": 15
+      },
+      "scanner": 1
+    }
+  ]
+}

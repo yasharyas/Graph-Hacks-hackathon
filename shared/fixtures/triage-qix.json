@@ -1,0 +1,803 @@
+{
+  "note": "MOCK data for UI development only. Not real results.",
+  "events": [
+    {
+      "type": "start",
+      "runId": "mock-run-1",
+      "graph": "pz_acme_qix",
+      "incident": {
+        "id": "qix-2025-09-08",
+        "title": "npm account qix phished: 19 packages hijacked",
+        "maintainer": "qix",
+        "firstPublishAt": 1757337130000,
+        "alertAt": 1757337360000,
+        "advisoryAt": 1757341611000,
+        "removedAt": 1757344500000,
+        "versions": [
+          {
+            "id": "ansi-styles@6.2.2",
+            "publishedAt": 1757337130000
+          },
+          {
+            "id": "debug@4.4.2",
+            "publishedAt": 1757337159000
+          },
+          {
+            "id": "chalk@5.6.1",
+            "publishedAt": 1757337185000
+          },
+          {
+            "id": "supports-color@10.2.1",
+            "publishedAt": 1757337220000
+          },
+          {
+            "id": "strip-ansi@7.1.1",
+            "publishedAt": 1757337250000
+          },
+          {
+            "id": "ansi-regex@6.2.1",
+            "publishedAt": 1757337280000
+          },
+          {
+            "id": "wrap-ansi@9.0.1",
+            "publishedAt": 1757337310000
+          },
+          {
+            "id": "color-convert@3.1.1",
+            "publishedAt": 1757337340000
+          },
+          {
+            "id": "color-name@2.0.1",
+            "publishedAt": 1757337370000
+          },
+          {
+            "id": "is-arrayish@0.3.3",
+            "publishedAt": 1757337400000
+          },
+          {
+            "id": "color@5.0.1",
+            "publishedAt": 1757337430000
+          },
+          {
+            "id": "slice-ansi@7.1.1",
+            "publishedAt": 1757337460000
+          },
+          {
+            "id": "error-ex@1.3.3",
+            "publishedAt": 1757337490000
+          },
+          {
+            "id": "color-string@2.1.1",
+            "publishedAt": 1757337520000
+          },
+          {
+            "id": "simple-swizzle@0.2.3",
+            "publishedAt": 1757337550000
+          },
+          {
+            "id": "supports-hyperlinks@4.1.1",
+            "publishedAt": 1757337580000
+          },
+          {
+            "id": "has-ansi@6.0.1",
+            "publishedAt": 1757337600000
+          },
+          {
+            "id": "chalk-template@1.1.1",
+            "publishedAt": 1757337615000
+          },
+          {
+            "id": "backslash@0.2.1",
+            "publishedAt": 1757337631000
+          }
+        ],
+        "sources": [
+          "https://www.aikido.dev/blog/npm-debug-and-chalk-packages-compromised"
+        ]
+      },
+      "at": 1757338200000
+    },
+    {
+      "type": "tool_start",
+      "id": "t1",
+      "tool": "suspect_versions",
+      "params": {
+        "maintainer": "qix",
+        "since": 1757336400000,
+        "until": 1757338200000
+      }
+    },
+    {
+      "type": "tool_result",
+      "id": "t1",
+      "result": {
+        "tool": "suspect_versions",
+        "summary": "19 versions published by qix packages since 13:00 UTC",
+        "rows": [
+          {
+            "version": "ansi-styles@6.2.2",
+            "publishedAt": 1757337130000
+          },
+          {
+            "version": "debug@4.4.2",
+            "publishedAt": 1757337159000
+          },
+          {
+            "version": "chalk@5.6.1",
+            "publishedAt": 1757337185000
+          },
+          {
+            "version": "supports-color@10.2.1",
+            "publishedAt": 1757337220000
+          },
+          {
+            "version": "strip-ansi@7.1.1",
+            "publishedAt": 1757337250000
+          }
+        ],
+        "evidence": [],
+        "cypher": [
+          "MATCH (:Maintainer {name:$maintainer})-[:MAINTAINS]->(p:Package)<-[:OF]-(v:Version) WHERE v.publishedAt >= $since AND v.publishedAt < $until RETURN p.name AS package, v.version AS version, v.publishedAt AS publishedAt, v.removed AS removed ORDER BY publishedAt LIMIT 40"
+        ],
+        "params": {
+          "maintainer": "qix",
+          "since": 1757336400000,
+          "until": 1757338200000
+        },
+        "ms": 3.1
+      }
+    },
+    {
+      "type": "tool_start",
+      "id": "t2",
+      "tool": "incident_exposure",
+      "params": {
+        "incident": "qix-2025-09-08",
+        "at": 1757338200000
+      }
+    },
+    {
+      "type": "tool_result",
+      "id": "t2",
+      "result": {
+        "tool": "incident_exposure",
+        "summary": "1 LOCKED, 4 WOULD_PULL across 17 repos",
+        "rows": [
+          {
+            "repo": "acme/checkout-web",
+            "synthetic": true,
+            "team": "Payments",
+            "tier": "LOCKED",
+            "versions": [
+              "debug@4.4.2",
+              "chalk@5.6.1"
+            ],
+            "depth": 1,
+            "dev": false,
+            "ranges": [],
+            "packages": [],
+            "remediated": null
+          },
+          {
+            "repo": "github/docs",
+            "synthetic": false,
+            "team": "Docs",
+            "tier": "WOULD_PULL",
+            "versions": [
+              "debug@4.4.2",
+              "chalk@5.6.1",
+              "strip-ansi@7.1.1",
+              "slice-ansi@7.1.1",
+              "wrap-ansi@9.0.1",
+              "simple-swizzle@0.2.3"
+            ],
+            "depth": 1,
+            "dev": false,
+            "ranges": [
+              "^5.4.1",
+              "^4.4.1",
+              "^7.0.1"
+            ],
+            "packages": [],
+            "remediated": null
+          },
+          {
+            "repo": "npm/cli",
+            "synthetic": false,
+            "team": "CLI",
+            "tier": "WOULD_PULL",
+            "versions": [
+              "chalk@5.6.1",
+              "supports-color@10.2.1",
+              "debug@4.4.2"
+            ],
+            "depth": 0,
+            "dev": false,
+            "ranges": [
+              "^5.4.1",
+              "^10.0.0"
+            ],
+            "packages": [],
+            "remediated": null
+          },
+          {
+            "repo": "mochajs/mocha",
+            "synthetic": false,
+            "team": "QA",
+            "tier": "WOULD_PULL",
+            "versions": [
+              "debug@4.4.2"
+            ],
+            "depth": 0,
+            "dev": false,
+            "ranges": [
+              "^4.3.5"
+            ],
+            "packages": [],
+            "remediated": null
+          },
+          {
+            "repo": "remy/nodemon",
+            "synthetic": false,
+            "team": "QA",
+            "tier": "WOULD_PULL",
+            "versions": [
+              "debug@4.4.2"
+            ],
+            "depth": 0,
+            "dev": false,
+            "ranges": [
+              "^4"
+            ],
+            "packages": [],
+            "remediated": null
+          }
+        ],
+        "evidence": [],
+        "cypher": [
+          "MATCH (:Incident {id:$incident})-[:INVOLVES]->(bad:Version)<-[a:ADMITS]-(p:Dep) WHERE a.fromT <= $at AND $at < a.toT RETURN p.repo AS repo, bad.id AS version, count(p) AS hits"
+        ],
+        "params": {
+          "incident": "qix-2025-09-08",
+          "at": 1757338200000
+        },
+        "ms": 4.7
+      }
+    },
+    {
+      "type": "tool_start",
+      "id": "t3",
+      "tool": "maintainer_blast_radius",
+      "params": {
+        "maintainer": "qix"
+      }
+    },
+    {
+      "type": "tool_result",
+      "id": "t3",
+      "result": {
+        "tool": "maintainer_blast_radius",
+        "summary": "qix packages appear in 16 repos",
+        "rows": [
+          {
+            "repo": "http-party/http-server",
+            "packages": 2
+          }
+        ],
+        "evidence": [],
+        "cypher": [
+          "MATCH (:Maintainer {name:$maintainer})-[:MAINTAINS]->(pkg:Package)<-[:OF]-(:Version)<-[:RESOLVES_TO]-(d:Dep) RETURN d.repo AS repo, count(DISTINCT pkg) AS packages"
+        ],
+        "params": {
+          "maintainer": "qix"
+        },
+        "ms": 6.2
+      }
+    },
+    {
+      "type": "tool_start",
+      "id": "t4",
+      "tool": "explain_path",
+      "params": {
+        "repo": "acme/checkout-web",
+        "version": "debug@4.4.2"
+      }
+    },
+    {
+      "type": "tool_result",
+      "id": "t4",
+      "result": {
+        "tool": "explain_path",
+        "summary": "2-hop chain via express",
+        "rows": [
+          {
+            "id": "E1",
+            "repo": "acme/checkout-web",
+            "version": "debug@4.4.2",
+            "kind": "RESOLVES_TO",
+            "range": null,
+            "hops": 2,
+            "chain": [
+              "acme/checkout-web",
+              "express@5.1.0",
+              "debug@4.4.2"
+            ],
+            "lockPaths": [
+              "",
+              "node_modules/express",
+              "node_modules/debug"
+            ]
+          }
+        ],
+        "evidence": [],
+        "cypher": [
+          "MATCH p = shortestPath((root)-[:REQUIRES*]->(x)) RETURN length(p) AS hops"
+        ],
+        "params": {
+          "repo": "acme/checkout-web",
+          "version": "debug@4.4.2"
+        },
+        "ms": 1.4
+      }
+    },
+    {
+      "type": "tool_start",
+      "id": "t5",
+      "tool": "route_owners",
+      "params": {
+        "repos": [
+          "acme/checkout-web",
+          "github/docs",
+          "npm/cli",
+          "mochajs/mocha",
+          "remy/nodemon",
+          "http-party/http-server"
+        ]
+      }
+    },
+    {
+      "type": "tool_result",
+      "id": "t5",
+      "result": {
+        "tool": "route_owners",
+        "summary": "4 teams to notify",
+        "rows": [
+          {
+            "team": "Payments",
+            "channel": "#team-payments",
+            "repos": [
+              "acme/checkout-web"
+            ]
+          },
+          {
+            "team": "Docs",
+            "channel": "#team-docs",
+            "repos": [
+              "github/docs"
+            ]
+          },
+          {
+            "team": "CLI",
+            "channel": "#team-cli",
+            "repos": [
+              "npm/cli",
+              "http-party/http-server"
+            ]
+          },
+          {
+            "team": "QA",
+            "channel": "#team-qa",
+            "repos": [
+              "mochajs/mocha",
+              "remy/nodemon"
+            ]
+          }
+        ],
+        "evidence": [],
+        "cypher": [
+          "MATCH (r:Repo)-[:OWNED_BY]->(t:Team) WHERE r.id IN $repos RETURN t.name AS team, t.channel AS channel, collect(r.id) AS repos"
+        ],
+        "params": {
+          "repos": [
+            "acme/checkout-web",
+            "github/docs",
+            "npm/cli",
+            "mochajs/mocha",
+            "remy/nodemon",
+            "http-party/http-server"
+          ]
+        },
+        "ms": 0.9
+      }
+    },
+    {
+      "type": "report",
+      "report": {
+        "incident": {
+          "id": "qix-2025-09-08",
+          "title": "npm account qix phished: 19 packages hijacked",
+          "maintainer": "qix",
+          "firstPublishAt": 1757337130000,
+          "alertAt": 1757337360000,
+          "advisoryAt": 1757341611000,
+          "removedAt": 1757344500000,
+          "versions": [
+            {
+              "id": "ansi-styles@6.2.2",
+              "publishedAt": 1757337130000
+            },
+            {
+              "id": "debug@4.4.2",
+              "publishedAt": 1757337159000
+            },
+            {
+              "id": "chalk@5.6.1",
+              "publishedAt": 1757337185000
+            },
+            {
+              "id": "supports-color@10.2.1",
+              "publishedAt": 1757337220000
+            },
+            {
+              "id": "strip-ansi@7.1.1",
+              "publishedAt": 1757337250000
+            },
+            {
+              "id": "ansi-regex@6.2.1",
+              "publishedAt": 1757337280000
+            },
+            {
+              "id": "wrap-ansi@9.0.1",
+              "publishedAt": 1757337310000
+            },
+            {
+              "id": "color-convert@3.1.1",
+              "publishedAt": 1757337340000
+            },
+            {
+              "id": "color-name@2.0.1",
+              "publishedAt": 1757337370000
+            },
+            {
+              "id": "is-arrayish@0.3.3",
+              "publishedAt": 1757337400000
+            },
+            {
+              "id": "color@5.0.1",
+              "publishedAt": 1757337430000
+            },
+            {
+              "id": "slice-ansi@7.1.1",
+              "publishedAt": 1757337460000
+            },
+            {
+              "id": "error-ex@1.3.3",
+              "publishedAt": 1757337490000
+            },
+            {
+              "id": "color-string@2.1.1",
+              "publishedAt": 1757337520000
+            },
+            {
+              "id": "simple-swizzle@0.2.3",
+              "publishedAt": 1757337550000
+            },
+            {
+              "id": "supports-hyperlinks@4.1.1",
+              "publishedAt": 1757337580000
+            },
+            {
+              "id": "has-ansi@6.0.1",
+              "publishedAt": 1757337600000
+            },
+            {
+              "id": "chalk-template@1.1.1",
+              "publishedAt": 1757337615000
+            },
+            {
+              "id": "backslash@0.2.1",
+              "publishedAt": 1757337631000
+            }
+          ],
+          "sources": [
+            "https://www.aikido.dev/blog/npm-debug-and-chalk-packages-compromised"
+          ]
+        },
+        "at": 1757338200000,
+        "counts": {
+          "LOCKED": 1,
+          "WOULD_PULL": 4,
+          "MAINTAINER": 1,
+          "CLEAN": 11
+        },
+        "minutesAhead": 74,
+        "scanner": [],
+        "grepCount": 15,
+        "exposures": [
+          {
+            "repo": "acme/checkout-web",
+            "synthetic": true,
+            "team": "Payments",
+            "tier": "LOCKED",
+            "versions": [
+              "debug@4.4.2",
+              "chalk@5.6.1"
+            ],
+            "depth": 1,
+            "dev": false,
+            "ranges": [],
+            "packages": [],
+            "remediated": null
+          },
+          {
+            "repo": "github/docs",
+            "synthetic": false,
+            "team": "Docs",
+            "tier": "WOULD_PULL",
+            "versions": [
+              "debug@4.4.2",
+              "chalk@5.6.1",
+              "strip-ansi@7.1.1",
+              "slice-ansi@7.1.1",
+              "wrap-ansi@9.0.1",
+              "simple-swizzle@0.2.3"
+            ],
+            "depth": 1,
+            "dev": false,
+            "ranges": [
+              "^5.4.1",
+              "^4.4.1",
+              "^7.0.1"
+            ],
+            "packages": [],
+            "remediated": null
+          },
+          {
+            "repo": "npm/cli",
+            "synthetic": false,
+            "team": "CLI",
+            "tier": "WOULD_PULL",
+            "versions": [
+              "chalk@5.6.1",
+              "supports-color@10.2.1",
+              "debug@4.4.2"
+            ],
+            "depth": 0,
+            "dev": false,
+            "ranges": [
+              "^5.4.1",
+              "^10.0.0"
+            ],
+            "packages": [],
+            "remediated": null
+          },
+          {
+            "repo": "mochajs/mocha",
+            "synthetic": false,
+            "team": "QA",
+            "tier": "WOULD_PULL",
+            "versions": [
+              "debug@4.4.2"
+            ],
+            "depth": 0,
+            "dev": false,
+            "ranges": [
+              "^4.3.5"
+            ],
+            "packages": [],
+            "remediated": null
+          },
+          {
+            "repo": "remy/nodemon",
+            "synthetic": false,
+            "team": "QA",
+            "tier": "WOULD_PULL",
+            "versions": [
+              "debug@4.4.2"
+            ],
+            "depth": 0,
+            "dev": false,
+            "ranges": [
+              "^4"
+            ],
+            "packages": [],
+            "remediated": null
+          },
+          {
+            "repo": "http-party/http-server",
+            "synthetic": false,
+            "team": "CLI",
+            "tier": "MAINTAINER",
+            "versions": [],
+            "depth": 1,
+            "dev": false,
+            "ranges": [],
+            "packages": [
+              "chalk",
+              "supports-color"
+            ],
+            "remediated": null
+          }
+        ],
+        "paths": [
+          {
+            "id": "E1",
+            "repo": "acme/checkout-web",
+            "version": "debug@4.4.2",
+            "kind": "RESOLVES_TO",
+            "range": null,
+            "hops": 2,
+            "chain": [
+              "acme/checkout-web",
+              "express@5.1.0",
+              "debug@4.4.2"
+            ],
+            "lockPaths": [
+              "",
+              "node_modules/express",
+              "node_modules/debug"
+            ]
+          },
+          {
+            "id": "E2",
+            "repo": "mochajs/mocha",
+            "version": "debug@4.4.2",
+            "kind": "ADMITS",
+            "range": "^4.3.5",
+            "hops": 0,
+            "chain": [
+              "mochajs/mocha"
+            ],
+            "lockPaths": [
+              ""
+            ]
+          },
+          {
+            "id": "E3",
+            "repo": "github/docs",
+            "version": "chalk@5.6.1",
+            "kind": "ADMITS",
+            "range": "^5.4.1",
+            "hops": 0,
+            "chain": [
+              "github/docs"
+            ],
+            "lockPaths": [
+              ""
+            ]
+          },
+          {
+            "id": "E4",
+            "repo": "npm/cli",
+            "version": "supports-color@10.2.1",
+            "kind": "ADMITS",
+            "range": "^10.0.0",
+            "hops": 0,
+            "chain": [
+              "npm/cli"
+            ],
+            "lockPaths": [
+              ""
+            ]
+          }
+        ],
+        "owners": [
+          {
+            "team": "Payments",
+            "channel": "#team-payments",
+            "repos": [
+              "acme/checkout-web"
+            ]
+          },
+          {
+            "team": "Docs",
+            "channel": "#team-docs",
+            "repos": [
+              "github/docs"
+            ]
+          },
+          {
+            "team": "CLI",
+            "channel": "#team-cli",
+            "repos": [
+              "npm/cli",
+              "http-party/http-server"
+            ]
+          },
+          {
+            "team": "QA",
+            "channel": "#team-qa",
+            "repos": [
+              "mochajs/mocha",
+              "remy/nodemon"
+            ]
+          }
+        ],
+        "remediations": [
+          {
+            "repo": "acme/checkout-web",
+            "overrides": {
+              "debug": "4.4.1",
+              "chalk": "5.6.0"
+            },
+            "steps": [
+              "Add overrides and regenerate the lockfile",
+              "Rotate secrets used by builds since 13:12 UTC",
+              "Rebuild and redeploy bundles built during the window"
+            ],
+            "prBody": "Pins debug and chalk to the last safe versions (path [E1])."
+          },
+          {
+            "repo": "mochajs/mocha",
+            "overrides": {
+              "debug": "4.4.1"
+            },
+            "steps": [
+              "Add overrides until the clean release lands",
+              "Avoid regenerating the lockfile during the window"
+            ],
+            "prBody": "Root range ^4.3.5 admits debug@4.4.2 [E2]."
+          }
+        ],
+        "notices": [
+          {
+            "team": "Payments",
+            "channel": "#team-payments",
+            "text": "Payments: acme/checkout-web exposed to the qix npm hijack. See paths and fixes in Patient Zero."
+          },
+          {
+            "team": "Docs",
+            "channel": "#team-docs",
+            "text": "Docs: github/docs exposed to the qix npm hijack. See paths and fixes in Patient Zero."
+          },
+          {
+            "team": "CLI",
+            "channel": "#team-cli",
+            "text": "CLI: npm/cli, http-party/http-server exposed to the qix npm hijack. See paths and fixes in Patient Zero."
+          },
+          {
+            "team": "QA",
+            "channel": "#team-qa",
+            "text": "QA: mochajs/mocha, remy/nodemon exposed to the qix npm hijack. See paths and fixes in Patient Zero."
+          }
+        ],
+        "concentration": [
+          {
+            "maintainer": "sindresorhus",
+            "influence": 0.31,
+            "packages": 48,
+            "reposReached": 17
+          },
+          {
+            "maintainer": "qix",
+            "influence": 0.12,
+            "packages": 22,
+            "reposReached": 16
+          },
+          {
+            "maintainer": "ljharb",
+            "influence": 0.09,
+            "packages": 61,
+            "reposReached": 14
+          }
+        ]
+      }
+    },
+    {
+      "type": "narration",
+      "mode": "replay",
+      "provider": null,
+      "text": "`acme/checkout-web` has `debug@4.4.2` locked [E1]: rotate secrets and rebuild. 4 repos would pull a malicious version on a fresh resolve, e.g. `mochajs/mocha` via `^4.3.5` [E2]. Notify Payments, Docs, CLI and QA. Advisory-based scanners show 0 hits until 14:26 UTC."
+    },
+    {
+      "type": "guard",
+      "verified": 9,
+      "total": 9,
+      "flagged": []
+    },
+    {
+      "type": "done",
+      "ms": 2140
+    }
+  ]
+}
