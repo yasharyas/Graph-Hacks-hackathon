@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scribble: 74 min</title>
+  <style>
+    :root { --bg-0: #0a0a0b; --bg-1: #121214; --line-2: #34343a; --fg-0: #eceae6; --fg-1: #a8a6a0; --red-400: #ff5a4f; }
+    html, body { margin: 0; background: var(--bg-0); color: var(--fg-0); font: 14px/1.4 'Satoshi', system-ui, sans-serif; }
+    main { padding: 24px; display: grid; gap: 16px; justify-items: start; }
+    .stage { position: relative; background: var(--bg-1); outline: 1px solid var(--line-2); }
+    .stage canvas { display: block; }
+    /* HTML stand-in for the UI text the scribble will sit on: not part of the export */
+    .stand-in { position: absolute; left: 0; top: 0; width: 480px; height: 300px; pointer-events: none; }
+    .stand-in .num { position: absolute; left: 300px; top: 160px; transform: translate(-50%, -50%); font: 800 56px/1 'Cabinet Grotesk', system-ui, sans-serif; letter-spacing: -0.02em; color: var(--fg-0); white-space: nowrap; }
+    .stand-in .cap { position: absolute; left: 28px; top: 20px; max-width: 150px; color: var(--fg-1); font-size: 13px; }
+    .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--bg-1); color: var(--fg-0); cursor: pointer; }
+    label { color: var(--fg-1); display: inline-flex; gap: 6px; align-items: center; }
+    output { font-family: 'Martian Mono', monospace; font-size: 12px; color: var(--fg-1); white-space: pre; }
+  </style>
+</head>
+<body>
+<main>
+  <div class="stage" id="stage">
+    <div class="stand-in" id="standin"><span class="cap">before the OSV record existed</span><span class="num">74 min</span></div>
+  </div>
+  <div class="toolbar">
+    <button id="export" type="button">Export arrow + loop + combined (PNG + WebP)</button>
+    <label><input id="standin-toggle" type="checkbox" checked> show UI stand-in</label>
+    <label>layer <select id="layer"><option value="both">both</option><option value="arrow">arrow</option><option value="loop">loop</option></select></label>
+  </div>
+  <output id="log"></output>
+</main>
+
+<script type="module">
+  // p5 2.x as an ES module + p5.brush (p5 build) in instance mode.
+  // p5.brush registers itself as a p5 addon only if a global `p5` exists when it is evaluated,
+  // hence the dynamic import after setting window.p5.
+  import p5 from 'p5';
+  window.p5 = p5;
+  const brush = await import('p5.brush');
+
+  const NAME = 'seventy-four-min';
+  const W = 480, H = 300, DPR = 2;        // exported at 960×600
+  const SEED = 1757341611;               // advisoryAt of the qix incident, for a deterministic edition
+  const INK = '#ff5a4f';                 // --red-400; strokes are recoloured to exactly this on export
+  const ANCHOR = { x: 300, y: 160 };     // where "74 min" sits (56px Cabinet Grotesk 800 ≈ 170×40)
+  const LOOP = { rx: 108, ry: 50, tiltDeg: -4, turns: 1.85, startDeg: 205 }; // ≈216×100, drawn twice
+  const say = (s) => (document.getElementById('log').textContent += s + '\n');
+  let layer = 'both';                    // which strokes draw() paints; switched per export pass
+
+  // A 2D copy of the WebGL canvas taken inside p5's postdraw hook (same task as p5.brush's
+  // composite), so the export never depends on preserveDrawingBuffer.
+  const snapshot = document.createElement('canvas');
+  snapshot.width = W * DPR; snapshot.height = H * DPR;
+  let snapshotReady = false;
+  p5.registerAddon((_p5, _fn, lifecycles) => {
+    lifecycles.postdraw = function () {
+      const gl = this._renderer?.canvas ?? this.canvas;
+      if (!gl) return;
+      const ctx = snapshot.getContext('2d', { willReadFrequently: true });
+      ctx.clearRect(0, 0, snapshot.width, snapshot.height);
+      ctx.drawImage(gl, 0, 0, snapshot.width, snapshot.height);
+      snapshotReady = true;
+    };
+  });
+
+  // Point on the (tilted) loop ellipse at parameter angle `deg`.
+  const onLoop = (deg) => {
+    const th = (deg * Math.PI) / 180, tilt = (LOOP.tiltDeg * Math.PI) / 180;
+    const x = LOOP.rx * Math.cos(th), y = LOOP.ry * Math.sin(th);
+    return { x: ANCHOR.x + x * Math.cos(tilt) - y * Math.sin(tilt), y: ANCHOR.y + x * Math.sin(tilt) + y * Math.cos(tilt) };
+  };
+
+  let sketchRef;
+  const sketch = (p) => {
+    sketchRef = p;
+    brush.instance(p);
+
+    p.setup = () => {
+      p.createCanvas(W, H, p.WEBGL);
+      p.pixelDensity(DPR);
+      p.angleMode(p.DEGREES);
+      brush.scaleBrushes(2.4);          // ≈3 at 600px, scaled to 480px
+      p.noLoop();
+    };
+
+    p.draw = () => {
+      p.randomSeed(SEED); p.noiseSeed(SEED);   // also seeds p5.brush
+      p.clear();                                // transparent background
+      p.translate(-W / 2, -H / 2);              // WEBGL origin is the centre
+
+      if (layer !== 'arrow') {
+        // 1. The loop: one continuous stroke, 1.85 turns, drifting inward, the way a hand circles
+        //    a figure twice without lifting the pen. Pen down at the top-left, trails off at the bottom.
+        brush.set('pen', INK, 1.45);
+        const steps = Math.round(LOOP.turns * 26);
+        const pts = [];
+        for (let i = 0; i <= steps; i++) {
+          const t = i / steps;
+          const deg = LOOP.startDeg + 360 * LOOP.turns * t;
+          const drift = 1 - 0.05 * t * LOOP.turns                     // spiral inward ~9%
+            + 0.02 * Math.sin((deg * Math.PI) / 180 * 2.3 + 0.7)      // slow wobble
+            + p.random(-0.005, 0.005);                                // pen jitter
+          const press = Math.min(1, t / 0.08) * (t > 0.86 ? 1 - ((t - 0.86) / 0.14) * 0.6 : 1);
+          const q = onLoop(deg);
+          pts.push([ANCHOR.x + (q.x - ANCHOR.x) * drift, ANCHOR.y + (q.y - ANCHOR.y) * drift, 0.55 + 0.75 * press]);
+        }
+        brush.spline(pts, 0.5);
+      }
+
+      if (layer !== 'loop') {
+        // 2. The arrow: starts below the two-line caption, lands on the loop's upper-left shoulder.
+        //    Firm at the start, slightly lighter at the tip, like a real stroke.
+        const tip = onLoop(212);
+        const stem = [
+          [56, 74, 1.25],
+          [122, 66, 1.15],
+          [180, 100, 1.0],
+          [tip.x, tip.y, 0.9],
+        ];
+        brush.set('pen', INK, 1.4);
+        brush.spline(stem, 0.55);
+
+        // Arrowhead: two solid barbs trailing back from the tip along the last segment's direction.
+        const prev = stem[stem.length - 2];
+        const heading = Math.atan2(tip.y - prev[1], tip.x - prev[0]);
+        const barb = 19, spread = 0.5;
+        brush.set('pen', INK, 1.55);
+        for (const s of [-1, 1]) {
+          const a = heading + Math.PI + s * spread;
+          brush.line(tip.x, tip.y, tip.x + Math.cos(a) * barb, tip.y + Math.sin(a) * barb);
+        }
+      }
+    };
+  };
+
+  new p5(sketch, document.getElementById('stage'));
+
+  // ── Export ────────────────────────────────────────────────────────────────────────────────────
+  // p5.brush composites the pen as opaque, darkened pixels. For the UI we want exactly --red-400 and
+  // soft edges, so: recolour every painted pixel to INK (keeping its alpha), then feather 1px at 2×.
+  function finish(src) {
+    const ctx = src.getContext('2d', { willReadFrequently: true });
+    const img = ctx.getImageData(0, 0, src.width, src.height);
+    const d = img.data;
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(INK.slice(i, i + 2), 16));
+    for (let i = 0; i < d.length; i += 4) if (d[i + 3]) { d[i] = r; d[i + 1] = g; d[i + 2] = b; }
+    const flat = document.createElement('canvas');
+    flat.width = src.width; flat.height = src.height;
+    flat.getContext('2d').putImageData(img, 0, 0);
+    const out = document.createElement('canvas');
+    out.width = src.width; out.height = src.height;
+    const octx = out.getContext('2d');
+    octx.filter = 'blur(0.8px)';
+    octx.drawImage(flat, 0, 0);
+    return out;
+  }
+  const toBlob = (c, type) => new Promise((ok, no) => c.toBlob((b) => (b ? ok(b) : no(new Error('toBlob failed'))), type, 0.92));
+  const settle = (ms) => new Promise((r) => setTimeout(r, ms));
+  // Rendering is driven explicitly with redraw() + a timer, not requestAnimationFrame: rAF does not
+  // fire while the browser pane is hidden, and the export must work unattended.
+  async function exportLayer(which, slug) {
+    layer = which;
+    snapshotReady = false;
+    await sketchRef.redraw();
+    await settle(80);
+    if (!snapshotReady) { say(`${slug}: not rendered`); return; }
+    const out = finish(snapshot);
+    for (const fmt of ['png', 'webp']) {
+      const blob = await toBlob(out, `image/${fmt}`);
+      const res = await fetch(`/__export?name=${slug}&fmt=${fmt}`, { method: 'POST', body: blob });
+      say(`${slug}.${fmt}: ${res.status} ${await res.text()}`);
+    }
+  }
+  async function exportAll() {
+    await exportLayer('arrow', `${NAME}-arrow`);
+    await exportLayer('loop', `${NAME}-loop`);
+    await exportLayer('both', NAME);
+    document.title = 'Scribble: 74 min — exported';
+  }
+  document.getElementById('export').addEventListener('click', exportAll);
+  document.getElementById('standin-toggle').addEventListener('change', (e) => {
+    document.getElementById('standin').style.display = e.target.checked ? '' : 'none';
+  });
+  document.getElementById('layer').addEventListener('change', (e) => { layer = e.target.value; sketchRef.redraw(); });
+  if (new URLSearchParams(location.search).has('export')) {
+    const ready = () => sketchRef && document.querySelector('#stage canvas');
+    const wait = () => (ready() ? settle(200).then(exportAll) : setTimeout(wait, 100));
+    wait();
+  }
+</script>
+</body>
+</html>

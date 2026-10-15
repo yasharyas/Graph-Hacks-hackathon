@@ -1,0 +1,352 @@
+/* Patient Zero — design tokens (Phase 0, owned by W7; the contract is docs/design.md)
+ *
+ * Usage (web/src/index.css):
+ *   @import "tailwindcss";
+ *   @import "./design/tokens.css";
+ *
+ * Two kinds of token live here:
+ *   1. `:root` custom properties for colour, motion durations, density and layering. These are
+ *      not Tailwind namespaces, so they never collide with the theme; colours are exposed to
+ *      utilities through `@theme inline` under semantic names only.
+ *   2. `@theme` values for fonts, type scale, tracking, radii, shadows, easings and animations.
+ *      Tailwind emits these as `:root` variables itself and builds the utilities from them.
+ * Tailwind's default palette, fonts, type scale, radii, shadows, easings and animations are reset:
+ * if a utility is not derivable from this file, it does not exist in this app.
+ */
+
+/* ───────────────────────────── 1. Fonts (self-hosted, see web/public/fonts/README.md) ──────────── */
+/* Preload all four files in index.html (<link rel="preload" as="font" type="font/woff2" crossorigin>)
+   so the `swap` window is a frame, not a second. */
+
+@font-face {
+  font-family: 'Satoshi';
+  src: url('/fonts/Satoshi-Variable.woff2') format('woff2');
+  font-weight: 300 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Cabinet Grotesk';
+  src: url('/fonts/CabinetGrotesk-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+/* Martian Mono is the Google Fonts subset: Latin only. U+2192 → and U+21D2 ⇒ are NOT in it; path chips
+   use an inline SVG arrow between chips (see docs/design.md §Path-chip grammar), never the glyphs. */
+@font-face {
+  font-family: 'Martian Mono';
+  src: url('/fonts/MartianMono-latin.woff2') format('woff2');
+  font-weight: 300 800;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Martian Mono';
+  src: url('/fonts/MartianMono-latin-ext.woff2') format('woff2');
+  font-weight: 300 800;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ───────────────────────────── 2. Colour, motion, density, layers ─────────────────────────────── */
+
+:root {
+  color-scheme: dark;
+
+  /* Surfaces: elevation is lightness, not shadow. Ratios are in docs/design.md §2. */
+  --bg-0: #0a0a0b; /* page, graph canvas, input fill */
+  --bg-1: #121214; /* panels */
+  --bg-2: #19191c; /* cards, table header, Cypher blocks */
+  --bg-3: #202024; /* hover, selected row, inset wells, skeleton blocks */
+  --bg-scrim: rgb(10 10 11 / 0.64);
+
+  /* Lines */
+  --line-1: #26262b; /* hairline dividers (decorative) */
+  --line-2: #34343a; /* card and panel borders (decorative) */
+  --line-3: #6c6c76; /* interactive boundaries: inputs, secondary buttons (≥ 3.1:1 on bg-0…bg-3) */
+
+  /* Text */
+  --fg-0: #eceae6; /* primary */
+  --fg-1: #a8a6a0; /* secondary, table headers, graph labels */
+  --fg-2: #85837e; /* tertiary meta (4.9:1 on bg-1; not for 11px text on bg-2/bg-3) */
+  --fg-3: #6b6964; /* disabled and placeholder only (3.4:1) */
+
+  /* The one accent: infection red. Means "infected", never "click me". */
+  --red-300: #ff8a7a; /* hover state of red text */
+  --red-400: #ff5a4f; /* red text, strokes, LOCKED, the pulsing bad node, scribble ink */
+  --red-500: #e5383b; /* solid fills: malicious version node, solid badge (text on it is --bg-0) */
+  --red-700: #8c2a2a; /* compromised maintainer node fill, always with a --red-400 ring */
+  --red-900: #2b1516; /* red-tinted surface: the alert banner only */
+
+  /* Muted supporting hues (not exported as utilities; reach them through tiers / graph / link) */
+  --amber-400: #e8a33d;
+  --steel-300: #9fb3c8;
+  --green-400: #5bbe8a;
+  --green-500: #3fae7a;
+  --blue-300: #7db2ff;
+  --blue-500: #5c9dff;
+  --dep-500: #6b6b73;
+
+  /* Tiers: text colour + tinted chip surface (every pair ≥ 5.1:1) */
+  --tier-locked: var(--red-400);
+  --tier-locked-bg: #331c1c;
+  --tier-would-pull: var(--amber-400);
+  --tier-would-pull-bg: #30261a;
+  --tier-maintainer: var(--steel-300);
+  --tier-maintainer-bg: #26292d;
+  --tier-clean: var(--green-400);
+  --tier-clean-bg: #1c2a25;
+
+  /* Graph palette (react-force-graph-2d) */
+  --graph-maintainer: var(--red-700);
+  --graph-maintainer-ring: var(--red-400);
+  --graph-bad: var(--red-500);
+  --graph-bad-pulse: var(--red-400);  /* a ring that scales and fades twice; never a shadowBlur glow */
+  --graph-dep: var(--dep-500);
+  --graph-repo: var(--blue-500);
+  --graph-team: var(--green-500);
+  --graph-link: #4a4a54;              /* idle edges, 2.3:1 on bg-0 (projector-safe) */
+  --graph-link-active: var(--red-400);
+  --graph-label: var(--fg-1);
+  --graph-dim-node: 0.35;             /* nodes outside the selected chain; their labels are hidden */
+  --graph-dim-link: 0.2;
+  --graph-canvas: var(--bg-0);
+
+  /* Semantic shortcuts */
+  --accent: var(--red-400);
+  --accent-fill: var(--red-500);
+  --accent-soft: var(--red-900);
+  --link: var(--blue-300);
+  --link-hover: var(--fg-0);
+  --ok: var(--green-400);
+  --warn: var(--amber-400);
+  --btn-primary-bg: var(--fg-0);
+  --btn-primary-fg: var(--bg-0);
+  --btn-primary-hover: #ffffff;
+  --selection-bg: var(--bg-3);
+  --skeleton: var(--bg-3);
+  --opacity-disabled: 0.5;
+
+  /* Focus: hue-free, outside the element so it reads on light fills too */
+  --focus-ring-color: var(--fg-0);
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+
+  /* Motion durations (easings live in @theme as --ease-*) */
+  --dur-instant: 0ms;   /* keyboard-initiated changes, scrubbing, tab switches */
+  --dur-press: 120ms;   /* pointer :active scale on buttons and chips */
+  --dur-fast: 160ms;    /* hover colour, tooltip, scrim */
+  --dur-base: 200ms;    /* dropdowns, row expand, card enter */
+  --dur-slow: 280ms;    /* drawer, dialog (ceiling for UI feedback: 300ms) */
+  --dur-fade: 120ms;    /* opacity / colour fades; the only duration kept under reduced motion */
+  --dur-draw: 600ms;    /* path and check draw-on, scribble reveal (explanatory, interruptible) */
+  --dur-sweep: 1800ms;  /* radar loop while a query is running (and only then) */
+  --stagger: 40ms;      /* list entrance, at most 6 items (240ms total) */
+  --press-scale: 0.97;
+  --tooltip-delay: 400ms;
+
+  /* Density */
+  --header-h: 48px;
+  --tabbar-h: 56px;         /* bottom tab bar under 1024px */
+  --control-h: 36px;        /* 44px on coarse pointers (below) */
+  --row-h: 36px;            /* dense table row; 44px on coarse pointers */
+  --cell-x: 12px;
+  --cell-y: 8px;
+  --pane-left: 320px;       /* tool feed; 360px from 1440 */
+  --pane-right: 420px;      /* exposure table; 480px from 1440 */
+  --measure: 68ch;          /* narrative line length */
+  --gutter: 16px;           /* 24px from 768 */
+
+  /* Layers (toasts show above dialogs by design) */
+  --z-sticky: 10;
+  --z-dropdown: 20;
+  --z-drawer: 30;
+  --z-modal: 40;
+  --z-toast: 50;
+}
+
+@media (min-width: 768px) { :root { --gutter: 24px; } }
+@media (min-width: 1440px) { :root { --pane-left: 360px; --pane-right: 480px; } }
+@media (pointer: coarse) { :root { --control-h: 44px; --row-h: 44px; } }
+
+/* ───────────────────────────── 3. Tailwind v4 theme ───────────────────────────────────────────── */
+
+@theme {
+  /* Only Patient Zero values exist as utilities. */
+  --color-*: initial;
+  --font-*: initial;
+  --text-*: initial;
+  --tracking-*: initial;
+  --radius-*: initial;
+  --shadow-*: initial;
+  --ease-*: initial;
+  --animate-*: initial;
+
+  --spacing: 0.25rem; /* 4px grid: p-1 = 4, p-2 = 8, p-3 = 12, p-4 = 16, p-6 = 24, p-8 = 32 */
+
+  --font-sans: 'Satoshi', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Cabinet Grotesk', 'Satoshi', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Martian Mono', ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
+
+  /* Type scale (dense). Live numbers use font-sans + tabular-nums: Cabinet Grotesk has no tnum. */
+  --text-2xs: 0.6875rem; --text-2xs--line-height: 1rem;        /* 11px uppercase labels, badges */
+  --text-xs: 0.75rem;    --text-xs--line-height: 1.125rem;     /* 12px meta, Cypher, ms */
+  --text-sm: 0.8125rem;  --text-sm--line-height: 1.25rem;      /* 13px table cells, chips */
+  --text-base: 0.875rem; --text-base--line-height: 1.375rem;   /* 14px UI body, buttons */
+  --text-md: 1rem;       --text-md--line-height: 1.5rem;       /* 16px narrative, inputs on touch */
+  --text-lg: 1.125rem;   --text-lg--line-height: 1.5rem;       /* 18px card titles */
+  --text-xl: 1.375rem;   --text-xl--line-height: 1.75rem;   --text-xl--letter-spacing: -0.01em;  /* 22px headings (display) */
+  --text-2xl: 1.75rem;   --text-2xl--line-height: 2rem;     --text-2xl--letter-spacing: -0.02em; /* 28px exec figures */
+  --text-3xl: 2.5rem;    --text-3xl--line-height: 2.625rem; --text-3xl--letter-spacing: -0.02em; /* 40px counters (sans, tabular) */
+  --text-4xl: 3.5rem;    --text-4xl--line-height: 3.5rem;   --text-4xl--letter-spacing: -0.02em; /* 56px "74 min" (display) */
+  --text-5xl: 5rem;      --text-5xl--line-height: 5rem;     --text-5xl--letter-spacing: -0.02em; /* 80px hero counter ≥ 1280 */
+
+  --tracking-caps: 0.08em;
+  --tracking-tight: -0.01em;
+  --tracking-display: -0.02em;
+
+  --radius-xs: 3px;    /* chips, inline code */
+  --radius-sm: 6px;    /* buttons, inputs, tool cards, segmented controls */
+  --radius-md: 10px;   /* panels, exec summary card */
+  --radius-lg: 14px;   /* drawers, dialogs */
+  --radius-full: 9999px; /* the LLM-mode and claims badges only */
+
+  /* Shadows exist only for things that float. Resting cards use lightness + hairline. */
+  --shadow-popover: 0 8px 24px rgb(0 0 0 / 0.5), 0 0 0 1px #34343a;
+  --shadow-overlay: 0 24px 48px rgb(0 0 0 / 0.6), 0 0 0 1px #34343a;
+
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);     /* enter, exit, press release, expand */
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1); /* things that travel on screen */
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);  /* drawers, dialogs */
+
+  --animate-radar-sweep: radar-sweep var(--dur-sweep) linear infinite;   /* only while a query runs */
+  --animate-pulse-ring: pulse-ring 1200ms var(--ease-out) 2;              /* twice, then still */
+  --animate-turn-once: turn-once var(--dur-draw) var(--ease-out) 1;       /* biohazard: one turn on run start */
+  --animate-enter: enter var(--dur-base) var(--ease-out) both;
+  --animate-fade: fade var(--dur-fade) var(--ease-out) both;
+
+  @keyframes radar-sweep { to { transform: rotate(360deg); } }
+  @keyframes pulse-ring { from { transform: scale(1); opacity: 0.5; } to { transform: scale(1.35); opacity: 0; } }
+  @keyframes turn-once { to { transform: rotate(360deg); } }
+  @keyframes enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+}
+
+@theme inline {
+  --color-white: #ffffff;
+  --color-bg-0: var(--bg-0);
+  --color-bg-1: var(--bg-1);
+  --color-bg-2: var(--bg-2);
+  --color-bg-3: var(--bg-3);
+  --color-scrim: var(--bg-scrim);
+  --color-line-1: var(--line-1);
+  --color-line-2: var(--line-2);
+  --color-line-3: var(--line-3);
+  --color-fg-0: var(--fg-0);
+  --color-fg-1: var(--fg-1);
+  --color-fg-2: var(--fg-2);
+  --color-fg-3: var(--fg-3);
+  /* Hue utilities are semantic on purpose: `red-500` / `blue-500` do not exist as classes, because
+     they would silently differ from the Tailwind defaults builders have in muscle memory. */
+  --color-infect-300: var(--red-300);
+  --color-infect-400: var(--red-400);
+  --color-infect-500: var(--red-500);
+  --color-infect-700: var(--red-700);
+  --color-infect-900: var(--red-900);
+  --color-tier-locked: var(--tier-locked);
+  --color-tier-locked-bg: var(--tier-locked-bg);
+  --color-tier-would-pull: var(--tier-would-pull);
+  --color-tier-would-pull-bg: var(--tier-would-pull-bg);
+  --color-tier-maintainer: var(--tier-maintainer);
+  --color-tier-maintainer-bg: var(--tier-maintainer-bg);
+  --color-tier-clean: var(--tier-clean);
+  --color-tier-clean-bg: var(--tier-clean-bg);
+  --color-graph-maintainer: var(--graph-maintainer);
+  --color-graph-bad: var(--graph-bad);
+  --color-graph-dep: var(--graph-dep);
+  --color-graph-repo: var(--graph-repo);
+  --color-graph-team: var(--graph-team);
+  --color-graph-link: var(--graph-link);
+  --color-graph-link-active: var(--graph-link-active);
+  --color-accent: var(--accent);
+  --color-accent-fill: var(--accent-fill);
+  --color-accent-soft: var(--accent-soft);
+  --color-link: var(--link);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-skeleton: var(--skeleton);
+}
+
+/* ───────────────────────────── 4. Scribble reveal primitives ──────────────────────────────────── */
+/* Pre-rendered p5.brush strokes are revealed along their own drawing direction, never as a curtain:
+   `.scribble-wipe` for a stroke that travels left→right (arrows, underlines);
+   `.scribble-sweep` for a loop: a conic mask that grows clockwise from the pen-down point
+   (--pen-x/--pen-y in % of the image box, --pen-from as a clock angle). */
+
+@property --sweep { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+@keyframes wipe-in { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+@keyframes sweep-in { from { --sweep: 0deg; } to { --sweep: 360deg; } }
+
+.scribble { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; user-select: none; }
+.scribble-wipe { animation: wipe-in var(--dur-draw) var(--ease-out) both; }
+.scribble-sweep {
+  --pen-x: 50%; --pen-y: 50%; --pen-from: 0deg;
+  -webkit-mask-image: conic-gradient(from var(--pen-from) at var(--pen-x) var(--pen-y), #000 var(--sweep), transparent 0);
+  mask-image: conic-gradient(from var(--pen-from) at var(--pen-x) var(--pen-y), #000 var(--sweep), transparent 0);
+  animation: sweep-in calc(var(--dur-draw) * 1.5) linear both;
+}
+
+/* ───────────────────────────── 5. Base ────────────────────────────────────────────────────────── */
+
+@layer base {
+  html {
+    background: var(--bg-0);
+    color: var(--fg-0);
+    font-family: var(--font-sans);
+    font-size: 100%;              /* respects the user's browser font-size preference */
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    scrollbar-color: var(--line-3) transparent;
+  }
+  body { font-size: var(--text-base); line-height: var(--text-base--line-height); min-height: 100dvh; }
+  ::selection { background: var(--selection-bg); color: var(--fg-0); }
+  :focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring-color);
+    outline-offset: var(--focus-ring-offset);
+  }
+  tr:focus-visible { outline-offset: -2px; scroll-margin-top: 40px; }
+  button, [role='button'], a, summary { touch-action: manipulation; }
+  code, kbd, pre, samp { font-family: var(--font-mono); font-size: 0.92em; }
+  .tabular, td[data-num], time { font-variant-numeric: tabular-nums; }
+  [aria-disabled='true'], :disabled { opacity: var(--opacity-disabled); cursor: not-allowed; }
+}
+
+/* ───────────────────────────── 6. Reduced motion ──────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-press: 0ms;
+    --dur-fast: 0ms;
+    --dur-base: 0ms;
+    --dur-slow: 0ms;
+    --dur-draw: 0ms;
+    --dur-sweep: 0ms;
+    --stagger: 0ms;
+    --press-scale: 1;
+    /* --dur-fade stays 120ms: components that want a colour/opacity fade use it explicitly. */
+  }
+  html { scroll-behavior: auto; }
+  /* Looping and travelling animations stop; elements land in their natural (final) state. */
+  [class*='animate-'], .scribble-wipe, .scribble-sweep { animation: none !important; }
+  .scribble-sweep { -webkit-mask-image: none; mask-image: none; }
+  /* Movement never transitions; opacity and colour may, at whatever duration the author chose
+     (token durations above are already 0 except --dur-fade). Nothing gains a transition it did not have. */
+  * { transition-property: opacity, color, background-color, border-color, outline-color, fill, stroke !important; }
+}

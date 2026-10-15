@@ -1,0 +1,6 @@
+# Fontshare files are fetched at build time (node web/src/design/fetch-fonts.mjs), never committed.
+# ITF Free Font License v2.0 §01 permits self-hosting on our own servers; §02 forbids redistributing
+# the font files through a public repository. Martian Mono (OFL 1.1) is committed.
+Satoshi-Variable.woff2
+CabinetGrotesk-Variable.woff2
+FFL.txt

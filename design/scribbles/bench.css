@@ -1,0 +1,32 @@
+/* Design bench stylesheet: the real token file compiled through Tailwind v4, plus a few bench-only rules. */
+@import "tailwindcss";
+@import "../../web/src/design/tokens.css";
+
+@layer components {
+  .bench-section { display: grid; gap: 12px; }
+  .bench-h2 { font-family: var(--font-display); font-weight: 800; font-size: var(--text-xl); line-height: var(--text-xl--line-height); letter-spacing: var(--tracking-display); }
+  .bench-p { color: var(--fg-1); max-width: var(--measure); }
+  .bench-link { color: var(--link); text-decoration: underline; text-underline-offset: 3px; }
+  .bench-link:hover { color: var(--link-hover); }
+  .swatch { display: grid; gap: 4px; width: 112px; font-size: var(--text-xs); color: var(--fg-1); }
+  .swatch i { display: block; height: 40px; border-radius: var(--radius-sm); border: 1px solid var(--line-2); }
+  .swatch b { color: var(--fg-0); font-weight: 500; }
+  .swatch code { color: var(--fg-2); font-size: 11px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: var(--radius-xs); font-family: var(--font-mono); font-size: var(--text-2xs); font-weight: 500; letter-spacing: 0.02em; }
+  .chip::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .btn { height: var(--control-h); padding: 0 14px; border-radius: var(--radius-sm); border: 1px solid transparent; font-weight: 500; cursor: pointer; transition: background-color var(--dur-fast) var(--ease-out); }
+  @media (hover: hover) and (pointer: fine) {
+    .btn-primary:hover { background: var(--btn-primary-hover); }
+    .btn-secondary:hover { background: var(--bg-3); }
+    .btn-ghost:hover { background: var(--bg-3); color: var(--fg-0); }
+  }
+  .btn:active { transform: scale(var(--press-scale)); transition: transform var(--dur-press) var(--ease-out); }
+  .btn-primary { background: var(--btn-primary-bg); color: var(--btn-primary-fg); }
+  .btn-secondary { background: var(--bg-2); color: var(--fg-0); border-color: var(--line-3); }
+  .btn-ghost { background: transparent; color: var(--fg-1); }
+  .input { height: var(--control-h); padding: 0 12px; border-radius: var(--radius-sm); border: 1px solid var(--line-3); background: var(--bg-0); color: var(--fg-0); min-width: 320px; }
+  .input::placeholder { color: var(--fg-3); }
+  .th { text-align: left; font-size: var(--text-2xs); letter-spacing: var(--tracking-caps); text-transform: uppercase; color: var(--fg-1); font-weight: 500; padding: 0 var(--cell-x); height: 32px; border-bottom: 1px solid var(--line-2); white-space: nowrap; }
+  .td { height: var(--row-h); padding: 0 var(--cell-x); border-bottom: 1px solid var(--line-1); white-space: nowrap; }
+  .path-arrow { display: inline-block; width: 12px; height: 12px; vertical-align: -1px; margin: 0 2px; }
+}

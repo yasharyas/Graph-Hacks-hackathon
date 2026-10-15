@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Patient Zero design bench</title>
+  <link rel="preload" as="font" type="font/woff2" href="/fonts/Satoshi-Variable.woff2" crossorigin>
+  <link rel="preload" as="font" type="font/woff2" href="/fonts/CabinetGrotesk-Variable.woff2" crossorigin>
+  <link rel="preload" as="font" type="font/woff2" href="/fonts/MartianMono-latin.woff2" crossorigin>
+  <link rel="stylesheet" href="/bench.css">
+</head>
+<body>
+<main class="max-w-[1100px] px-[var(--gutter)] py-8 grid gap-10">
+  <header class="grid gap-2">
+    <h1 class="font-sans font-bold text-xl tracking-tight">Patient Zero</h1>
+    <p class="bench-p">Design bench for Phase 0: fonts, tokens (compiled through Tailwind v4 from <code>web/src/design/tokens.css</code>) and the scribble sketches. Not shipped. The contract is <code>docs/design.md</code>.</p>
+  </header>
+
+  <section class="bench-section">
+    <h2 class="bench-h2">Fonts</h2>
+    <div class="font-mono text-xs text-fg-1" id="fonts">checking document.fonts…</div>
+    <div class="grid gap-2">
+      <div class="font-display font-extrabold text-4xl">74 min before the advisory</div>
+      <div class="font-sans font-bold text-3xl tabular">17 repos · 1 LOCKED · 4 WOULD_PULL</div>
+      <p class="text-md text-fg-0 max-w-[68ch]"><code>acme/checkout-web</code> has <code>debug@4.4.2</code> locked [E1]: rotate secrets and rebuild. 4 repos would pull a malicious version on a fresh resolve.</p>
+<pre class="font-mono text-xs bg-bg-2 border border-line-2 rounded-sm px-3.5 py-3 text-fg-1 overflow-auto"><span class="text-fg-0">MATCH</span> (:Maintainer {name:<span class="text-infect-400">$maintainer</span>})-[:MAINTAINS]-&gt;(p:Package)&lt;-[:OF]-(v:Version)
+<span class="text-fg-0">WHERE</span> v.publishedAt &gt;= <span class="text-infect-400">$since</span> <span class="text-fg-0">AND</span> v.publishedAt &lt; <span class="text-infect-400">$until</span>
+<span class="text-fg-0">RETURN</span> p.name <span class="text-fg-0">AS</span> package, v.version <span class="text-fg-0">AS</span> version <span class="text-fg-0">ORDER BY</span> publishedAt <span class="text-fg-0">LIMIT</span> <span class="text-warn">40</span></pre>
+      <div class="font-mono text-xs text-fg-1 tabular">13:12:39 UTC · +74 min · Σ 23.4 ms · 9 queries</div>
+    </div>
+  </section>
+
+  <section class="bench-section">
+    <h2 class="bench-h2">Scribble: 74 min</h2>
+    <p class="bench-p">Sketch at <a class="bench-link" href="/seventy-four-min.html">seventy-four-min.html</a>. Two layers land in <code>web/public/scribbles/</code>: the arrow (wiped left→right) and the loop (swept clockwise from the pen-down point). Preview on a stand-in of the timeline; <button class="bench-link" id="replay" type="button">replay</button>.</p>
+    <div class="relative w-[480px] h-[300px] bg-bg-1 border border-line-2 rounded-md overflow-hidden" id="timeline">
+      <span class="absolute left-7 top-5 max-w-[150px] text-sm text-fg-1">before the OSV record existed</span>
+      <span class="absolute left-[300px] top-[160px] -translate-x-1/2 -translate-y-1/2 font-display font-extrabold text-4xl whitespace-nowrap">74 min</span>
+      <div class="absolute left-6 right-6 top-[236px] h-px bg-line-3"></div>
+      <div class="absolute left-[72px] top-[228px] w-px h-[17px] bg-infect-400"><span class="absolute top-5 -translate-x-1/2 text-2xs uppercase tracking-caps text-fg-1 whitespace-nowrap tabular">13:12 publish</span></div>
+      <div class="absolute left-[120px] top-[228px] w-px h-[17px] bg-fg-2"><span class="absolute top-[34px] -translate-x-1/2 text-2xs uppercase tracking-caps text-fg-1 whitespace-nowrap tabular">13:16 alert</span></div>
+      <div class="absolute left-[360px] top-[228px] w-px h-[17px] bg-fg-2"><span class="absolute top-5 -translate-x-1/2 text-2xs uppercase tracking-caps text-fg-1 whitespace-nowrap tabular">14:26 OSV</span></div>
+      <picture>
+        <source srcset="/scribbles/seventy-four-min-arrow.webp" type="image/webp">
+        <img class="scribble scribble-wipe" style="animation-duration: 400ms" src="/scribbles/seventy-four-min-arrow.png" width="480" height="300" alt="" aria-hidden="true">
+      </picture>
+      <picture>
+        <source srcset="/scribbles/seventy-four-min-loop.webp" type="image/webp">
+        <img class="scribble scribble-sweep" style="--pen-x: 62.5%; --pen-y: 53%; --pen-from: 282deg; animation-delay: 350ms" src="/scribbles/seventy-four-min-loop.png" width="480" height="300" alt="" aria-hidden="true">
+      </picture>
+    </div>
+  </section>
+
+  <section class="bench-section">
+    <h2 class="bench-h2">Surfaces, text, lines</h2>
+    <div class="flex flex-wrap gap-2" id="swatches"></div>
+  </section>
+
+  <section class="bench-section">
+    <h2 class="bench-h2">Tiers, path grammar, graph palette</h2>
+    <div class="flex flex-wrap gap-2 items-center">
+      <span class="chip text-tier-locked bg-tier-locked-bg">LOCKED</span>
+      <span class="chip text-tier-would-pull bg-tier-would-pull-bg">WOULD_PULL</span>
+      <span class="chip text-tier-maintainer bg-tier-maintainer-bg">MAINTAINER</span>
+      <span class="chip text-tier-clean bg-tier-clean-bg">CLEAN</span>
+    </div>
+    <div class="font-mono text-xs flex flex-wrap gap-2 items-center">
+      <span class="bg-bg-2 rounded-xs px-1.5 py-0.5"><span class="text-fg-0">express</span><span class="text-fg-1">@5.1.0</span></span>
+      <svg class="path-arrow text-fg-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      <span class="bg-bg-2 rounded-xs px-1.5 py-0.5"><span class="text-fg-0">debug</span><span class="text-infect-400 underline underline-offset-2">@4.4.2</span></span>
+      <span class="text-fg-2">·</span>
+      <span class="bg-bg-2 rounded-xs px-1.5 py-0.5"><span class="text-warn">^4.3.5</span></span>
+      <svg class="path-arrow text-fg-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9h12M4 15h12M13 5l7 7-7 7"/></svg>
+      <span class="bg-bg-2 rounded-xs px-1.5 py-0.5"><span class="text-fg-0">debug</span><span class="text-infect-400 underline underline-offset-2">@4.4.2</span></span>
+      <span class="text-fg-2 ml-2" title="2 hops">•• 2 hops</span>
+    </div>
+    <div class="flex flex-wrap gap-2" id="graph"></div>
+  </section>
+
+  <section class="bench-section">
+    <h2 class="bench-h2">Controls</h2>
+    <div class="flex flex-wrap gap-2 items-center">
+      <button class="btn btn-primary" type="button">Run triage</button>
+      <button class="btn btn-secondary" type="button">Try axios 2026</button>
+      <button class="btn btn-ghost" type="button">Show Cypher</button>
+      <label class="grid gap-1 text-xs text-fg-1">Repository or lockfile<input class="input text-base" type="text" placeholder="https://github.com/owner/repo"></label>
+    </div>
+  </section>
+
+  <section class="bench-section">
+    <h2 class="bench-h2">Table density (pane width 420)</h2>
+    <table class="border-collapse text-sm w-[420px]">
+      <thead><tr><th class="th">Repo</th><th class="th">Tier</th><th class="th">Path</th><th class="th">Team</th><th class="th"></th></tr></thead>
+      <tbody>
+        <tr class="hover:bg-bg-3"><td class="td"><a class="text-link" href="#">acme/checkout-web</a></td><td class="td"><span class="chip text-tier-locked bg-tier-locked-bg">LOCKED</span></td><td class="td font-mono text-xs"><span class="text-fg-0">debug</span><span class="text-infect-400">@4.4.2</span> <span class="text-fg-2">•• 2</span></td><td class="td">Payments</td><td class="td text-right"><button class="btn btn-ghost h-7 px-2" type="button">Fix</button></td></tr>
+        <tr class="hover:bg-bg-3"><td class="td"><a class="text-link" href="#">mochajs/mocha</a></td><td class="td"><span class="chip text-tier-would-pull bg-tier-would-pull-bg">WOULD_PULL</span></td><td class="td font-mono text-xs"><span class="text-warn">^4.3.5</span> <span class="text-fg-0">debug</span><span class="text-infect-400">@4.4.2</span></td><td class="td">QA</td><td class="td text-right"><button class="btn btn-ghost h-7 px-2" type="button">Fix</button></td></tr>
+        <tr class="hover:bg-bg-3"><td class="td"><a class="text-link" href="#">http-party/http-server</a></td><td class="td"><span class="chip text-tier-maintainer bg-tier-maintainer-bg">MAINTAINER</span></td><td class="td font-mono text-xs text-fg-1">chalk, supports-color</td><td class="td">CLI</td><td class="td text-right"><button class="btn btn-ghost h-7 px-2" type="button">Fix</button></td></tr>
+      </tbody>
+    </table>
+  </section>
+</main>
+
+<script type="module">
+  const need = ['Satoshi', 'Cabinet Grotesk', 'Martian Mono'];
+  const el = document.getElementById('fonts');
+  await document.fonts.ready;
+  const lines = [];
+  for (const f of need) {
+    const spec = `16px "${f}"`;
+    try { await document.fonts.load(spec); } catch {}
+    const ok = document.fonts.check(spec);
+    lines.push(`<div class="${ok ? 'text-ok' : 'text-infect-400'}">${ok ? 'loaded' : 'MISSING'}  ${f}</div>`);
+  }
+  el.innerHTML = lines.join('');
+
+  const css = getComputedStyle(document.documentElement);
+  const sw = (names) => names.map((n) => `<div class="swatch"><i style="background:${css.getPropertyValue(n)}"></i><b>${n}</b><code>${css.getPropertyValue(n).trim()}</code></div>`).join('');
+  document.getElementById('swatches').innerHTML = sw(['--bg-0', '--bg-1', '--bg-2', '--bg-3', '--line-1', '--line-2', '--line-3', '--fg-0', '--fg-1', '--fg-2', '--fg-3', '--red-400', '--red-500', '--red-700', '--red-900']);
+  document.getElementById('graph').innerHTML = sw(['--graph-maintainer', '--graph-bad', '--graph-dep', '--graph-repo', '--graph-team', '--graph-link']);
+
+  document.getElementById('replay').addEventListener('click', () => {
+    for (const img of document.querySelectorAll('#timeline img')) {
+      const a = img.style.animation; img.style.animation = 'none'; void img.offsetWidth; img.style.animation = a;
+    }
+  });
+</script>
+</body>
+</html>
