@@ -13,8 +13,10 @@
  * Labels are drawn in screen space after the frame, highest priority first, and skipped when they would overlap one
  * already placed: repos, malicious versions and the maintainer by default; with a selection only its chain. A hovered
  * node gets a canvas tooltip. The library's own tooltip (innerHTML) is disabled: package names are untrusted (S5).
- * Selected chain: full opacity, 2px red stroke drawn on from the bad version toward the repo, arrowheads, and
+ * Selected chain: full opacity, 2px stroke in the repo's TIER colour (LOCKED red, WOULD_PULL amber, MAINTAINER steel: red
+ * stays what it means on this screen, an infected repo) drawn on from the bad version toward the repo, arrowheads, and
  * directional particles for a bounded time (and during the landing autoplay); everything else is dimmed.
+ * Teams: a pasted repo has no owning team (the server files it under a placeholder), so no team node is drawn for it.
  * Reduced motion: no pulse, no draw-on, no particles.
  *
  * Props:
@@ -30,7 +32,8 @@ import ForceGraph2D, { type ForceGraphMethods, type NodeObject } from 'react-for
 import type { Exposure, ExposurePath, IncidentMeta } from '../data/types.ts';
 import { motionTokens } from './icons/motionTokens.ts';
 import { splitRef } from './PathChip.tsx';
-import { repoLabel, repoShort } from '../data/repoLabel.ts';
+import { chainVar } from '../data/graphTone.ts';
+import { realTeam, repoLabel, repoShort } from '../data/repoLabel.ts';
 
 export type NodeType = 'maintainer' | 'bad' | 'dep' | 'repo' | 'team';
 type GNode = { id: string; type: NodeType; label: string; fx?: number; fy?: number };
@@ -40,7 +43,7 @@ export type Graph = { nodes: GNode[]; links: GLink[]; chains: Map<string, Chain>
 
 /** Columns the layout needs between the first and last node: maintainer, version, dependencies, repo, team. */
 const columnGaps = (exposures: Exposure[], paths: ExposurePath[], incident: IncidentMeta | null) =>
-  (incident?.maintainer ? 1 : 0) + 1 + depsOf(paths) + 1 + (exposures.some((e) => e.team) ? 1 : 0) - 1;
+  (incident?.maintainer ? 1 : 0) + 1 + depsOf(paths) + 1 + (exposures.some((e) => realTeam(e.team)) ? 1 : 0) - 1;
 /** Most dependencies between a version and its repo on any drafted chain (`chain` is root first and may end at the version). */
 const depsOf = (paths: ExposurePath[]) => Math.max(0, ...paths.map((p) => p.chain.slice(1).filter((id) => id !== p.version).length));
 
@@ -123,9 +126,10 @@ export function buildGraph(exposures: Exposure[], paths: ExposurePath[], inciden
       }
       if (!vs.length && mId) link(e.repo, mId, e.repo); // MAINTAINER tier: depends on the account's packages
     }
-    if (e.team) {
-      node(`team:${e.team}`, 'team', e.team);
-      link(e.repo, e.repo, `team:${e.team}`);
+    const team = realTeam(e.team);
+    if (team) {
+      node(`team:${team}`, 'team', team);
+      link(e.repo, e.repo, `team:${team}`);
     }
   }
   if (mId) for (const [repo, c] of chains) for (const id of [...c.nodes]) if (nodes.get(id)?.type === 'bad') link(repo, mId, id);
@@ -245,6 +249,9 @@ export default function PathGraphCanvas({ exposures, paths, incident, selectedRe
   const graph = useMemo(() => buildGraph(exposures, paths, incident, colPx), [graphKey, incident, colPx]);
   const byId = useMemo(() => new Map(graph.nodes.map((n) => [n.id, n as NodeObject<GNode>])), [graph]);
   const byRepo = useMemo(() => new Map(exposures.map((e) => [e.repo, e])), [exposures]);
+  // The selected chain wears its repo's tier colour (LOCKED red, WOULD_PULL amber, MAINTAINER steel), not infection red for all.
+  const tier = selectedRepo ? byRepo.get(selectedRepo)?.tier : undefined;
+  const chainColor = useMemo(() => cssVar(chainVar(tier)) || tok.active, [tier, tok]);
   const firstRepo = useMemo(() => {
     const m = new Map<string, string>();
     for (const [repo, c] of graph.chains) for (const id of c.nodes) m.has(id) || m.set(id, repo);
@@ -381,7 +388,7 @@ export default function PathGraphCanvas({ exposures, paths, incident, selectedRe
     ctx.save();
     ctx.globalAlpha = chain && !active ? tok.dimLink : 1;
     ctx.lineWidth = (active ? 2 : 1) / scale;
-    ctx.strokeStyle = active ? tok.active : tok.link;
+    ctx.strokeStyle = active ? chainColor : tok.link;
     ctx.beginPath();
     ctx.moveTo(s.x, s.y);
     ctx.lineTo(s.x + (t.x - s.x) * p, s.y + (t.y - s.y) * p);
@@ -397,7 +404,7 @@ export default function PathGraphCanvas({ exposures, paths, incident, selectedRe
       ctx.lineTo(ax - ux * a * 1.6 - uy * a * 0.8, ay - uy * a * 1.6 + ux * a * 0.8);
       ctx.lineTo(ax - ux * a * 1.6 + uy * a * 0.8, ay - uy * a * 1.6 - ux * a * 0.8);
       ctx.closePath();
-      ctx.fillStyle = tok.active;
+      ctx.fillStyle = chainColor;
       ctx.fill();
     }
     ctx.restore();
@@ -409,7 +416,7 @@ export default function PathGraphCanvas({ exposures, paths, incident, selectedRe
     const e = byRepo.get(n.id);
     switch (n.type) {
       case 'repo':
-        return [e?.tier, e?.team, e?.synthetic && 'sample repo', e?.dev && 'dev only', e && count(e.versions.length, 'malicious version')].filter(Boolean).join(' · ') || 'repo';
+        return [e?.tier, realTeam(e?.team), e?.synthetic && 'sample repo', e?.dev && 'dev only', e && count(e.versions.length, 'malicious version')].filter(Boolean).join(' · ') || 'repo';
       case 'bad':
         return `malicious version · reaches ${count(exposures.filter((x) => x.versions.includes(n.id)).length, 'repo')}`;
       case 'maintainer':
@@ -539,7 +546,7 @@ export default function PathGraphCanvas({ exposures, paths, incident, selectedRe
       linkDirectionalParticles={particles}
       linkDirectionalParticleWidth={2.5}
       linkDirectionalParticleSpeed={0.012}
-      linkDirectionalParticleColor={() => tok.active}
+      linkDirectionalParticleColor={() => chainColor}
       onRenderFramePost={(ctx) => paintHud(ctx)}
       autoPauseRedraw={!recent}
       onNodeClick={(n) => {

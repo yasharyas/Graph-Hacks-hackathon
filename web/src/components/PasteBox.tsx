@@ -196,6 +196,7 @@ export function PasteBox({
                   <CircleAlert size={16} className="mt-0.5 shrink-0 text-fg-1" />
                   {problem.message}
                 </p>
+                {problem.hint && <p className="pl-6 text-fg-1">{problem.hint}</p>}
                 {problem.command && (
                   <p className="flex flex-wrap items-center gap-2">
                     <code className="rounded-xs bg-bg-3 px-2 py-1 font-mono text-xs text-fg-0 select-all">{problem.command}</code>

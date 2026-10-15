@@ -14,7 +14,8 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import type { Exposure, ExposurePath, IncidentMeta } from '../data/types.ts';
 import { EmptyState } from './EmptyState.tsx';
-import { repoLabel, repoShort } from '../data/repoLabel.ts';
+import { chainVar } from '../data/graphTone.ts';
+import { realTeam, repoLabel, repoShort } from '../data/repoLabel.ts';
 import { PathChip } from './PathChip.tsx';
 
 const Canvas = lazy(() => import('./PathGraphCanvas.tsx'));
@@ -30,11 +31,11 @@ export interface PathGraphProps {
   subject?: string | null;
 }
 
-// Left to right, the order the canvas lays them out; the shapes are the canvas shapes (radii scaled to 16px).
-const LEGEND: { id: 'maintainer' | 'bad' | 'dep' | 'repo' | 'team' | 'locked'; label: string; shape: ReactNode }[] = [
+// Left to right, the order the canvas lays them out; the shapes are the canvas shapes (radii scaled to 16px). The small grey
+// dependency dots are not keyed: five entries read at a glance, and hovering a dot says what it is.
+const LEGEND: { id: 'maintainer' | 'bad' | 'repo' | 'team' | 'locked'; label: string; shape: ReactNode }[] = [
   { id: 'maintainer', label: 'Compromised maintainer', shape: <circle cx="8" cy="8" r="6" fill="var(--graph-maintainer)" stroke="var(--graph-maintainer-ring)" strokeWidth="1.5" /> },
   { id: 'bad', label: 'Malicious version', shape: <circle cx="8" cy="8" r="4.5" fill="var(--graph-bad)" /> },
-  { id: 'dep', label: 'Dependency', shape: <circle cx="8" cy="8" r="2.6" fill="var(--graph-dep)" /> },
   { id: 'repo', label: 'Repo', shape: <rect x="3" y="3" width="10" height="10" rx="1.5" fill="var(--graph-repo)" /> },
   { id: 'team', label: 'Team', shape: <path d="M8 2 14 8 8 14 2 8Z" fill="var(--graph-team)" /> },
   {
@@ -126,9 +127,8 @@ export function PathGraph({ exposures, paths, incident, selectedRepo, playing, o
   const shown = {
     maintainer: !!incident?.maintainer,
     bad: true,
-    dep: paths.some((p) => p.chain.slice(1).some((id) => id !== p.version)),
     repo: true,
-    team: exposures.some((e) => e.team),
+    team: exposures.some((e) => realTeam(e.team)), // a pasted repo has no owning team, so no team diamond
     locked: exposures.some((e) => e.tier === 'LOCKED'),
   };
 
@@ -145,10 +145,11 @@ export function PathGraph({ exposures, paths, incident, selectedRepo, playing, o
             {l.label}
           </span>
         ))}
-        {/* Always laid out (invisible until a repo is selected) so the legend never changes height and re-fits the canvas. */}
+        {/* Always laid out (invisible until a repo is selected) so the legend never changes height and re-fits the canvas.
+            The swatch is the chain's own colour: its repo's tier (LOCKED red, WOULD_PULL amber, MAINTAINER steel). */}
         <span className={`inline-flex items-center gap-1.5 text-xs text-fg-1 ${selectedRepo ? '' : 'invisible'}`} aria-hidden={!selectedRepo}>
           <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden>
-            <path d="M1 8h14" stroke="var(--graph-link-active)" strokeWidth="2" />
+            <path d="M1 8h14" stroke={`var(${chainVar(selected?.tier)})`} strokeWidth="2" />
           </svg>
           Selected chain
         </span>
@@ -186,7 +187,7 @@ export function PathGraph({ exposures, paths, incident, selectedRepo, playing, o
         <div className="flex flex-col items-start gap-3 p-4">
           <p className="label-caps text-xs">{selectedRepo ? 'Path for the selected repo' : 'Path'}</p>
           {shownPath ? (
-            <CompactPath path={shownPath} badVersions={bad} team={(selected ?? exposures.find((e) => e.repo === shownPath.repo))?.team ?? null} />
+            <CompactPath path={shownPath} badVersions={bad} team={realTeam((selected ?? exposures.find((e) => e.repo === shownPath.repo))?.team)} />
           ) : selected ? (
             <div className="flex flex-col items-start gap-2">
               <PathChip item={selected.repo} label={repoShort(selected.repo)} />

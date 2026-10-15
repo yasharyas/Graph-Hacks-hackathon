@@ -15,11 +15,14 @@ export interface PasteProblem {
   wait: number;
   /** A command the message tells the person to run, so it can be copied. */
   command: string | null;
+  /** What else to try when the server's sentence alone leaves nowhere to go (a repo that is not public may be a typo or private). */
+  hint: string | null;
 }
 
 const OUR_SIDE = /on our side|did not answer|didn.t answer|hit an error|unexpected error|not responding|cannot reach|stream ended|timed out|stopped before it finished/i;
 const TRY_AGAIN = /\s*Try again(?: in [^.]*|, or [^.]*)?\./gi;
 const COMMAND = /npm install --package-lock-only/;
+const NOT_PUBLIC = /is not a public repo/i;
 
 export function pasteProblem(e: { message: string; status?: number; requestId?: string }): PasteProblem {
   const said = plainError(e);
@@ -36,5 +39,6 @@ export function pasteProblem(e: { message: string; status?: number; requestId?: 
     // "Another repo is being analyzed ... in a few seconds" is a short wait; the per-address limit is 20 s
     wait: rate ? (/being analy[sz]ed|busy|few seconds/i.test(said) ? 5 : 20) : 0,
     command: COMMAND.test(said) ? 'npm install --package-lock-only' : null,
+    hint: NOT_PUBLIC.test(said) ? 'Check the spelling, or paste its package-lock.json below if the repo is private.' : null,
   };
 }

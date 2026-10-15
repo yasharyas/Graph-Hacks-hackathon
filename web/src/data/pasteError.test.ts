@@ -21,6 +21,14 @@ test('a verdict about the input is shown whole, with no "try again" and no reque
   assert.equal(pasteProblem({ message: 'github.com/foo/bar is not a public repo. Try again, or try a sample repo.', status: 404 }).message, 'github.com/foo/bar is not a public repo.');
 });
 
+test('a repo that is not public says what else to try, besides the server sentence kept whole', () => {
+  const p = pasteProblem({ message: 'github.com/foo/bar is not a public repo.', status: 404 });
+  assert.equal(p.message, 'github.com/foo/bar is not a public repo.');
+  assert.equal(p.hint, 'Check the spelling, or paste its package-lock.json below if the repo is private.');
+  assert.equal(pasteProblem({ message: 'No package-lock.json at the root of a/b.' }).hint, null);
+  assert.equal(pasteProblem({ message: 'Analysis failed on our side.' }).hint, null);
+});
+
 test('no lockfile: the command the server names can be copied', () => {
   const message = 'No package-lock.json at the root of a/b. In a checkout, run npm install --package-lock-only (it writes the lockfile without installing anything) and drop the generated package-lock.json here.';
   const p = pasteProblem({ message, requestId: ID });

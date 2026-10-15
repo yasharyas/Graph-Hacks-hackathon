@@ -1,10 +1,12 @@
 /* Path chips: `express@5.1.0 -> debug@4.4.2` is the hero string of the product (docs/design.md section 3).
  * PathChip props: item ("name@version" or "owner/repo"), bad (a malicious version: red, underlined).
  * PathChain props: path (ExposurePath), badVersions (ids from IncidentMeta.versions), last (true = only the final
- *   hop, as the table shows it), className.
+ *   hop, as the table shows it), className, trail (a node kept on the last chip's line: the hop dots).
+ * Chips are not controls (the row or card around them is what a tap selects), so they have no touch target of their own.
  * HopDots props: hops. Dot per hop, capped at 5 then +N.
  * Separators are inline SVG arrows (Martian Mono has no U+2192): single = REQUIRES/RESOLVES_TO, bar = ADMITS.
  */
+import type { ReactNode } from 'react';
 import { repoShort } from '../data/repoLabel.ts';
 import type { ExposurePath } from '../data/types.ts';
 import { ArrowRight, ArrowRightToLine } from './icons/Glyphs.tsx';
@@ -20,7 +22,7 @@ export function splitRef(ref: string): [name: string, version: string | null] {
 export function PathChip({ item, bad = false, label }: { item: string; bad?: boolean; label?: string }) {
   const [name, version] = label === undefined ? splitRef(item) : [label, null];
   return (
-    <span className="inline-flex max-w-full items-center rounded-xs bg-bg-2 px-1.5 py-0.5 font-mono text-xs break-words">
+    <span className="inline-flex max-w-full min-w-0 items-center rounded-xs bg-bg-2 px-1.5 py-0.5 font-mono text-xs break-words">
       <span className="text-fg-0">{name}</span>
       {version && (
         <span className={bad ? 'text-infect-400 underline decoration-1 underline-offset-2' : 'text-fg-1'}>@{version}</span>
@@ -44,11 +46,14 @@ export function PathChain({
   badVersions,
   last = false,
   className = '',
+  trail,
 }: {
   path: ExposurePath;
   badVersions: ReadonlySet<string>;
   last?: boolean;
   className?: string;
+  /** Drawn right after the last chip and kept on its line (the hop dots: alone on a line they read as a stray bullet). */
+  trail?: ReactNode;
 }) {
   // ADMITS chains end at the repo or dep whose range admits the version, so the version is appended.
   const nodes = path.chain.at(-1) === path.version ? path.chain : [...path.chain, path.version];
@@ -59,7 +64,7 @@ export function PathChain({
         const isLast = i === shown.length - 1;
         const admits = isLast && path.kind === 'ADMITS';
         return (
-          <span key={`${item}-${i}`} className="inline-flex max-w-full flex-wrap items-center gap-1">
+          <span key={`${item}-${i}`} className={`inline-flex max-w-full items-center gap-1 ${isLast && trail ? '' : 'flex-wrap'}`}>
             {i > 0 &&
               (admits ? (
                 <>
@@ -70,6 +75,7 @@ export function PathChain({
                 <ArrowRight size={12} className="text-fg-2" title="requires" />
               ))}
             <PathChip item={item} bad={badVersions.has(item)} label={item === path.repo ? repoShort(item) : undefined} />
+            {isLast && trail}
           </span>
         );
       })}

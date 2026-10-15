@@ -25,11 +25,13 @@
  * Repo names are buttons (the accessible name of the row); the row click is a convenience.
  * Untrusted strings (repo, team, package names) render as text only.
  */
-import { Fragment, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { Fragment, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { localStamp, localTime } from '../data/clock.ts';
 import { plural } from '../data/format.ts';
 import { lockNote, realTeam, repoLabel } from '../data/repoLabel.ts';
+import { charsIn, scopeFit } from '../data/refName.ts';
 import { viewLabel, type ReportView } from '../data/reportView.ts';
+import { emptyCopy, filterRows, sortStatus, whyEmpty } from '../data/tableEmpty.ts';
 import type { Exposure, ExposurePath, Tier } from '../data/types.ts';
 import { Button } from './Button.tsx';
 import { EmptyState } from './EmptyState.tsx';
@@ -50,7 +52,9 @@ const BAR: Record<Tier, string> = {
 const FORCED_ROW = 'forced-colors:outline-2 forced-colors:-outline-offset-2 forced-colors:outline-solid forced-colors:outline-[Highlight]';
 const FORCED_EDGE = 'forced-colors:border-l-[6px] forced-colors:border-l-[Highlight]';
 type SortKey = 'tier' | 'repo' | 'team';
-const TAG = 'shrink-0 rounded-xs border border-line-3 px-1 text-xs leading-4 text-fg-1';
+const SORT_LABEL: Record<SortKey, string> = { tier: 'Tier', repo: 'Repo', team: 'Team' };
+// max-md: the phone cards have room for a little vertical padding; the dense desktop row keeps its two 18px lines.
+const TAG = 'shrink-0 rounded-xs border border-line-3 px-1 text-xs leading-4 text-fg-1 max-md:px-1.5 max-md:py-0.5';
 const LINE = 'text-xs leading-[18px]';
 
 export interface ExposureTableProps {
@@ -68,24 +72,43 @@ export interface ExposureTableProps {
   onExport?: (format: 'md' | 'json', view?: ReportView) => string;
 }
 
-/** `name@1.2.3` on one line: the name truncates, the version never does. */
-function Ref({ item, badVersions, dim = false }: { item: string; badVersions: ReadonlySet<string>; dim?: boolean }) {
+/**
+ * `name@1.2.3` on one line. The text in the DOM is always the whole ref (it is read aloud as "@tapjs/run", copied whole and
+ * found by the browser's search); when it does not fit, only the scope is clipped for the eye, by a rule that depends on the
+ * cell's width in characters (data/refName.ts): "@typescript-eslint/parser" -> "@ty…/parser" -> "…/parser". The package name
+ * stays whole and the version always shows; only a long unscoped name in a narrow cell is ever cut, at its end. The whole ref
+ * is in the path's title. `max`: characters this line holds.
+ */
+function Ref({ item, badVersions, max, dim = false }: { item: string; badVersions: ReadonlySet<string>; max: number; dim?: boolean }) {
   const [name, version] = splitRef(item);
-  // A scoped name gives up its scope first ("@typescript-eslint/parser" -> "@typ…/parser"): three packages of one scope
-  // must not all read "@typescript…".
-  const cut = name.startsWith('@') ? name.indexOf('/') + 1 : 0;
-  const tone = dim ? 'text-fg-1' : 'text-fg-0';
+  const fit = scopeFit(name, version, max);
+  const slash = name.indexOf('/');
+  // The name is the one thing that may still give way, and only when nothing else is left to clip (a long unscoped name in a
+  // narrow cell): the version never does, it is what says whether the package is the bad one.
   return (
     <span className="flex min-w-0 items-baseline whitespace-nowrap">
-      {cut > 0 && <span className={`min-w-0 shrink-[100] truncate ${tone}`}>{name.slice(0, cut)}</span>}
-      <span className={`min-w-0 truncate ${tone}`}>{name.slice(cut)}</span>
+      <span className={`min-w-0 truncate ${dim ? 'text-fg-1' : 'text-fg-0'}`}>
+        {fit === 'whole' ? (
+          name
+        ) : (
+          <>
+            {/* the scope's first three characters (none, when even that does not fit) with a drawn ellipsis; the rest of it stays in the text */}
+            <span className={`inline-block overflow-hidden align-top ${fit === 'short' ? 'max-w-[3ch]' : 'max-w-0'}`}>{name.slice(0, slash)}</span>
+            <span aria-hidden>…</span>
+            {name.slice(slash)}
+          </>
+        )}
+      </span>
       {version && <span className={`shrink-0 ${badVersions.has(item) ? 'text-infect-400 underline decoration-1 underline-offset-2' : 'text-fg-1'}`}>@{version}</span>}
     </span>
   );
 }
 
-/** The table's path, two lines: the parent, then `-> the bad version` and the hops. For a declared-directly path: the range, then the bad version. */
-function PathText({ path, direct = false, nodes, hops, badVersions }: { path?: ExposurePath; direct?: boolean; nodes?: string[]; hops: number; badVersions: ReadonlySet<string> }) {
+/** Characters the hop dots take (with their gap): "direct" is six, a dot per hop otherwise (five at most, then "+N"). */
+const dotsWidth = (hops: number) => (hops === 0 ? 6 : Math.min(hops, 5) + (hops > 5 ? 2 : 0)) + 1;
+
+/** The table's path, two lines: the parent, then `-> the bad version` and the hops. For a declared-directly path: the range, then the bad version. `max`: characters a line of the cell holds. */
+function PathText({ path, direct = false, nodes, hops, badVersions, max }: { path?: ExposurePath; direct?: boolean; nodes?: string[]; hops: number; badVersions: ReadonlySet<string>; max: number }) {
   const chain = nodes ?? (path!.chain.at(-1) === path!.version ? path!.chain : [...path!.chain, path!.version]);
   const shown = direct ? [path!.version] : chain.slice(-2);
   const title = `${direct && path!.range ? `${path!.range} admits ` : ''}${shown.join(' → ')} (${hops === 0 ? 'declared directly by the repo' : `${hops} ${hops === 1 ? 'hop' : 'hops'}`})`;
@@ -102,10 +125,11 @@ function PathText({ path, direct = false, nodes, hops, badVersions }: { path?: E
           {path!.kind === 'ADMITS' && <ArrowRightToLine size={12} className="shrink-0 text-fg-2" title="admits" />}
         </span>
       )}
-      {!direct && shown.length > 1 && <Ref item={shown[0]!} badVersions={badVersions} />}
+      {!direct && shown.length > 1 && <Ref item={shown[0]!} badVersions={badVersions} max={max} />}
       <span className="flex min-w-0 items-center gap-1.5">
         {!direct && shown.length > 1 && <ArrowRight size={12} className="shrink-0 text-fg-2" title="requires" />}
-        <Ref item={shown.at(-1)!} badVersions={badVersions} />
+        {/* the arrow (12px + a gap) and the dots share this line */}
+        <Ref item={shown.at(-1)!} badVersions={badVersions} max={max - dotsWidth(hops) - (!direct && shown.length > 1 ? 2 : 0)} />
         {dots}
       </span>
       {/* the range that admits the bad version, for the chain case: in the drawer and the graph; here for screen readers */}
@@ -196,7 +220,7 @@ function ExportMenu({ onExport, view, total }: { onExport: (format: 'md' | 'json
       </Button>
       {open && (
         <div id={id} role="group" aria-label="Export report" className="absolute top-full right-0 z-(--z-dropdown) mt-1 w-60 origin-top-right animate-enter rounded-sm border border-line-2 bg-bg-2 p-1 shadow-popover">
-          <p className="px-3 py-1 text-xs text-fg-1">{view ? `Only the rows shown: ${view.label}.` : `The whole report, ${plural(total, 'repo')}.`}</p>
+          <p className="px-3 py-1 text-xs text-fg-1">{view ? `Only the rows shown: ${view.label}.` : `The whole report: ${plural(total, 'exposed repo')}. Clean repos are only counted.`}</p>
           <button type="button" className={menuItem} onClick={() => run('md')}>
             <Download size={16} /> Report (.md)
           </button>
@@ -209,6 +233,21 @@ function ExportMenu({ onExport, view, total }: { onExport: (format: 'md' | 'json
   );
 }
 
+/** Characters one line of the path cell holds, measured on the Path header (every cell under it has the same width). */
+function usePathChars(root: RefObject<HTMLElement | null>, mounted: boolean): number {
+  const [chars, setChars] = useState(22); // the cell at 1440px, until the first measurement
+  useEffect(() => {
+    const th = root.current?.querySelector('thead th:nth-child(3)');
+    if (!th) return;
+    const ro = new ResizeObserver(([entry]) => {
+      if (entry && entry.contentRect.width > 0) setChars(charsIn(entry.contentRect.width));
+    });
+    ro.observe(th);
+    return () => ro.disconnect();
+  }, [root, mounted]);
+  return chars;
+}
+
 export function ExposureTable({ exposures, paths, badVersions, selectedRepo, remediated, undoable, fixable, onSelect, onOpenFix, onUndo, onExport }: ExposureTableProps) {
   const [prodOnly, setProdOnly] = useState(false);
   const [tier, setTier] = useState<Tier | 'ALL'>('ALL');
@@ -218,10 +257,8 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
   const root = useRef<HTMLElement>(null);
   const owed = useRef<string | null>(null); // the row whose Undo was pressed: focus is owed to its repo button once the Undo is gone
   const [undone, setUndone] = useState('');
-
-  const devOnly = exposures.filter((e) => e.dev).length;
+  const hasTeams = exposures.some((e) => realTeam(e.team)); // a pasted repo has none: no Team column, no owner line
   const rows = useMemo(() => {
-    const q = query.trim().toLowerCase();
     const cmp = (a: Exposure, b: Exposure) => {
       const by =
         sort.key === 'tier'
@@ -231,10 +268,20 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
             : a.repo.localeCompare(b.repo);
       return (by || a.repo.localeCompare(b.repo)) * sort.dir;
     };
-    return exposures
-      .filter((e) => (!prodOnly || !e.dev) && (tier === 'ALL' || e.tier === tier) && (!q || e.repo.toLowerCase().includes(q) || (e.team ?? '').toLowerCase().includes(q)))
-      .sort(cmp);
+    return filterRows(exposures, { prodOnly, tier, query }).sort(cmp);
   }, [exposures, prodOnly, tier, query, sort]);
+  const chars = usePathChars(root, rows.length > 0);
+  const filtered = rows.length !== exposures.length;
+  const shown = filtered ? `${rows.length} of ${exposures.length} shown` : plural(exposures.length, 'repo');
+  // What a screen reader hears: one sentence about the filter, spoken once the typing pauses (a word typed recounts two or three
+  // times), at once for a switch or a sort. It starts as the current count, so nothing is announced on load.
+  const [said, setSaid] = useState(shown);
+  const typing = useRef(false);
+  useEffect(() => {
+    const t = setTimeout(() => setSaid(shown), typing.current ? 700 : 0);
+    typing.current = false;
+    return () => clearTimeout(t);
+  }, [shown]);
 
   // Roving tabindex: the row last focused, else the selected one, else the first (a filtered-out row gives the stop back).
   const current = rows.find((e) => e.repo === active)?.repo ?? rows.find((e) => e.repo === selectedRepo)?.repo ?? rows[0]?.repo ?? null;
@@ -274,7 +321,12 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
     onUndo(repo);
   };
 
-  const toggleSort = (key: SortKey) => setSort((s) => (s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: 1 }));
+  // The sort is a discrete action: it is spoken at once ("Sorted by repo, ascending"); aria-sort only marks the header.
+  const toggleSort = (key: SortKey) => {
+    const dir = sort.key === key && sort.dir === 1 ? -1 : 1;
+    setSort({ key, dir });
+    setSaid(sortStatus(SORT_LABEL[key], dir));
+  };
   const ariaSort = (key: SortKey) => (sort.key === key ? (sort.dir === 1 ? 'ascending' : 'descending') : 'none');
 
   const pathFor = (e: Exposure) => paths.find((p) => p.repo === e.repo);
@@ -284,33 +336,40 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
     if (path) {
       // Declared by the repo itself: the repo is not a hop (it would read as a package), so show range, then the bad version.
       const direct = path.hops === 0 && path.chain.length <= 2;
-      if (dense) return <PathText path={path} direct={direct} hops={path.hops} badVersions={badVersions} />;
+      if (dense) return <PathText path={path} direct={direct} hops={path.hops} badVersions={badVersions} max={chars} />;
+      // fg-1, not the dots' own fg-2: 4.3:1 on the selected row's bg-3 is under the 4.5:1 text minimum. The dots stay on the
+      // last chip's line: alone on a line they read as a stray bullet.
+      const dots = (
+        <span className="shrink-0 [&_span]:text-fg-1">
+          <HopDots hops={path.hops} />
+        </span>
+      );
       return (
         <span className="flex max-w-full flex-wrap items-center gap-x-2 gap-y-1">
           {direct ? (
-            <span className="inline-flex flex-wrap items-center gap-1">
+            <span className="inline-flex max-w-full items-center gap-1">
               {path.range && <span className="font-mono text-xs text-warn">{path.range}</span>}
-              {path.kind === 'ADMITS' && <ArrowRightToLine size={12} className="text-fg-2" title="admits" />}
+              {path.kind === 'ADMITS' && <ArrowRightToLine size={12} className="shrink-0 text-fg-2" title="admits" />}
               <PathChip item={path.version} bad={badVersions.has(path.version)} />
+              <span className="ml-1 inline-flex">{dots}</span>
             </span>
           ) : (
-            <PathChain path={path} badVersions={badVersions} last className="min-w-0" />
+            <PathChain path={path} badVersions={badVersions} last className="min-w-0" trail={<span className="ml-1 inline-flex">{dots}</span>} />
           )}
-          {/* fg-1, not the dots' own fg-2: 4.3:1 on the selected row's bg-3 is under the 4.5:1 text minimum */}
-          <span className="shrink-0 [&_span]:text-fg-1">
-            <HopDots hops={path.hops} />
-          </span>
         </span>
       );
     }
     const item = e.versions[0] ?? e.packages[0];
-    if (item && dense) return <PathText nodes={[item]} hops={e.depth} badVersions={badVersions} />;
+    if (item && dense) return <PathText nodes={[item]} hops={e.depth} badVersions={badVersions} max={chars} />;
     return item ? (
       <span className="flex max-w-full flex-wrap items-center gap-x-2 gap-y-1">
         <PathChip item={item} bad={badVersions.has(item)} />
-        {e.packages.length > 1 && <span className="shrink-0 text-xs text-fg-1">+{e.packages.length - 1}</span>}
-        <span className="shrink-0 [&_span]:text-fg-1">
-          <HopDots hops={e.depth} />
+        {/* the count and the dots wrap together, never one alone */}
+        <span className="inline-flex items-center gap-2">
+          {e.packages.length > 1 && <span className="shrink-0 text-xs text-fg-1">+{e.packages.length - 1}</span>}
+          <span className="shrink-0 [&_span]:text-fg-1">
+            <HopDots hops={e.depth} />
+          </span>
         </span>
       </span>
     ) : null;
@@ -330,7 +389,7 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
           title={repoLabel(e.repo)}
           aria-current={selectedRepo === e.repo ? 'true' : undefined}
           onClick={(ev) => (ev.stopPropagation(), onSelect(e.repo))}
-          className={`max-w-full scroll-mt-10 truncate rounded-xs text-left text-sm leading-[18px] whitespace-nowrap pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:py-2 ${done ? 'text-fg-2 line-through' : 'text-link'} hov:text-fg-0`}
+          className={`max-w-full scroll-mt-10 truncate rounded-xs text-left text-sm leading-[18px] whitespace-nowrap pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:py-2 ${done ? 'text-fg-1 line-through' : 'text-link'} hov:text-fg-0`}
         >
           {repoLabel(e.repo)}
         </button>
@@ -373,7 +432,7 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
           <button
             type="button"
             aria-label={`Undo remediated mark for ${e.repo}`}
-            className="inline-flex items-center gap-1 rounded-xs text-link underline underline-offset-2 pointer-coarse:min-h-11"
+            className="inline-flex items-center justify-center gap-1 rounded-xs text-link underline underline-offset-2 pointer-coarse:min-h-11 pointer-coarse:min-w-11"
             onClick={(ev) => (ev.stopPropagation(), undoRow(e.repo))}
           >
             <Undo size={12} /> Undo
@@ -430,11 +489,12 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
     </th>
   );
 
-  const filtered = rows.length !== exposures.length;
-  const shown = filtered ? `${rows.length} of ${exposures.length} shown` : plural(exposures.length, 'repo');
   // What an export must hold while a filter hides rows: exactly these repos, in this order, and the filter in words.
   const view: ReportView | undefined = filtered ? { repos: rows.map((r) => r.repo), label: viewLabel({ prodOnly, tier, query, shown: rows.length, total: exposures.length }) } : undefined;
-  const clearFilters = () => (setProdOnly(false), setTier('ALL'), setQuery(''));
+  const clearFilters = () => ((typing.current = false), setProdOnly(false), setTier('ALL'), setQuery(''));
+  const emptyWhy = rows.length === 0 ? whyEmpty(exposures, { prodOnly, tier, query }) : null;
+  const empty = emptyWhy && emptyCopy(emptyWhy);
+  const hintId = useId();
 
   return (
     <section ref={root} aria-label="Exposed repos" className="flex flex-col" onFocus={follow} onKeyDown={arrows}>
@@ -442,12 +502,12 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
         <Button
           aria-pressed={prodOnly}
           icon={prodOnly ? <Check size={14} /> : undefined}
-          onClick={() => setProdOnly((p) => !p)}
+          onClick={() => ((typing.current = false), setProdOnly((p) => !p))}
           className="shrink-0 aria-pressed:border-fg-0 aria-pressed:bg-bg-3 aria-pressed:text-fg-0"
         >
           Prod only
         </Button>
-        <select aria-label="Tier" className="field w-auto shrink-0" value={tier} onChange={(e) => setTier(e.target.value as Tier | 'ALL')}>
+        <select aria-label="Tier" className="field w-auto shrink-0" value={tier} onChange={(e) => ((typing.current = false), setTier(e.target.value as Tier | 'ALL'))}>
           <option value="ALL">All tiers</option>
           {(['LOCKED', 'WOULD_PULL', 'MAINTAINER'] as Tier[]).map((t) => (
             <option key={t} value={t}>
@@ -455,45 +515,60 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
             </option>
           ))}
         </select>
-        <input aria-label="Filter repos or teams" placeholder="Repo or team" className="field min-w-28 flex-1 basis-28" type="search" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <input aria-label="Filter repos or teams" placeholder="Repo or team" className="field min-w-28 flex-1 basis-28" type="search" value={query} onChange={(e) => ((typing.current = true), setQuery(e.target.value))} />
         {onExport && <ExportMenu onExport={onExport} view={view} total={exposures.length} />}
-        {/* The count is visible only while a filter is on (the summary above already says "21 of 21 exposed"); it always announces. */}
-        <p aria-live="polite" className={filtered ? 'shrink-0 text-xs text-fg-1 tabular-nums' : 'sr-only'}>
+        {/* The count is printed only while a filter is on (the summary above already says "21 of 21 exposed"). It is not the live
+            region: that is the status below, which speaks once typing pauses and also says how the table was sorted. */}
+        <p aria-hidden className={filtered ? 'shrink-0 text-xs text-fg-1 tabular-nums' : 'hidden'}>
           {shown}
+        </p>
+        <p role="status" className="sr-only">
+          {said}
         </p>
         <p role="status" className="sr-only">
           {undone}
         </p>
       </div>
 
-      {rows.length === 0 ? (
+      {empty ? (
         <EmptyState
-          title={exposures.length === 0 ? 'No exposed repos' : prodOnly && devOnly ? 'No prod exposures' : 'No matching repos'}
-          cause={
-            exposures.length === 0
-              ? 'At this clock, no repo reaches a malicious version, and none depends on the compromised account’s packages.'
-              : prodOnly && devOnly
-                ? 'Every exposed repo here reaches the bad version through dev dependencies only.'
-                : 'No repo matches these filters.'
-          }
+          title={empty.title}
+          cause={empty.cause}
           action={
-            exposures.length === 0
+            emptyWhy?.kind === 'none'
               ? undefined
-              : prodOnly && devOnly && tier === 'ALL' && !query.trim()
-                ? { label: `Show dev-only (${devOnly})`, onClick: () => setProdOnly(false) }
-                : { label: 'Clear filters', onClick: clearFilters }
+              : emptyWhy?.kind === 'devOnly'
+                ? { label: empty.action, onClick: () => ((typing.current = false), setProdOnly(false)) }
+                : { label: empty.action, onClick: clearFilters }
           }
         />
       ) : (
         <>
-          <table className="hidden w-full table-fixed border-collapse text-sm md:table">
-            <caption className="sr-only">Exposed repos. {HONEST_SEMANTICS} Use the arrow keys to move between rows, Enter to select one, Tab to reach its Fix button.</caption>
+          {/* A pasted repo has no owner to name beside its tier, so its tier is explained here, once, in plain words. */}
+          {!hasTeams && rows.some((e) => e.tier === 'WOULD_PULL') && (
+            <p className="hidden items-center gap-2 border-b border-line-1 px-3 py-2 text-xs text-fg-1 md:flex">
+              <span aria-hidden>
+                <TierChip tier="WOULD_PULL" />
+              </span>
+              <span>
+                <span className="sr-only">WOULD_PULL: </span>
+                {HONEST_SEMANTICS}
+              </span>
+            </p>
+          )}
+          {/* The caption is the table's name; what to do with it is a description, read once on entry instead of at every row. */}
+          <p id={hintId} className="sr-only">
+            {HONEST_SEMANTICS} Use the arrow keys to move between rows, Enter to select one, Tab to reach its Fix button.
+          </p>
+          <table aria-describedby={hintId} className="hidden w-full table-fixed border-collapse text-sm md:table">
+            <caption className="sr-only">Exposed repos</caption>
             <colgroup>
               <col />
               <col className="w-28" />
-              <col className="w-[40%]" />
-              <col className="hidden w-24 md:table-column xl:hidden" />
-              <col className="w-16" />
+              {/* the path gets the width the Fix button does not need: 22 characters of mono text at 1366px, so "…/type-utils@8.39.1" fits */}
+              <col className="w-[42%]" />
+              {hasTeams && <col className="hidden w-24 md:table-column xl:hidden" />}
+              <col className="w-14 pointer-coarse:w-16" />
             </colgroup>
             <thead>
               <tr>
@@ -502,7 +577,7 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
                 <th scope="col" className="sticky top-0 z-(--z-sticky) bg-bg-2 px-2 py-1 text-left">
                   <span className="label-caps text-xs">Path</span>
                 </th>
-                {sortTh('team', 'Team', 'hidden md:table-cell xl:hidden')}
+                {hasTeams && sortTh('team', 'Team', 'hidden md:table-cell xl:hidden')}
                 <th scope="col" className="sticky top-0 z-(--z-sticky) bg-bg-2 px-2 py-1">
                   <span className="sr-only">Action</span>
                 </th>
@@ -517,17 +592,19 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
                       <td className={`py-[3px] pr-2 pl-3 align-top ${selected ? `${BAR[e.tier]} ${FORCED_EDGE}` : ''}`}>{repoCell(e, false)}</td>
                       <td className="px-2 py-[3px] align-top">{tierCell(e, true)}</td>
                       <td className="px-2 py-[3px] align-top">{hopCell(e, true)}</td>
-                      <td className="hidden px-2 py-[3px] align-top text-fg-1 md:table-cell xl:hidden">
-                        <span className={`block truncate ${LINE}`} title={realTeam(e.team) ?? undefined}>
-                          {realTeam(e.team) ?? '–'}
-                        </span>
-                      </td>
+                      {hasTeams && (
+                        <td className="hidden px-2 py-[3px] align-top text-fg-1 md:table-cell xl:hidden">
+                          <span className={`block truncate ${LINE}`} title={realTeam(e.team) ?? undefined}>
+                            {realTeam(e.team) ?? '–'}
+                          </span>
+                        </td>
+                      )}
                       <td className="py-[3px] pr-3 pl-1 text-right align-top">{fixButton(e)}</td>
                     </tr>
                     {/* Below 1024px the graph is another tab, so the selected row shows its whole path under itself (the phone cards do too). */}
                     {selected && (
                       <tr className="border-b border-line-1 bg-bg-3 lg:hidden">
-                        <td colSpan={5} className="px-3 pb-2">
+                        <td colSpan={hasTeams ? 5 : 4} className="px-3 pb-2">
                           {fullPath(e)}
                         </td>
                       </tr>
