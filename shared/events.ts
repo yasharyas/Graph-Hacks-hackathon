@@ -38,6 +38,9 @@ export interface IncidentMeta {
   removedAt: number; // approximate (packument has no removal time)
   versions: { id: string; publishedAt: number }[]; // malicious name@version ids
   sources: string[];
+  // First moment any repo in this graph was exposed (LOCKED or WOULD_PULL). "Minutes ahead" everywhere is
+  // advisoryAt - firstExposureAt, so the landing figure and the report figure can never disagree.
+  firstExposureAt?: number | null;
 }
 
 export interface Exposure {
@@ -51,6 +54,7 @@ export interface Exposure {
   ranges: string[]; // declared ranges that admit a bad version (WOULD_PULL)
   packages: string[]; // MAINTAINER tier: compromised account's packages in the tree
   remediated: { at: number; action: string } | null;
+  locked?: string[]; // what the lockfile actually pins for each affected package, e.g. "chalk@5.4.1" (safe) or the bad version (LOCKED)
 }
 
 export interface ExposurePath {
@@ -83,6 +87,7 @@ export interface Report {
   remediations: Remediation[];
   notices: Notice[];
   concentration: Concentration[];
+  scope?: { kind: 'org' | 'guest'; label: string; repos: number }; // guest = a pasted repo; the hero must follow this, not the demo org
 }
 
 export interface TimelinePoint { at: number; counts: Record<Tier, number>; scanner: number }
@@ -92,7 +97,10 @@ export type TriageEvent =
   | { type: 'tool_start'; id: string; tool: ToolName; params: Record<string, unknown> }
   | { type: 'tool_result'; id: string; result: ToolResult }
   | { type: 'report'; report: Report }
-  | { type: 'narration'; mode: LlmMode; provider: string | null; text: string }
+  // `text`: the deterministic Verdict / Notify / Do built from the report (always complete and correct).
+  // `note`: an optional short analyst summary written by the LLM (guarded); `mode`/`provider` describe the note.
+  // `at`: the scenario clock the narration describes (the UI dims it when the scrubber moves away).
+  | { type: 'narration'; mode: LlmMode; provider: string | null; text: string; note?: string | null; at?: number }
   // `claims`: every claim the server checked; the UI marks a span verified only if it appears here with ok=true.
   | { type: 'guard'; verified: number; total: number; flagged: string[]; claims?: { text: string; ok: boolean }[] }
   | { type: 'error'; message: string; requestId: string }
