@@ -122,6 +122,7 @@ test('S5/S8 security headers present, body limit enforced', async () => {
   assert.match(res.headers.get('content-security-policy') ?? '', /default-src 'self'/);
   assert.match(res.headers.get('content-security-policy') ?? '', /frame-ancestors 'none'/);
   // The graph library's injected <style> blocks: a dependency bump that changes them must update STYLE_HASHES.
+  assert.ok(STYLE_HASHES.includes(`'sha256-${createHash('sha256').update('').digest('base64')}'`), 'the empty <style> they append first');
   for (const f of ['force-graph/dist/force-graph.mjs', 'float-tooltip/dist/float-tooltip.mjs']) {
     const css = JSON.parse(readFileSync(new URL(`../node_modules/${f}`, import.meta.url), 'utf8').match(/var css_248z = (".*");/)![1]!);
     const hash = `'sha256-${createHash('sha256').update(css).digest('base64')}'`;

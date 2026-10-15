@@ -43,7 +43,8 @@ const org = (s: ScenarioId) => graph(orgGraph(s, prefix()));
 
 // ---------- middleware ----------
 
-export const STYLE_HASHES = ["'sha256-jtRRMYY2VbEXuBKbHvqM1/fPT8vazFrEooXdvwUK4y8='", "'sha256-9xjtvxMT1ApHlgn9ohbh2FNfvK5Tqtzy94BjfXBeMSY='"];
+// The injected blocks are appended empty and filled after, so the empty string's hash is needed too.
+export const STYLE_HASHES = ["'sha256-jtRRMYY2VbEXuBKbHvqM1/fPT8vazFrEooXdvwUK4y8='", "'sha256-9xjtvxMT1ApHlgn9ohbh2FNfvK5Tqtzy94BjfXBeMSY='", "'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='"];
 app.use(requestId({ headerName: '' })); // S12: always generated here, never taken from the client
 // S5/S8: strict CSP, no framing, no referrer. No CORS middleware = same-origin only.
 app.use(
