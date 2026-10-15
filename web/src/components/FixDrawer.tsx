@@ -117,7 +117,7 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
   const direct = fix ? hasDirect(fix) : false;
   const qualified = fix ? Object.keys(fix.overrides).some((k) => k.lastIndexOf('@') > 0) : false;
   const fixText = fix ? `${direct ? `${DIRECT_NOTE}\n` : ''}${snippet}\n\n${fix.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\n${fix.prBody}` : '';
-  const slack = exposure ? slackMessage({ exposure, paths, fix, incident: report.incident, link: detailsLink(location.href, report, exposure.repo, 'notice') }) : '';
+  const slack = exposure ? slackMessage({ exposure, paths, fix, incident: report.incident, at: report.at, link: detailsLink(location.href, report, exposure.repo, 'notice') }) : '';
   const copyLabel = tab === 'fix' ? 'Fix' : 'Slack message';
   const copyBody = tab === 'fix' ? fixText : slack;
   const copy = async () => say((await copyText(copyBody, copyLabel, true)) ? `${copyLabel} copied` : `Clipboard blocked. Select the ${copyLabel.toLowerCase()} text above and copy it manually.`);

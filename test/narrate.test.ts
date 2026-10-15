@@ -35,7 +35,7 @@ test('org verdict: complete, plain-language, cited, guard-clean, no markdown', (
   const [verdict, why, notify, todo] = t.split('\n');
   assert.match(verdict, /^Verdict: 5 of 17 repos are exposed to the `qix` account compromise at 13:30 UTC on 2025-09-08\. The graph showed this 74 minutes before the first OSV record\./);
   assert.match(verdict, /LOCKED, 1 repo \(`acme\/checkout-web`\): the lockfile itself pins the malicious version, so rotate secrets and rebuild\./);
-  assert.match(verdict, /WOULD_PULL, 4 repos \(4 prod, 0 dev-only\): exposed only on a fresh install since 13:12 UTC on 2025-09-08 \(still open at 13:30 UTC\); installing from the committed lockfile was safe\./);
+  assert.match(verdict, /WOULD_PULL, 4 repos \(4 prod, 0 dev-only\): exposed only on a fresh install since 13:12 UTC on 2025-09-08 \(still live at 13:30 UTC; npm removed them around 15:15 UTC\); installing from the committed lockfile was safe\./);
   assert.match(verdict, /1 more repo depends on packages from the compromised account/); // MAINTAINER is counted, never listed as exposed
   assert.match(why, /^Why: `acme\/checkout-web` locks `debug@4\.4\.2` through `express@5\.1\.0` \[E1\], and also `chalk@5\.6\.1`; /);
   assert.match(why, /`mochajs\/mocha` declares `\^4\.3\.5`, which admits `debug@4\.4\.2` \[E2\]/);
@@ -104,7 +104,14 @@ test('a pasted repo gets one plain answer: what its lockfile pins, no Notify, co
   r.notices = [];
   let t = verdictText(r);
   clean(r, t);
-  assert.match(t, /^Verdict: `mochajs\/mocha` is exposed only on a fresh install since 13:12 UTC on 2025-09-08 \(still open at 13:30 UTC\); installing from your committed lockfile was safe: it pins `debug@4\.3\.7`\./);
+  assert.match(t, /^Verdict: `mochajs\/mocha` is exposed to the `qix` account compromise only on a fresh install since 13:12 UTC on 2025-09-08 \(still live at 13:30 UTC; npm removed them around 15:15 UTC\); installing from your committed lockfile was safe: it pins `debug@4\.3\.7`\./);
+  // which lockfile was judged: the last commit before the incident, or a pasted file (a counterfactual)
+  r.scope = { ...r.scope, source: { kind: 'snapshot', sha: '5f8e8a8'.padEnd(40, '0'), date: Date.parse('2025-09-01T10:00:00Z') } };
+  assert.match(verdictText(r), /^Verdict \(its package-lock\.json at commit 5f8e8a8 from 2025-09-01, the last change before the incident\): `mochajs\/mocha` is exposed/);
+  clean(r, verdictText(r));
+  r.scope = { ...r.scope, source: { kind: 'pasted' } };
+  assert.match(verdictText(r), /^Verdict \(counterfactual: this checks the lockfile you pasted as if it had been committed on 2025-09-08\): /);
+  r.scope = { kind: 'guest', label: 'mochajs/mocha', repos: 1 };
   assert.match(t, /Do: 1\) Keep installing from your committed lockfile \(npm ci\); it pins `debug@4\.3\.7` \(safe\)\. 2\) Only if you must re-resolve before the malicious versions are removed, add overrides that replace `debug@4\.4\.2` with `debug@4\.4\.1`/);
   assert.doesNotMatch(t, /Notify|#your-team|Your team/);
 
@@ -115,13 +122,13 @@ test('a pasted repo gets one plain answer: what its lockfile pins, no Notify, co
   r.scope.label = head;
   t = verdictText(r);
   clean(r, t);
-  assert.match(t, /^Verdict \(counterfactual: no lockfile from before the incident was available, so this checks today's lockfile\): `mochajs\/mocha@HEAD` would have been exposed only on a fresh install .*; installing from that lockfile would have been safe/);
+  assert.match(t, /^Verdict \(counterfactual: no lockfile from before the incident was available, so this checks today's lockfile\): `mochajs\/mocha@HEAD` would have been exposed to the `qix` account compromise only on a fresh install .*; installing from that lockfile would have been safe/);
 
   r.exposures = [exposure('pasted/app', 'LOCKED', { versions: ['debug@4.4.2'], locked: ['debug@4.4.2'] })];
   r.scope.label = 'pasted/app';
   t = verdictText(r);
   clean(r, t);
-  assert.match(t, /^Verdict: LOCKED: the lockfile itself pins the malicious version `debug@4\.4\.2`, so rotate secrets and rebuild\./);
+  assert.match(t, /^Verdict: LOCKED for the `qix` account compromise: the lockfile itself pins the malicious version `debug@4\.4\.2`, so rotate secrets and rebuild\./);
 
   r.exposures = [];
   assert.match(verdictText(r), /^Verdict: `pasted\/app` is not exposed to the `qix` account compromise at 13:30 UTC/);

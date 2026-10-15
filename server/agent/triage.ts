@@ -3,7 +3,7 @@
 // that the guard must pass in full. CLI: node --env-file-if-exists=.env server/agent/triage.ts qix-2025-09-08 2025-09-08T13:30:00Z
 import { randomUUID } from 'node:crypto';
 import type {
-  Concentration, Exposure, ExposurePath, IncidentMeta, LlmMode, Notice, OwnerGroup, Remediation, Report, ScannerHit, ScenarioId, Tier, ToolName, ToolResult, TriageEvent,
+  Concentration, Exposure, ExposurePath, IncidentMeta, LlmMode, LockSource, Notice, OwnerGroup, Remediation, Report, ScannerHit, ScenarioId, Tier, ToolName, ToolResult, TriageEvent,
 } from '../../shared/events.ts';
 import { close, graph, orgGraph } from '../graph/client.ts';
 import * as T from '../tools/registry.ts';
@@ -16,7 +16,7 @@ const DAY = 86_400_000;
 // Most severe first: LOCKED, WOULD_PULL prod, WOULD_PULL dev, MAINTAINER, CLEAN; then shallowest.
 const rank = (e: Exposure) => ({ LOCKED: 0, WOULD_PULL: e.dev ? 2 : 1, MAINTAINER: 3, CLEAN: 4 })[e.tier];
 
-export async function* triage({ graph: g, scenario, at, alert, session, signal }: { graph: Graph; scenario: ScenarioId; at: number; alert?: string; session?: string; signal?: AbortSignal }): AsyncGenerator<TriageEvent> {
+export async function* triage({ graph: g, scenario, at, alert, session, source, signal }: { graph: Graph; scenario: ScenarioId; at: number; alert?: string; session?: string; source?: LockSource; signal?: AbortSignal }): AsyncGenerator<TriageEvent> {
   const t0 = performance.now();
   const runId = randomUUID();
   let n = 0;
@@ -98,9 +98,9 @@ export async function* triage({ graph: g, scenario, at, alert, session, signal }
     const guest = head.org === 'guest';
     const report: Report = {
       incident, at, counts, minutesAhead: T.minutesAhead(incident),
-      scope: guest ? { kind: 'guest', label: rows[0]?.repo ?? 'pasted repo', repos: rows.length } : { kind: 'org', label: 'Acme demo org', repos: rows.length },
+      scope: guest ? { kind: 'guest', label: rows[0]?.repo ?? 'pasted repo', repos: rows.length, ...(source && { source }) } : { kind: 'org', label: 'Acme demo org', repos: rows.length },
       scanner: T.rowsOf<ScannerHit>(scan.result), grepCount: scan.grepCount,
-      exposures, paths, owners, remediations, notices: guest ? [] : notices(incident, exposures, owners, remediations), concentration,
+      exposures, paths, owners, remediations, notices: guest ? [] : notices(incident, exposures, owners, remediations, paths), concentration,
     };
     yield { type: 'report', report };
 
@@ -139,12 +139,19 @@ export async function* triage({ graph: g, scenario, at, alert, session, signal }
 // One plain-text notice per owning team (synthetic team channels only).
 // One plain-text notice per owning team (synthetic team channels only): each repo with its tier in words, what it
 // reaches, and its own fix, so the message stands on its own in Slack.
-function notices(incident: IncidentMeta, exposures: Exposure[], owners: OwnerGroup[], remediations: Remediation[]): Notice[] {
-  const fix = (repo: string) => Object.entries(remediations.find((m) => m.repo === repo)?.overrides ?? {}).map(([k, v]) => `${k} -> ${v}`).join(', ');
+function notices(incident: IncidentMeta, exposures: Exposure[], owners: OwnerGroup[], remediations: Remediation[], paths: ExposurePath[]): Notice[] {
+  // The overrides, plus the root dependencies npm needs set to the same version (EOVERRIDE otherwise).
+  const fix = (repo: string) => {
+    const m = remediations.find((x) => x.repo === repo);
+    const pins = Object.entries(m?.overrides ?? {}).map(([k, v]) => `${k} -> ${v}`).join(', ');
+    const roots = [...Object.entries(m?.direct ?? {}).map(([n, v]) => `${n} to ${v} in dependencies`), ...Object.entries(m?.devDirect ?? {}).map(([n, v]) => `${n} to ${v} in devDependencies`)];
+    return pins && roots.length ? `${pins}, and set ${roots.join(', ')} (npm rejects an override that conflicts with a direct dependency)` : pins;
+  };
   const line = (e: Exposure) => {
     const pins = fix(e.repo);
+    const p = paths.find((x) => x.repo === e.repo && x.kind === 'ADMITS' && x.range); // its own range, paired with the version it admits
     if (e.tier === 'LOCKED') return `- ${e.repo}: LOCKED, its lockfile pins ${e.versions.join(', ')}. Rotate build secrets, rebuild${pins ? `, and override ${pins}` : ''}.`;
-    if (e.tier === 'WOULD_PULL') return `- ${e.repo}${e.dev ? ' (dev-only)' : ''}: WOULD_PULL, a fresh resolve would fetch ${e.versions.slice(0, 3).join(', ')}${e.versions.length > 3 ? ` +${e.versions.length - 3} more` : ''}${e.ranges[0] ? ` via ${e.ranges[0]}` : ''}. Keep npm ci on the committed lockfile${pins ? `; only if you must re-resolve, override ${pins}` : ''}.`;
+    if (e.tier === 'WOULD_PULL') return `- ${e.repo}${e.dev ? ' (dev-only)' : ''}: WOULD_PULL, a fresh resolve would fetch ${e.versions.slice(0, 3).join(', ')}${e.versions.length > 3 ? ` +${e.versions.length - 3} more` : ''}${p ? ` (${p.version} via ${p.range})` : ''}. Keep npm ci on the committed lockfile${pins ? `; only if you must re-resolve, override ${pins}` : ''}.`;
     return `- ${e.repo}: depends on packages from the compromised account; no malicious version is live for it.`;
   };
   return owners.map((o) => {

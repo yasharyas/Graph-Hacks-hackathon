@@ -75,7 +75,10 @@ test('the Slack message is complete on its own: repo, tier in words, prod/dev, p
   assert.ok(msg.includes(`Tier: ${e.tier}`));
   if (path) assert.ok(msg.includes(`Path: ${path.chain.map((c) => `\`${c}\``).join(' > ')}`));
   assert.ok(msg.includes('Pin to: `' + pinTargets(fix.overrides)[0] + '`'));
-  assert.match(msg, /live since \d\d:\d\d UTC/);
+  assert.match(msg, /live since \d\d:\d\d UTC on \d{4}-\d\d-\d\d/);
+  const from = report.incident.firstPublishAt + 9 * 60_000; // a later first exposure than the first publish (axios: a decoy came first)
+  assert.ok(slackMessage({ exposure: e, paths: [], incident: report.incident, link: null, at: report.incident.removedAt + 60_000 }).includes('until npm removed them'), 'past tense after removal');
+  assert.ok(slackMessage({ exposure: e, paths: [], incident: { ...report.incident, firstExposureAt: from }, link: null }).includes(new Date(from).toISOString().slice(11, 16)), 'the first exposure, not the first publish');
   assert.ok(msg.endsWith('Details: https://pz.example/?repo=x'));
   assert.ok(msg.includes('(malicious)'), 'a locked bad version is called out');
   assert.ok(slackMessage({ exposure: { ...e, locked: ['chalk@5.4.1'] } as Exposure, paths: [], incident: report.incident, link: 'x' }).includes('`chalk@5.4.1` (safe)'));
@@ -87,6 +90,7 @@ test('the fix snippet carries the direct pins next to the overrides, so it works
   assert.deepEqual(JSON.parse(fixJson(mocha)), { dependencies: { debug: '4.4.1' }, overrides: { 'debug@4.4.2': '4.4.1' } });
   assert.deepEqual(JSON.parse(fixJson({ ...mocha, direct: undefined })), { overrides: { 'debug@4.4.2': '4.4.1' } }, 'no direct pins: overrides only');
   assert.deepEqual(JSON.parse(fixJson({ ...mocha, direct: {} })), { overrides: { 'debug@4.4.2': '4.4.1' } });
+  assert.deepEqual(JSON.parse(fixJson({ ...mocha, direct: undefined, devDirect: { chalk: '5.6.0' } })), { devDependencies: { chalk: '5.6.0' }, overrides: { 'debug@4.4.2': '4.4.1' } }, 'a devDependency is pinned where it is declared');
 });
 
 test('the Markdown export and the Slack message include the direct pins', () => {
@@ -96,7 +100,7 @@ test('the Markdown export and the Slack message include the direct pins', () => 
   assert.ok(md.includes(DIRECT_NOTE));
   const msg = slackMessage({ exposure: e, paths: [], fix: mocha, incident: report.incident, link: null });
   assert.ok(msg.includes('Pin to: `debug@4.4.1`'));
-  assert.match(msg, /Also set in package\.json, under dependencies or devDependencies.*`debug@4\.4\.1`/);
+  assert.match(msg, /Also set in package\.json, under dependencies: `debug@4\.4\.1`/);
   assert.ok(!slackMessage({ exposure: e, paths: [], fix: { ...mocha, direct: undefined }, incident: report.incident, link: null }).includes('Also set in package.json'));
 });
 

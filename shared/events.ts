@@ -71,8 +71,9 @@ export interface ExposurePath {
 }
 
 export interface OwnerGroup { team: string; channel: string; repos: string[] }
-// direct: root dependencies to set to the same safe version (npm rejects an override that conflicts with a direct dependency)
-export interface Remediation { repo: string; overrides: Record<string, string>; direct?: Record<string, string>; steps: string[]; prBody: string }
+// direct / devDirect: root dependencies (package.json "dependencies" / "devDependencies") to set to the same safe version
+// (npm rejects an override that conflicts with a direct dependency)
+export interface Remediation { repo: string; overrides: Record<string, string>; direct?: Record<string, string>; devDirect?: Record<string, string>; steps: string[]; prBody: string }
 export interface Notice { team: string; channel: string; text: string }
 export interface Concentration { maintainer: string; influence: number; packages: number; reposReached: number }
 export interface ScannerHit { repo: string; version: string; advisory: string }
@@ -90,8 +91,12 @@ export interface Report {
   remediations: Remediation[];
   notices: Notice[];
   concentration: Concentration[];
-  scope?: { kind: 'org' | 'guest'; label: string; repos: number }; // guest = a pasted repo; the hero must follow this, not the demo org
+  scope?: { kind: 'org' | 'guest'; label: string; repos: number; source?: LockSource }; // guest = a pasted repo; the hero must follow this, not the demo org
 }
+
+// Which lockfile a pasted repo was judged on: the last commit before the incident (sha, commit time), today's (no history
+// available), or a pasted file (no date known). Only the first is the repo's real state at the time.
+export interface LockSource { kind: 'snapshot' | 'head' | 'pasted'; sha?: string; date?: number }
 
 export interface TimelinePoint { at: number; counts: Record<Tier, number>; scanner: number }
 

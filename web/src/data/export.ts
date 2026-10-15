@@ -26,15 +26,19 @@ const pinName = (key: string) => (key.lastIndexOf('@') > 0 ? key.slice(0, key.la
 export const pinTargets = (overrides: Record<string, string>) => Object.entries(overrides).map(([k, v]) => `${pinName(k)}@${v}`);
 
 /** Root dependencies to pin next to the overrides: npm rejects an override that conflicts with a direct dependency (EOVERRIDE). */
-export const directOf = (f: Pick<Remediation, 'direct'>): Record<string, string> => f.direct ?? {};
-export const hasDirect = (f: Pick<Remediation, 'direct'>): boolean => Object.keys(directOf(f)).length > 0;
+export const directOf = (f: Pick<Remediation, 'direct' | 'devDirect'>): Record<string, string> => ({ ...f.direct, ...f.devDirect });
+export const hasDirect = (f: Pick<Remediation, 'direct' | 'devDirect'>): boolean => Object.keys(directOf(f)).length > 0;
 
-/** The package.json edits that work when pasted on their own: the direct pins (when the repo declares the package) and the overrides. */
-export const fixJson = (f: Pick<Remediation, 'overrides' | 'direct'>): string =>
-  JSON.stringify(hasDirect(f) ? { dependencies: directOf(f), overrides: f.overrides } : { overrides: f.overrides }, null, 2);
+/** The package.json edits that work when pasted on their own: the direct pins, each in the block the repo declares it in, and the overrides. */
+export const fixJson = (f: Pick<Remediation, 'overrides' | 'direct' | 'devDirect'>): string =>
+  JSON.stringify({
+    ...(Object.keys(f.direct ?? {}).length && { dependencies: f.direct }),
+    ...(Object.keys(f.devDirect ?? {}).length && { devDependencies: f.devDirect }),
+    overrides: f.overrides,
+  }, null, 2);
 
-/** Said wherever the two-block snippet is shown or copied. */
-export const DIRECT_NOTE = 'Set these in package.json. Put each dependency under dependencies or devDependencies, wherever the package is declared.';
+/** Said wherever the snippet is shown or copied: package.json may already have these blocks, and JSON keeps only the last of two. */
+export const DIRECT_NOTE = 'Merge these keys into package.json: add them to its existing "overrides", "dependencies" or "devDependencies" block rather than adding a second one (JSON keeps only the last).';
 
 export function reportToMarkdown(r: Report): string {
   const live = publishedBy(r.incident, r.at);
@@ -97,7 +101,16 @@ export function detailsLink(base: string, report: Pick<Report, 'incident' | 'at'
 }
 
 /** One repo's Slack message, complete on its own: repo, tier in words, prod/dev, path, pin target (and the direct pins), window start and a link (none for a dropped lockfile). */
-export function slackMessage(i: { exposure: Exposure; paths: ExposurePath[]; fix?: Remediation; incident: IncidentMeta; link: string | null }): string {
+// "since 00:21 UTC on 2026-03-31 (still live at 01:30 UTC)", or the closed window once npm removed the versions: the first
+// version that exposed a repo here, not the incident's first publish (axios published a decoy before any bad version).
+function windowLine(incident: IncidentMeta, at?: number): string {
+  const from = incident.firstExposureAt ?? incident.firstPublishAt;
+  const day = (t: number) => new Date(t).toISOString().slice(0, 10);
+  if (at !== undefined && at >= incident.removedAt) return `Window: malicious versions were live from ${utcLabel(from)} on ${day(from)} until npm removed them around ${utcLabel(incident.removedAt)}.`;
+  return `Window: malicious versions live since ${utcLabel(from)} on ${day(from)}${at !== undefined ? ` (still live at ${utcLabel(at)})` : ''}.`;
+}
+
+export function slackMessage(i: { exposure: Exposure; paths: ExposurePath[]; fix?: Remediation; incident: IncidentMeta; link: string | null; at?: number }): string {
   const { exposure: e } = i;
   const bad = new Set(i.incident.versions.map((v) => v.id));
   const pins = i.fix ? pinTargets(i.fix.overrides) : [];
@@ -108,8 +121,8 @@ export function slackMessage(i: { exposure: Exposure; paths: ExposurePath[]; fix
     ...i.paths.slice(0, 2).map((p) => `Path: ${p.chain.map(code).join(' > ')}${p.chain.at(-1) === p.version ? '' : ` > ${code(p.version)}`}${p.range ? ` (range ${code(p.range)})` : ''}`),
     ...(locked.length ? [`Your lockfile pins: ${locked.join(', ')}`] : []),
     ...(pins.length ? [`Pin to: ${pins.map(code).join(', ')}`] : []),
-    ...(i.fix && hasDirect(i.fix) ? [`Also set in package.json, under dependencies or devDependencies (wherever it is declared): ${pinTargets(directOf(i.fix)).map(code).join(', ')}. npm rejects an override that conflicts with a direct dependency.`] : []),
-    `Window: malicious versions have been live since ${utcLabel(i.incident.firstPublishAt)}.`,
+    ...(i.fix && hasDirect(i.fix) ? [`Also set in package.json${Object.keys(i.fix.direct ?? {}).length ? `, under dependencies: ${pinTargets(i.fix.direct!).map(code).join(', ')}` : ''}${Object.keys(i.fix.devDirect ?? {}).length ? `${Object.keys(i.fix.direct ?? {}).length ? ';' : ','} under devDependencies: ${pinTargets(i.fix.devDirect!).map(code).join(', ')}` : ''}. npm rejects an override that conflicts with a direct dependency.`] : []),
+    windowLine(i.incident, i.at),
     `Do: ${ACTION[e.tier]}`,
     ...(i.link ? [`Details: ${i.link}`] : []),
   ].join('\n');

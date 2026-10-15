@@ -260,16 +260,16 @@ RETURN bad.id AS bad, bad.name AS package, v.version AS version, v.publishedAt A
 
 #### `REMEDIATION_RANGES`
 
-draft_remediation (2/2): the repo's ranges that lock or admit each bad version (the pin must satisfy all of them), whether the repo root declares it (npm rejects an override that conflicts with a direct dependency), what the lockfile pins for that range, and when the range stopped admitting the bad version.
+draft_remediation (2/2): the repo's ranges that lock or admit each bad version (the pin must satisfy all of them), whether the repo root declares it and as what (npm rejects an override that conflicts with a direct dependency), what the lockfile pins for that range, and when the range stopped admitting the bad version.
 
 ```cypher
 MATCH (bad:Version)<-[:RESOLVES_TO]-(d:Dep)<-[r:REQUIRES]-(p:Dep)
 WHERE bad.id IN $versions AND d.repo = $repo
-RETURN bad.id AS bad, r.range AS range, 'RESOLVES_TO' AS kind, p.path = '' AS direct, bad.id AS locked, null AS until
+RETURN bad.id AS bad, r.range AS range, 'RESOLVES_TO' AS kind, p.path = '' AS direct, r.kind AS dep, bad.id AS locked, null AS until
 UNION
 MATCH (bad:Version)<-[a:ADMITS]-(p:Dep)-[r:REQUIRES]->(l:Dep)
 WHERE bad.id IN $versions AND p.repo = $repo AND l.name = bad.name AND r.range = a.range
-RETURN bad.id AS bad, a.range AS range, 'ADMITS' AS kind, p.path = '' AS direct, l.name + '@' + l.version AS locked, a.toT AS until
+RETURN bad.id AS bad, a.range AS range, 'ADMITS' AS kind, p.path = '' AS direct, r.kind AS dep, l.name + '@' + l.version AS locked, a.toT AS until
 ```
 
 #### `SCANNER_VIEW`

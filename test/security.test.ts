@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { parseRepo, safeJson, forPrompt, limited, safeFetch, errorBody, HttpError, clientKey } from '../server/security.ts';
 import { assertSafeParams } from '../server/graph/client.ts';
 import { parseLockfile } from '../server/ingest/lockfile.ts';
-import { app } from '../server/index.ts';
+import { app, STYLE_HASHES } from '../server/index.ts';
+import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 
 test('S1/S2 repo parsing accepts only github owner/repo', () => {
   assert.deepEqual(parseRepo('https://github.com/mochajs/mocha'), { owner: 'mochajs', repo: 'mocha' });
@@ -119,6 +121,12 @@ test('S5/S8 security headers present, body limit enforced', async () => {
   assert.equal(res.status, 200);
   assert.match(res.headers.get('content-security-policy') ?? '', /default-src 'self'/);
   assert.match(res.headers.get('content-security-policy') ?? '', /frame-ancestors 'none'/);
+  // The graph library's injected <style> blocks: a dependency bump that changes them must update STYLE_HASHES.
+  for (const f of ['force-graph/dist/force-graph.mjs', 'float-tooltip/dist/float-tooltip.mjs']) {
+    const css = JSON.parse(readFileSync(new URL(`../node_modules/${f}`, import.meta.url), 'utf8').match(/var css_248z = (".*");/)![1]!);
+    const hash = `'sha256-${createHash('sha256').update(css).digest('base64')}'`;
+    assert.ok(STYLE_HASHES.includes(hash) && res.headers.get('content-security-policy')!.includes(hash), `${f}: ${hash}`);
+  }
   assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
   assert.equal(res.headers.get('referrer-policy'), 'no-referrer');
   assert.equal(res.headers.get('access-control-allow-origin'), null);

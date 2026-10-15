@@ -241,7 +241,31 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
       // when: start, the OSV gap, and only what is known at the scenario clock
       const when = of(await askQ('When did this start, and how far ahead of the advisory were we?'), 'narration');
       assert.match(when.text, /^Exposure began at 13:12 UTC, when `ansi-styles@6\.2\.2` was published\. The first OSV record came at 14:26 UTC, 74 minutes later\. At 13:30 UTC they were still live\.$/);
+
+      // a list already groups its repos by team: no second, unfiltered Notify roster under it
+      assert.doesNotMatch(n.text, /Notify:/);
+      // how bad / tell my CISO: the verdict's headline with the team count (7, not a model's 6)
+      for (const q of ['how bad is this?', 'what do I tell my CISO?']) {
+        const s = of(await askQ(q), 'narration');
+        assert.match(s.text, /^21 of 21 repos are exposed .* The exposed repos belong to 7 teams\.$/s, q);
+        assert.doesNotMatch(s.text, /^Notify:/m, q);
+      }
+      // dev-only is not safe to ignore, and npm ci stays safe for WOULD_PULL
+      const dev = of(await askQ('can I ignore the dev-only ones?'), 'narration');
+      assert.match(dev.text, /^7 of the exposed repos are dev-only: .*Dev-only is not safe to ignore: npm install and npm ci install devDependencies by default/);
+      // what first: the verdict's own Notify and Do lines (rotate for the LOCKED repo included), never a tool name
+      const first = of(await askQ('what should I do first in the next hour?'), 'narration');
+      assert.match(first.text, /^Notify: .*\nDo: .*[Rr]otate secrets/s);
+      assert.doesNotMatch(first.text, /draft_remediation|filter_exposures/);
+      // which team: open exposures by team, most first, every count from the graph
+      const teams = of(await askQ('which team has the most work?'), 'narration');
+      assert.match(teams.text, /^Open exposures by team, most first: `[^`]+` \d+ repos/);
+      for (const q of ['how bad is this?', 'can I ignore the dev-only ones?', 'which team has the most work?']) assert.deepEqual(of(await askQ(q), 'guard').flagged, [], q);
       assert.equal(asked, 0);
+      // customers are not in the graph: the model answers (not the team roster)
+      const cust = of(await askQ('do I need to notify customers?'), 'narration');
+      assert.equal(asked, 1);
+      assert.doesNotMatch(cust.text, /^Notify:/);
     } finally {
       delete hooks.chat;
     }
@@ -346,9 +370,9 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
     assert.deepEqual([p.kind, p.range, p.hops], ['ADMITS', '^4.3.5', 0]);
     const n = of(t.evs, 'narration');
     assert.deepEqual([n.mode, n.note], ['template', null]); // no recording describes a guest graph
-    assert.deepEqual(t.report.scope, { kind: 'guest', label: 'pasted/mocha', repos: 1 });
+    assert.deepEqual(t.report.scope, { kind: 'guest', label: 'pasted/mocha', repos: 1, source: { kind: 'pasted' } });
     assert.deepEqual(t.report.notices, []);
-    assert.match(n.text, /^Verdict: `pasted\/mocha` is exposed only on a fresh install since \d\d:\d\d UTC on \d{4}-\d\d-\d\d \(still open at 13:30 UTC\); installing from your committed lockfile was safe: it pins .*`debug@4\.3\.5`/);
+    assert.match(n.text, /^Verdict \(counterfactual: this checks the lockfile you pasted as if it had been committed on 2025-09-08\): `pasted\/mocha` would have been exposed to the `qix` account compromise only on a fresh install since \d\d:\d\d UTC on \d{4}-\d\d-\d\d \(still live at 13:30 UTC; npm removed them around \d\d:\d\d UTC\); installing from that lockfile would have been safe: it pins .*`debug@4\.3\.5`/);
     assert.doesNotMatch(n.text, /Notify|#your-team/);
     assert.ok(e.locked!.length > 0 && e.locked!.every((v) => !e.versions.includes(v)), 'a WOULD_PULL lockfile pins only safe versions');
     assert.equal(t.report.minutesAhead, Math.floor((t.report.incident.advisoryAt - t.report.incident.firstExposureAt!) / 60_000)); // its own first exposure

@@ -3,7 +3,7 @@
 // calls, no GitHub token and no disk cache on this path. The graph name is a server-side hash of the input, never user
 // text (S3). LRU 4 + TTL 1 h with GRAPH.DELETE on eviction, one ingest at a time, each graph usable only by the
 // sessions that analyzed it (S10).
-import type { AnalyzeEvent, ScenarioId } from '../../shared/events.ts';
+import type { AnalyzeEvent, LockSource, ScenarioId } from '../../shared/events.ts';
 import { db, guestGraph, registryGraph } from '../graph/client.ts';
 import { HttpError, MAX_LOCKFILE_BYTES, parseRepo, safeFetch, safeJson } from '../security.ts';
 import { badVersions, load, writeAdmits, writeMaintainers, writeRepos, type RepoIn } from './build.ts';
@@ -34,7 +34,7 @@ export function checkLock(text: string): Parsed & { name: unknown } {
   }
 }
 
-export type Input = { key: string; repo: string; github?: { owner: string; repo: string }; parsed?: Parsed };
+export type Input = { key: string; repo: string; github?: { owner: string; repo: string }; parsed?: Parsed; source?: LockSource };
 // Validates the request before any SSE starts, so bad input gets a real 400/413.
 export function prepare(b: { url?: unknown; lockfile?: unknown }): Input {
   if (b.url !== undefined) {
@@ -45,7 +45,7 @@ export function prepare(b: { url?: unknown; lockfile?: unknown }): Input {
   if (typeof b.lockfile !== 'string') throw new HttpError(400, 'Send a GitHub repo URL or the contents of a package-lock.json.');
   const { name, ...parsed } = checkLock(b.lockfile);
   const base = String(name ?? '').split('/').pop()!;
-  return { key: `lockfile:${b.lockfile}`, repo: `pasted/${/^[A-Za-z0-9._-]{1,100}$/.test(base) && !/^\.+$/.test(base) ? base : 'lockfile'}`, parsed };
+  return { key: `lockfile:${b.lockfile}`, repo: `pasted/${/^[A-Za-z0-9._-]{1,100}$/.test(base) && !/^\.+$/.test(base) ? base : 'lockfile'}`, parsed, source: { kind: 'pasted' } };
 }
 
 // ---------- GitHub (no token: the guest path must not spend or expose ours) ----------
@@ -82,28 +82,34 @@ async function fetchLock({ owner, repo }: { owner: string; repo: string }, snaps
   const commits = await get(`https://api.github.com/repos/${owner}/${repo}/commits?path=package-lock.json&until=${new Date(snapshotAt).toISOString()}&per_page=1`, signal).catch(() => null);
   if (commits?.status === 404) throw new HttpError(404, `github.com/${owner}/${repo} is not a public repo.`);
   let sha: unknown;
-  if (commits?.ok) sha = (safeJson(await capped(commits), 1_000_000) as { sha?: unknown }[] | null)?.[0]?.sha;
-  else void commits?.body?.cancel().catch(() => {});
+  let date: unknown;
+  if (commits?.ok) {
+    const c = (safeJson(await capped(commits), 1_000_000) as { sha?: unknown; commit?: { committer?: { date?: unknown } } }[] | null)?.[0];
+    sha = c?.sha;
+    date = c?.commit?.committer?.date;
+  } else void commits?.body?.cancel().catch(() => {});
   const ref = typeof sha === 'string' && /^[0-9a-f]{40}$/.test(sha) ? sha : null;
+  const when = typeof date === 'string' ? Date.parse(date) : NaN;
   const res = await get(`https://raw.githubusercontent.com/${owner}/${repo}/${ref ?? 'HEAD'}/package-lock.json`, signal);
   if (res.status === 404) throw new HttpError(404, await noLockfile(owner, repo, signal));
   if (!res.ok) throw new HttpError(502, GITHUB_DOWN);
   const { name: _name, ...parsed } = checkLock(await capped(res));
-  return { parsed, sha: ref, repo: ref ? `${owner}/${repo}` : `${owner}/${repo}@HEAD` }; // @HEAD: today's lockfile, a counterfactual
+  const source: LockSource = ref ? { kind: 'snapshot', sha: ref, ...(Number.isFinite(when) && { date: when }) } : { kind: 'head' };
+  return { parsed, sha: ref, source, repo: ref ? `${owner}/${repo}` : `${owner}/${repo}@HEAD` }; // @HEAD: today's lockfile, a counterfactual
 }
 
 // Which lockfile the repo uses instead, so the error says what to do (HEAD requests only: nothing is downloaded).
 async function noLockfile(owner: string, repo: string, signal: AbortSignal): Promise<string> {
   for (const [file, tool] of [['yarn.lock', 'yarn'], ['pnpm-lock.yaml', 'pnpm']] as const) {
     const r = await safeFetch(`https://raw.githubusercontent.com/${owner}/${repo}/HEAD/${file}`, { method: 'HEAD', signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]) }).catch(() => null);
-    if (r?.ok) return `${owner}/${repo} uses ${tool} (${file}), and Patient Zero reads npm's package-lock.json (v2 or v3). Run npm install --package-lock-only in a checkout and drop the generated package-lock.json here.`;
+    if (r?.ok) return `${owner}/${repo} uses ${tool} (${file}), and Patient Zero reads only npm's package-lock.json (v2 or v3); ${tool} lockfiles are on the roadmap. If the project also installs with npm, run npm install --package-lock-only in a checkout and drop the generated file here (${tool} workspaces with workspace: dependencies cannot be converted this way).`;
   }
-  return `No package-lock.json at the root of ${owner}/${repo}. Drop the lockfile instead.`;
+  return `No package-lock.json at the root of ${owner}/${repo}. In a checkout, run npm install --package-lock-only (it writes the lockfile without installing anything) and drop the generated package-lock.json here.`;
 }
 
 // ---------- graphs ----------
 
-type Entry = { graph: string; scenario: ScenarioId; repo: string; entries: number; used: number; sessions: Set<string> };
+type Entry = { graph: string; scenario: ScenarioId; repo: string; entries: number; used: number; sessions: Set<string>; source: LockSource };
 const guests = new Map<string, Entry>(); // insertion order = LRU order: a touch re-inserts
 const inflight = new Map<string, Promise<void>>();
 let data: ReturnType<typeof load> | undefined;
@@ -153,9 +159,10 @@ export async function* analyze(input: Input, scenario: ScenarioId, session: stri
     const snapshotAt = Date.parse(data.org.scenarios[scenario]);
     let { parsed, repo } = input;
     let sha: string | null = null;
+    let source: LockSource = input.source ?? { kind: 'pasted' };
     if (input.github) {
       yield progress('fetch', 0);
-      ({ parsed, repo, sha } = await fetchLock(input.github, snapshotAt, signal));
+      ({ parsed, repo, sha, source } = await fetchLock(input.github, snapshotAt, signal));
       yield progress('fetch', 1);
     }
     yield progress('parse', 1);
@@ -174,7 +181,7 @@ export async function* analyze(input: Input, scenario: ScenarioId, session: stri
     await writeAdmits(name, repos, badVersions(inc, data.packuments), Date.parse(inc.removedAt));
     yield progress('admits', 1);
 
-    guests.set(name, (e = { graph: name, scenario, repo, entries: parsed!.deps.length, used: Date.now(), sessions: new Set([session]) }));
+    guests.set(name, (e = { graph: name, scenario, repo, entries: parsed!.deps.length, used: Date.now(), sessions: new Set([session]), source }));
     built = true;
     await sweep();
     yield { type: 'ready', graph: name, repo, entries: e.entries };

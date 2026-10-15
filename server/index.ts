@@ -12,7 +12,7 @@ import { getCookie, setCookie } from 'hono/cookie';
 import { requestId, type RequestIdVariables } from 'hono/request-id';
 import { secureHeaders } from 'hono/secure-headers';
 import { streamSSE } from 'hono/streaming';
-import type { AnalyzeEvent, Exposure, IncidentMeta, ScannerHit, ScenarioId, Tier, TimelinePoint, ToolName, TriageEvent } from '../shared/events.ts';
+import type { AnalyzeEvent, Exposure, IncidentMeta, LockSource, ScannerHit, ScenarioId, Tier, TimelinePoint, ToolName, TriageEvent } from '../shared/events.ts';
 import { ask, latestRun, recall, remember, type ChatFn, type Run } from './agent/ask.ts';
 import { narrated } from './agent/replay.ts';
 import { triage } from './agent/triage.ts';
@@ -43,12 +43,15 @@ const org = (s: ScenarioId) => graph(orgGraph(s, prefix()));
 
 // ---------- middleware ----------
 
+export const STYLE_HASHES = ["'sha256-jtRRMYY2VbEXuBKbHvqM1/fPT8vazFrEooXdvwUK4y8='", "'sha256-9xjtvxMT1ApHlgn9ohbh2FNfvK5Tqtzy94BjfXBeMSY='"];
 app.use(requestId({ headerName: '' })); // S12: always generated here, never taken from the client
 // S5/S8: strict CSP, no framing, no referrer. No CORS middleware = same-origin only.
 app.use(
   secureHeaders({
     contentSecurityPolicy: {
       defaultSrc: ["'self'"],
+      // force-graph and float-tooltip inject one fixed <style> each (test/security.test.ts recomputes these hashes)
+      styleSrc: ["'self'", ...STYLE_HASHES],
       imgSrc: ["'self'", 'data:'],
       connectSrc: ["'self'"],
       objectSrc: ["'none'"],
@@ -291,11 +294,13 @@ app.post('/api/triage', async (c) => {
   let at: number | undefined;
   let alert: string | undefined;
   let guestGraph: string | undefined;
+  let source: LockSource | undefined;
   if (b.guest !== undefined) {
     s = scenarioOf(b.scenario);
     const e = guests.guest(b.guest, session);
     if (!e || e.scenario !== s) throw new HttpError(404, 'That analysis has expired. Paste the repo again.');
     guestGraph = e.graph;
+    source = e.source;
   } else if (b.alert !== undefined) {
     if (b.scenario !== undefined) throw new HttpError(400, 'Send an alert or a scenario, not both.');
     alert = textOf(b.alert, 'The alert');
@@ -304,7 +309,7 @@ app.post('/api/triage', async (c) => {
   at = b.at !== undefined ? atOf(b.at, s) : (at ?? DEFAULT_AT[s]);
   const name = guestGraph ?? orgGraph(s, prefix());
   const release = slot();
-  return sse(c, (signal) => remembering(narrated(triage({ graph: graph(name), scenario: s, at, alert, session, signal }), s, at, !guestGraph), { session, graph: name, scenario: s, at }), release);
+  return sse(c, (signal) => remembering(narrated(triage({ graph: graph(name), scenario: s, at, alert, session, source, signal }), s, at, !guestGraph), { session, graph: name, scenario: s, at }), release);
 });
 
 app.post('/api/ask', async (c) => {

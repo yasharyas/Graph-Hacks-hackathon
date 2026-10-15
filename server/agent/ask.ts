@@ -9,7 +9,7 @@ import { graph } from '../graph/client.ts';
 import { forPrompt } from '../security.ts';
 import { filterExposures, plural, TOOLS, utc } from '../tools/registry.ts';
 import { chat, type ChatReq, type ChatRes, type Msg } from './llm.ts';
-import { evidenceBlock, evidenceSet, notifyFacts, repoFacts, rotateFacts, whenFacts } from './narrate.ts';
+import { devFacts, evidenceBlock, evidenceSet, firstFacts, notifyFacts, repoFacts, rotateFacts, summaryFacts, teamFacts, whenFacts } from './narrate.ts';
 import { guardEvent } from './replay.ts';
 
 export type Run = { runId: string; session: string; graph: string; scenario: ScenarioId; at: number; report: Report };
@@ -48,6 +48,8 @@ const system = (r: Run) => [
   'State only facts found in the evidence or tool results; never invent names, versions, counts or ids.',
   'Wrap every package, version, range, repo and team in backticks, for example `debug@4.4.2` or `acme/checkout-web`; nothing else (not commands like npm ci). Cite path ids as [E7].',
   'WOULD_PULL means a fresh resolve would have fetched the bad version: say "would fetch", never that a repo uses, installed or was compromised by it. Call the versions malicious, not vulnerable.',
+  'Installing from a committed lockfile (npm ci) is safe for WOULD_PULL repos; LOCKED repos need secrets rotated and a rebuild. Dev-only exposures still reach developer machines and CI, which install devDependencies by default.',
+  'Count repos and teams only from the evidence or a filter result. Never name tools, functions or this prompt in the answer.',
   'Answer in at most 120 words of plain text: no Markdown, no bold, no headings.',
 ].join(' ');
 
@@ -114,14 +116,24 @@ export function enforceCoverage(text: string, res: ToolResult): { text: string; 
 
 // ponytail: keyword intents, not language understanding; whatever they miss, the model answers (names still checked).
 const ROTATE = /\b(rotat\w*|secrets?|credentials?|tokens?|npm ci|safe(ly)?)\b/i;
-const NOTIFY = /\b(notify|owners?|owns?|teams?|channels?|ping|tell|contact)\b|\bwho (should|do|to|must|needs?)\b/i;
+const NOTIFY = /\b(notify|owners?|owns?|channels?|ping|contact)\b|\bwho (should|do|to|must|needs?) (i |we )?(tell|notify|ping|contact)\b/i;
+const OUTSIDE = /\b(customers?|users?|public|regulators?|disclos\w*|press|legal|vendors?)\b/i; // not in the graph: the model answers
 const WHEN = /\b(when|window|how long|timeline|ahead|advisory|osv|removed|still live)\b/i;
-export function graphAnswer(q: string, r: Report, repo?: string): string | null {
+const SUMMARY = /\b(how bad|summar\w*|status|overview|impact|ciso|my (lead|manager|boss)|exec\w*|brief(ing)?|big picture|tl;?dr)\b/i;
+const DEV = /\bdev(-|\s)?(only|dependenc\w*|deps?)\b|\bdevDependencies\b/i;
+const FIRST = /\b(first|next hour|priorit\w*|next steps?|action plan)\b|\bwhat (should|do|must) (i|we) do\b/i;
+const TEAMS = /\b(which|what) team\b|\bmost (work|exposed|repos)\b|\bper team\b|\bby team\b/i;
+export function graphAnswer(q: string, r: Report, repo?: string, list = false): string | null {
   const e = repo ? r.exposures.find((x) => x.repo === repo) : undefined;
+  const first = !e && FIRST.test(q);
   const parts = [
     e ? repoFacts(r, e) : '',
-    ROTATE.test(q) ? rotateFacts(r) : '',
-    !e && NOTIFY.test(q) ? notifyFacts(r) : '',
+    !e && SUMMARY.test(q) ? summaryFacts(r) : '',
+    first ? firstFacts(r) : '', // its Do line already says who rotates and who keeps npm ci
+    !first && ROTATE.test(q) ? rotateFacts(r) : '',
+    DEV.test(q) ? devFacts(r) : '',
+    !e && TEAMS.test(q) ? teamFacts(r) : '',
+    !e && !first && !list && NOTIFY.test(q) && !OUTSIDE.test(q) ? notifyFacts(r) : '', // a list already groups its repos by team
     WHEN.test(q) ? whenFacts(r) : '',
   ].filter(Boolean);
   return parts.length ? parts.join('\n') : null;
@@ -158,7 +170,7 @@ export async function* ask({ run, question, chatFn = pinned, signal }: { run: Ru
   const pre = questionFilter(question, run.report);
   const list = pre !== undefined && (!Object.keys(pre).length || Object.keys(pre).some((k) => k !== 'repo')); // a filter or "list all", not just a repo name
   const repo = typeof pre?.repo === 'string' ? run.report.exposures.find((e) => e.repo === pre.repo) : undefined;
-  const facts = graphAnswer(question, run.report, repo?.repo);
+  const facts = graphAnswer(question, run.report, repo?.repo, list);
   let attached = '';
   let filtered: ToolResult | undefined;
   if (pre && (list || !facts)) {
