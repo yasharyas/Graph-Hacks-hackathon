@@ -32,7 +32,7 @@ The only numbers the README, video, blog and posts may quote. Each line names it
 
 - Ask "which exposures are prod-only and who owns them?" at qix 13:30Z: **14 repos across 6 teams**, answered from the graph (`filter_exposures`), never in a model's words.
 - Analyst pick at qix 13:30Z: the LLM chose, from graph-built observations, "**4 repos get a malicious version through the same dependency, `@babel/core`**" (socket.io, jquery, pdf.js and 1 more). At axios 01:30Z it picked "2 repos … through `nx`" (appium, nest).
-- Every claim in the narrative is checked against the run's evidence: a typical qix run shows **58–60 of 58–60 claims traced**.
+- Every claim in the narrative is checked against the run's evidence: a qix run traces **all of its claims, about 60** (58 to 61, depending on what the session has marked remediated).
 
 ## Free-tier speed (source: `docker run --cpus=0.1 --memory=512m` of the production image, 2026-10-16)
 
