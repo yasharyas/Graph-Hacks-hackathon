@@ -33,7 +33,7 @@ test('org verdict: complete, plain-language, cited, guard-clean, no markdown', (
   clean(r, t);
   assert.ok(guard(t, evidenceSet(r)).total > 15);
   const [verdict, why, notify, todo] = t.split('\n');
-  assert.match(verdict, /^Verdict: 5 of 17 repos are exposed to the `qix` account compromise at 13:30 UTC on 2025-09-08\. The graph showed this 74 minutes before the first OSV record\./);
+  assert.match(verdict, /^Verdict: 5 of 17 repos are exposed to the `qix` account compromise at 13:30 UTC on 2025-09-08\. No advisory exists yet at this clock: the first OSV record came at 14:26 UTC, 74 minutes after the first exposure\./);
   assert.match(verdict, /LOCKED, 1 repo \(`acme\/checkout-web`\): the lockfile itself pins the malicious version, so rotate secrets and rebuild\./);
   assert.match(verdict, /WOULD_PULL, 4 repos \(4 prod, 0 dev-only\): exposed only on a fresh install since 13:12 UTC on 2025-09-08 \(still live at 13:30 UTC; npm removed them around 15:15 UTC\); installing from the committed lockfile was safe\./);
   assert.match(verdict, /1 more repo depends on packages from the compromised account/); // MAINTAINER is counted, never listed as exposed
@@ -44,9 +44,9 @@ test('org verdict: complete, plain-language, cited, guard-clean, no markdown', (
   for (const e of r.exposures.filter((x) => x.tier !== 'MAINTAINER')) assert.ok(notify.includes(`\`${e.repo}\``), `${e.repo} missing from Notify`);
   assert.ok(!notify.includes('http-party/http-server'));
   assert.match(notify, /^Notify: `Payments` \(`#team-payments`\): `acme\/checkout-web` \(LOCKED\); /);
-  assert.match(todo, /^Do: 1\) Keep installing the 4 WOULD_PULL repos from their committed lockfiles \(npm ci\): none pins a malicious version\. 2\) Only if you must re-resolve/);
+  assert.match(todo, /^Do: 1\) For `acme\/checkout-web` \[E1\]: rotate secrets/); // the step that cannot wait comes first
+  assert.match(todo, /2\) Keep installing the 4 WOULD_PULL repos from their committed lockfiles \(npm ci\): none pins a malicious version\. 3\) Only if you must re-resolve/);
   assert.match(todo, /replace `chalk@5\.6\.1` with `chalk@5\.6\.0`|replace `debug@4\.4\.2` with `debug@4\.4\.1`/);
-  assert.match(todo, /3\) For `acme\/checkout-web` \[E1\]: rotate secrets/);
   assert.doesNotMatch(t, /\*\*|#your-team|Your team/);
 });
 

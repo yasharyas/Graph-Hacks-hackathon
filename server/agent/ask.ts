@@ -115,23 +115,26 @@ export function enforceCoverage(text: string, res: ToolResult): { text: string; 
 }
 
 // ponytail: keyword intents, not language understanding; whatever they miss, the model answers (names still checked).
-const ROTATE = /\b(rotat\w*|secrets?|credentials?|tokens?|npm ci|safe(ly)?)\b/i;
+const ROTATE = /\b(rotat\w*|secrets?|credentials?|tokens?)\b/i;
+const SAFE = /\b(npm ci|safe(ly)?)\b/i; // with a named repo, "safe" is about that repo: its own facts answer it
+const EXCEPT = /\b(after|besides|other than|except|apart from|excluding)\b/i; // "riskiest after X": not X's own facts
 const NOTIFY = /\b(notify|owners?|owns?|channels?|ping|contact)\b|\bwho (should|do|to|must|needs?) (i |we )?(tell|notify|ping|contact)\b/i;
 const OUTSIDE = /\b(customers?|users?|public|regulators?|disclos\w*|press|legal|vendors?)\b/i; // not in the graph: the model answers
-const WHEN = /\b(when|window|how long|timeline|ahead|advisory|osv|removed|still live)\b/i;
-const SUMMARY = /\b(how bad|summar\w*|status|overview|impact|ciso|my (lead|manager|boss)|exec\w*|brief(ing)?|big picture|tl;?dr)\b/i;
+const WHEN = /\b(when|window|how long|timeline|how far ahead|advisory|osv|still live)\b/i;
+const SUMMARY = /\b(how bad|summar\w*|status|overview|impact|ciso|my (lead|manager|boss)|exec\w*|brief(ing)?|big picture|tl;?dr)\b|\b(am i|are we|is (our|my) org) (affected|exposed|at risk)\b/i;
 const DEV = /\bdev(-|\s)?(only|dependenc\w*|deps?)\b|\bdevDependencies\b/i;
 const FIRST = /\b(first|next hour|priorit\w*|next steps?|action plan)\b|\bwhat (should|do|must) (i|we) do\b/i;
 const TEAMS = /\b(which|what) team\b|\bmost (work|exposed|repos)\b|\bper team\b|\bby team\b/i;
-const NEXT = /\bnext (qix|one|target|compromise|account|maintainer)\b|\bconcentrat\w*|\briskiest\b|\bwhich maintainers?\b|\bpagerank\b|\bsingle points? of failure\b|\b(compromised|hijacked) next\b/i;
+const NEXT = /\bnext (qix|target|compromise|account|maintainer)\b|\bconcentrat\w*|\bwhich maintainers?\b|\bpagerank\b|\bsingle points? of failure\b|\b(compromised|hijacked) next\b/i;
 export function graphAnswer(q: string, r: Report, repo?: string, list = false): string | null {
+  if (EXCEPT.test(q)) return null; // comparisons are the model's (with the filter result attached)
   const e = repo ? r.exposures.find((x) => x.repo === repo) : undefined;
   const first = !e && FIRST.test(q);
   const parts = [
     e ? repoFacts(r, e) : '',
     !e && SUMMARY.test(q) ? summaryFacts(r) : '',
     first ? firstFacts(r) : '', // its Do line already says who rotates and who keeps npm ci
-    !first && ROTATE.test(q) ? rotateFacts(r) : '',
+    !first && (ROTATE.test(q) || (!e && SAFE.test(q))) ? rotateFacts(r) : '',
     DEV.test(q) ? devFacts(r) : '',
     !e && TEAMS.test(q) ? teamFacts(r) : '',
     !e && NEXT.test(q) ? concentrationFacts(r) : '',

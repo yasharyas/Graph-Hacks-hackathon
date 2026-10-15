@@ -250,8 +250,18 @@ function fromAlert(text: string): { s: ScenarioId; at?: number } {
   const name = (w: string) => (w.lastIndexOf('@') > 0 ? w.slice(0, w.lastIndexOf('@')) : w);
   const [best] = TERMS.map(({ s, terms }) => ({ s, n: words.filter((w) => terms.has(w) || terms.has(name(w))).length })).sort((a, b) => b.n - a.n);
   if (!best?.n) throw new HttpError(400, 'The alert names no known incident, account or package. Try "qix compromised, 13:16 UTC".');
-  const m = /\b([01]?\d|2[0-3]):([0-5]\d)\b/.exec(text);
-  return { s: best.s, at: m ? Date.parse(`${SNAPSHOT[best.s].slice(0, 10)}T${m[1].padStart(2, '0')}:${m[2]}:00Z`) : undefined };
+  return { s: best.s, at: clockOf(text, best.s) };
+}
+export function clockOf(text: string, s: ScenarioId): number | undefined {
+  const iso = /\b(\d{4}-\d\d-\d\d)T([01]\d|2[0-3]):([0-5]\d)(?::[0-5]\d(?:\.\d+)?)?Z?/i.exec(text);
+  const m = iso ? null : /(?<![\d:.])([01]?\d|2[0-3]):([0-5]\d)(?![\d:])\s*([ap])\.?\s?m\b\.?/i.exec(text) ?? /(?<![\d:.])([01]?\d|2[0-3]):([0-5]\d)(?![\d:])/.exec(text);
+  if (!iso && !m) return undefined;
+  let h = Number(iso ? iso[2] : m![1]);
+  const ap = m?.[3]?.toLowerCase();
+  if (ap === 'p' && h < 12) h += 12;
+  if (ap === 'a' && h === 12) h = 0;
+  const t = Date.parse(`${iso ? iso[1] : SNAPSHOT[s].slice(0, 10)}T${String(h).padStart(2, '0')}:${iso ? iso[3] : m![2]}:00Z`);
+  return Math.abs(t - Date.parse(SNAPSHOT[s])) <= 30 * DAY ? t : undefined;
 }
 
 // Keeps each finished report (by runId, with its session and graph) for Ask and remediation.

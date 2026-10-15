@@ -255,7 +255,7 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
       assert.match(dev.text, /^7 of the exposed repos are dev-only: .*Dev-only is not safe to ignore: npm install and npm ci install devDependencies by default/);
       // what first: the verdict's own Notify and Do lines (rotate for the LOCKED repo included), never a tool name
       const first = of(await askQ('what should I do first in the next hour?'), 'narration');
-      assert.match(first.text, /^Notify: .*\nDo: .*[Rr]otate secrets/s);
+      assert.match(first.text, /^Do: 1\) For `acme\/checkout-web`.*rotate secrets.*\nNotify: /s); // the LOCKED repo's rotation first, then who to tell
       assert.doesNotMatch(first.text, /draft_remediation|filter_exposures/);
       // which team: open exposures by team, most first, every count from the graph
       const teams = of(await askQ('which team has the most work?'), 'narration');

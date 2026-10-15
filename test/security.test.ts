@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { parseRepo, safeJson, forPrompt, limited, safeFetch, errorBody, HttpError, clientKey } from '../server/security.ts';
 import { assertSafeParams } from '../server/graph/client.ts';
 import { parseLockfile } from '../server/ingest/lockfile.ts';
-import { app, STYLE_HASHES } from '../server/index.ts';
+import { app, clockOf, STYLE_HASHES } from '../server/index.ts';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 
@@ -53,6 +53,13 @@ test('S1/S4 lockfile names, versions and ranges cannot carry lines, links or cod
   assert.equal(r('npm:strip-ansi@^6.0.1'), '^6.0.1');
   assert.equal(r('file:test/fixture'), 'file:test/fixture');
   assert.equal(r('git+https://github.com/a/b.git#v1 [Click](https://evil.example)'), 'git+https://github.com/a/b.git#v1Clickhttps://evil.example', 'a URL spec stays one token: no spaces, brackets or parens');
+});
+
+test('S1 the clock in an alert: 24 h, am/pm, glued UTC or an ISO instant; never a time far from the incident', () => {
+  const at = (t: string) => { const v = clockOf(t, 'qix-2025-09-08'); return v === undefined ? v : new Date(v).toISOString().slice(0, 16); };
+  for (const t of ['qix compromised 13:16 UTC', 'qix at 1:16 PM', 'qix 1:16 p.m.', 'qix 2025-09-08T13:16:00Z', 'qix 13:16UTC', 'qix 13:16 PM']) assert.equal(at(t), '2025-09-08T13:16', t);
+  assert.equal(at('qix 12:05 am'), '2025-09-08T00:05');
+  for (const t of ['qix hijacked', 'qix 2024-01-01T10:00:00Z', 'v1.2.3:45', 'qix 25:61']) assert.equal(at(t), undefined, t);
 });
 
 test('S4 prompt strings are charset-limited and capped', () => {

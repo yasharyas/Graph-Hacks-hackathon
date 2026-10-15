@@ -278,8 +278,9 @@ export function devFacts(r: Report): string {
 
 // "What do I do first?": the verdict's own Notify and Do lines, in its order (rotate LOCKED first).
 export function firstFacts(r: Report): string {
-  const lines = verdictText(r).split('\n').filter((l) => /^(Notify|Do):/.test(l));
-  return lines.length ? lines.join('\n') : `No repo is exposed at ${hm(r.at)}: nothing to do.`;
+  const lines = verdictText(r).split('\n');
+  const pick = ['Do:', 'Notify:'].map((k) => lines.find((l) => l.startsWith(k))).filter(Boolean); // what to do, then who to tell
+  return pick.length ? pick.join('\n') : `No repo is exposed at ${hm(r.at)}: nothing to do.`;
 }
 
 // Open exposures (remediated left out) grouped by owning team, the most first.
@@ -330,7 +331,11 @@ export function verdictText(r: Report): string {
   const first = r.incident.firstExposureAt ?? null;
   const closed = r.at >= r.incident.removedAt; // as known at the scenario clock: the removal is in the past
   const window = first === null ? 'in the window' : closed ? `between ${hm(first)} and ${hm(r.incident.removedAt)} on ${day(first)}` : `since ${hm(first)} on ${day(first)} (still live at ${hm(r.at)}; npm removed them around ${hm(r.incident.removedAt)})`;
-  const ahead = r.minutesAhead > 0 && first !== null && r.at >= first ? ` The graph showed this ${r.minutesAhead} minutes before the first OSV record.` : '';
+  const ahead = r.minutesAhead > 0 && first !== null && r.at >= first
+    ? r.at < r.incident.advisoryAt
+      ? ` No advisory exists yet at this clock: the first OSV record came at ${hm(r.incident.advisoryAt)}, ${r.minutesAhead} minutes after the first exposure.`
+      : ` The graph showed this ${r.minutesAhead} minutes before the first OSV record.`
+    : '';
   const total = r.scope?.repos ?? Object.values(r.counts).reduce((a, b) => a + b, 0);
   const fixFor = (e: Exposure) => r.remediations.find((m) => m.repo === e.repo)?.overrides ?? {};
   // The override is an in-window measure: it pins every dependent whose range admits the bad version, so once npm removed
@@ -387,9 +392,9 @@ export function verdictText(r: Report): string {
 
   const example = pull.map((e) => replace(fixFor(e))[0]).find(Boolean);
   const steps = [
+    locked.length ? `For ${and(locked.map((e) => `${tk(e.repo)}${pathOf(r, e) ? ` [${pathOf(r, e)!.id}]` : ''}`))}: rotate secrets that builds and CI could read in the window, rebuild anything built in it, and regenerate the lockfile with the overrides from its Fix.` : '',
     pull.length ? `Keep installing the ${pull.length} WOULD_PULL ${pull.length === 1 ? 'repo' : 'repos'} from ${pull.length === 1 ? 'its committed lockfile' : 'their committed lockfiles'} (npm ci): none pins a malicious version.` : '',
     pull.length && example ? overrideStep(`the version-qualified overrides from that repo's Fix (for example, replace ${example})`) : '',
-    locked.length ? `For ${and(locked.map((e) => `${tk(e.repo)}${pathOf(r, e) ? ` [${pathOf(r, e)!.id}]` : ''}`))}: rotate secrets that builds and CI could read in the window, rebuild anything built in it, and regenerate the lockfile with the overrides from its Fix.` : '',
   ].filter(Boolean);
 
   return [
