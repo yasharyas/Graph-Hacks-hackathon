@@ -386,6 +386,7 @@ if (import.meta.main) {
   serve({ fetch: app.fetch, port }, () => console.log(`patient-zero on :${port}`));
   for (const s of SCENARIOS) timeline(s).catch((e) => console.error('timeline warm-up failed', e)); // first visitor gets it cached
   for (const s of SCENARIOS) stats(s).catch((e) => console.error('stats warm-up failed', e));
+  guests.dropOrphans(prefix()).catch((e) => console.error('guest cleanup failed', e));
   // Fill the path/fix memo for each scenario's default clock, so the first demo run after a cold start is fast too.
   (async () => {
     for (const s of SCENARIOS) for await (const _ of triage({ graph: org(s), scenario: s, at: DEFAULT_AT[s], signal: AbortSignal.abort() }));

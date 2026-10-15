@@ -79,6 +79,7 @@ test('a line with more verified names than LIST_MAX is a list (light treatment);
 test('each Ask answer says how it was produced, with the provider when there is one', () => {
   assert.equal(answerLabel({ mode: 'template', provider: null }), 'Answered from the graph');
   assert.equal(answerLabel({ mode: 'live', provider: null }), 'LLM answer: the model wrote the words');
+  assert.equal(answerLabel({ mode: 'template', provider: null, unanswered: true }), 'Not answered: no language model is available');
   assert.equal(answerLabel({ mode: 'live', provider: 'groq' }), 'LLM answer: the model wrote the words · groq');
 });
 

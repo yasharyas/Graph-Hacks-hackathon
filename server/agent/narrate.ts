@@ -44,6 +44,7 @@ export function evidenceSet(r: Report): Evidence {
     r.scope?.repos ?? Object.values(r.counts).reduce((a, b) => a + b, 0), ...reach(r).slice(0, 4).map(([, n]) => n),
     ...observations(r).flatMap((o) => o.numbers),
     new Set(exposed.map((e) => e.team).filter(Boolean)).size, ...openByTeam(r).map(([, es]) => es.length), // summary and team answers
+    ...r.concentration.flatMap((c) => [c.packages, c.reposReached]), // the concentration answer
     ...(['LOCKED', 'WOULD_PULL'] as const).flatMap((t) => { // the verdict's still-open counts (remediated ones left out)
       const open = exposed.filter((e) => e.tier === t && !e.remediated);
       return [open.length, open.filter((e) => !e.dev).length, open.filter((e) => e.dev).length];
@@ -188,7 +189,7 @@ export function parsePick(text: unknown, obs: Observation[]): Observation | null
 
 // ---------- the deterministic Verdict / Notify / Do ----------
 
-const tk = (s: string) => `\`${s.replace(/[\u0000-\u001f\u007f`]/g, '')}\``; // external text: no line breaks, no code-span escape
+const tk = (s: string) => `\`${s.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}`]/gu, '')}\``; // external text: no line breaks, bidi or code-span escape
 const hm = (t: number) => `${new Date(t).toISOString().slice(11, 16)} UTC`;
 const day = (t: number) => new Date(t).toISOString().slice(0, 10);
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
@@ -294,6 +295,14 @@ export function teamFacts(r: Report): string {
   const rows = openByTeam(r);
   if (!rows.length) return `No team has an open exposure at ${hm(r.at)}.`;
   return `Open exposures by team, most first: ${rows.map(([t, es]) => `${t ? tk(t) : 'no owner on record'} ${plural(es.length, 'repo')}${es.some((e) => e.tier === 'LOCKED') ? ' (one LOCKED: rotate secrets)' : ''}`).join('; ')}.`;
+}
+
+// "Who could be compromised next?": the maintainers whose packages weigh most in this graph (PageRank), and their reach.
+const ACCOUNT_NOTES: Record<string, string> = { types: 'the account that publishes DefinitelyTyped\'s @types packages' };
+export function concentrationFacts(r: Report): string {
+  if (!r.concentration.length) return 'No maintainer concentration was computed for this run.';
+  const total = r.scope?.repos ?? Object.values(r.counts).reduce((a, b) => a + b, 0);
+  return `The accounts whose compromise would reach the most here, by PageRank over package dependencies: ${r.concentration.map((c) => `${tk(c.maintainer)}${ACCOUNT_NOTES[c.maintainer] ? ` (${ACCOUNT_NOTES[c.maintainer]})` : ''}, ${plural(c.packages, 'package')}, reaching ${c.reposReached} of ${plural(total, 'repo')}`).join('; ')}. A hijack of any of them would spread the same way, so they are the ones to watch.`;
 }
 
 // When it started, when the record came, whether it is over (only what is known at the scenario clock, plus the OSV gap).

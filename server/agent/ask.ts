@@ -9,7 +9,7 @@ import { graph } from '../graph/client.ts';
 import { forPrompt } from '../security.ts';
 import { filterExposures, plural, TOOLS, utc } from '../tools/registry.ts';
 import { chat, type ChatReq, type ChatRes, type Msg } from './llm.ts';
-import { devFacts, evidenceBlock, evidenceSet, firstFacts, notifyFacts, repoFacts, rotateFacts, summaryFacts, teamFacts, whenFacts } from './narrate.ts';
+import { concentrationFacts, devFacts, evidenceBlock, evidenceSet, firstFacts, notifyFacts, repoFacts, rotateFacts, summaryFacts, teamFacts, whenFacts } from './narrate.ts';
 import { guardEvent } from './replay.ts';
 
 export type Run = { runId: string; session: string; graph: string; scenario: ScenarioId; at: number; report: Report };
@@ -123,6 +123,7 @@ const SUMMARY = /\b(how bad|summar\w*|status|overview|impact|ciso|my (lead|manag
 const DEV = /\bdev(-|\s)?(only|dependenc\w*|deps?)\b|\bdevDependencies\b/i;
 const FIRST = /\b(first|next hour|priorit\w*|next steps?|action plan)\b|\bwhat (should|do|must) (i|we) do\b/i;
 const TEAMS = /\b(which|what) team\b|\bmost (work|exposed|repos)\b|\bper team\b|\bby team\b/i;
+const NEXT = /\bnext (qix|one|target|compromise|account|maintainer)\b|\bconcentrat\w*|\briskiest\b|\bwhich maintainers?\b|\bpagerank\b|\bsingle points? of failure\b|\b(compromised|hijacked) next\b/i;
 export function graphAnswer(q: string, r: Report, repo?: string, list = false): string | null {
   const e = repo ? r.exposures.find((x) => x.repo === repo) : undefined;
   const first = !e && FIRST.test(q);
@@ -133,6 +134,7 @@ export function graphAnswer(q: string, r: Report, repo?: string, list = false): 
     !first && ROTATE.test(q) ? rotateFacts(r) : '',
     DEV.test(q) ? devFacts(r) : '',
     !e && TEAMS.test(q) ? teamFacts(r) : '',
+    !e && NEXT.test(q) ? concentrationFacts(r) : '',
     !e && !first && !list && NOTIFY.test(q) && !OUTSIDE.test(q) ? notifyFacts(r) : '', // a list already groups its repos by team
     WHEN.test(q) ? whenFacts(r) : '',
   ].filter(Boolean);
@@ -181,6 +183,7 @@ export async function* ask({ run, question, chatFn = pinned, signal }: { run: Ru
   let provider: string | undefined;
   let text = '';
   let mode: LlmMode = 'live';
+  let unanswered = false;
   if (list || facts) {
     // The graph answers: the proof is the tool calls (the repo's path and fix, or the filter), the words are the report's.
     if (repo && repo.tier !== 'MAINTAINER' && repo.versions.length) {
@@ -248,9 +251,10 @@ export async function* ask({ run, question, chatFn = pinned, signal }: { run: Ru
   }
   if (!text) {
     mode = 'template';
+    unanswered = !results.length;
     text = results.length
       ? `No language model answered, so here is what the graph returned: ${results.map((r) => r.summary).join('; ')}.`
-      : `No language model is available right now, so this question cannot be answered. Every panel of the triage at ${utc(run.at)} comes straight from graph queries.`;
+      : `No language model is available right now, and this question has no answer built from the graph. The graph answers these by itself: which repos are exposed (or prod-only, by team), is npm ci safe, how bad is it, what to do first, which team has the most work, who could be compromised next, and when it started. Every panel of the triage at ${utc(run.at)} comes straight from graph queries.`;
   }
   text = stripMarkdown(text);
   const last = results.findLast((r) => r.tool === 'filter_exposures');
@@ -268,7 +272,7 @@ export async function* ask({ run, question, chatFn = pinned, signal }: { run: Ru
     ev.numbers.add(r.rows.length);
     if (r.tool === 'filter_exposures') ev.numbers.add(new Set(r.rows.map((x) => x.team ?? '')).size);
   }
-  yield { type: 'narration', mode, provider: mode === 'live' ? (provider ?? null) : null, text, at: run.at };
+  yield { type: 'narration', mode, provider: mode === 'live' ? (provider ?? null) : null, text, at: run.at, ...(unanswered ? { unanswered: true } : {}) };
   yield guardEvent(text, ev);
   yield { type: 'done', ms: Math.round(performance.now() - t0) };
 }

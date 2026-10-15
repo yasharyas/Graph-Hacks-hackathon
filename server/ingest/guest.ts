@@ -124,6 +124,12 @@ async function sweep() {
 }
 setInterval(() => void sweep().catch(() => {}), 60_000).unref();
 
+/** At boot: guest graphs from an earlier process are in no LRU, so the cap and TTL would never reach them. */
+export async function dropOrphans(prefix = 'pz') {
+  const fdb = await db();
+  for (const g of await fdb.list()) if (g.startsWith(`${prefix}_guest_`) && !guests.has(g)) await drop(g);
+}
+
 // A live entry, moved to the LRU's fresh end.
 function touch(name: string): Entry | undefined {
   const e = guests.get(name);

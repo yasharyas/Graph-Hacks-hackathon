@@ -127,7 +127,8 @@ export function spokenAnswer(text: string, max = 280): string {
 }
 
 /** Above each Ask answer: how it was produced, so a person can tell a graph lookup from a model's words. */
-export function answerLabel(n: { mode: 'live' | 'replay' | 'template'; provider: string | null }): string {
+export function answerLabel(n: { mode: 'live' | 'replay' | 'template'; provider: string | null; unanswered?: boolean }): string {
+  if (n.unanswered) return 'Not answered: no language model is available';
   const by = n.provider ? ` · ${n.provider}` : '';
   return n.mode === 'template' ? `Answered from the graph${by}` : `${n.mode === 'replay' ? 'Recorded LLM answer' : 'LLM answer'}: the model wrote the words${by}`;
 }

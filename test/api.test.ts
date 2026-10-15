@@ -171,7 +171,7 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
     };
     try {
       // an open question (no list, repo, rotate, notify or timing intent) is the model's: tools it picks, capped at 6
-      const evs = await sse<TriageEvent>(await post('/api/ask', { runId, question: 'Which maintainer is the biggest risk next?' }, { cookie: t.sid! }));
+      const evs = await sse<TriageEvent>(await post('/api/ask', { runId, question: 'Explain how a pinned version differs from a declared range here.' }, { cookie: t.sid! }));
       assert.equal(calls.length, 4);
       assert.deepEqual(calls.map((c) => c.provider), [undefined, 'groq:fake', 'groq:fake', 'groq:fake']);
       const starts = evs.filter((e) => e.type === 'tool_start') as Extract<TriageEvent, { type: 'tool_start' }>[];
@@ -260,12 +260,20 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
       // which team: open exposures by team, most first, every count from the graph
       const teams = of(await askQ('which team has the most work?'), 'narration');
       assert.match(teams.text, /^Open exposures by team, most first: `[^`]+` \d+ repos/);
-      for (const q of ['how bad is this?', 'can I ignore the dev-only ones?', 'which team has the most work?']) assert.deepEqual(of(await askQ(q), 'guard').flagged, [], q);
+      // who could be next: the concentration the graph computed (PageRank), not a model's guess
+      const next = of(await askQ('which maintainer is the next qix and why?'), 'narration');
+      assert.match(next.text, /^The accounts whose compromise would reach the most here, by PageRank over package dependencies: `[^`]+`, \d+ packages?, reaching \d+ of 21 repos/);
+      for (const q of ['how bad is this?', 'can I ignore the dev-only ones?', 'which team has the most work?', 'which maintainer is the next qix and why?']) assert.deepEqual(of(await askQ(q), 'guard').flagged, [], q);
       assert.equal(asked, 0);
       // customers are not in the graph: the model answers (not the team roster)
       const cust = of(await askQ('do I need to notify customers?'), 'narration');
       assert.equal(asked, 1);
       assert.doesNotMatch(cust.text, /^Notify:/);
+      // no model at all and no graph answer: said plainly, and flagged so the UI does not call it "answered from the graph"
+      hooks.chat = async () => { throw new Error('every provider failed'); };
+      const none = of(await askQ('do I need to notify customers?'), 'narration');
+      assert.equal(none.unanswered, true);
+      assert.match(none.text, /^No language model is available right now, and this question has no answer built from the graph\./);
     } finally {
       delete hooks.chat;
     }

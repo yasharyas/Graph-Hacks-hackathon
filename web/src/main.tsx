@@ -17,7 +17,7 @@ class Boundary extends Component<{ children: ReactNode }, { failed: boolean }> {
         <div className="max-w-md space-y-3">
           <h1 className="font-display text-xl">This page hit an error</h1>
           <p className="text-fg-1">Nothing was sent or saved. Start again from a clean link.</p>
-          <a className="text-link underline underline-offset-2" href={location.pathname}>
+          <a className="text-link underline underline-offset-2" href="/">
             Open Patient Zero
           </a>
         </div>

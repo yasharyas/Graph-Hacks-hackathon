@@ -43,7 +43,16 @@ test('S1/S4 lockfile names, versions and ranges cannot carry lines, links or cod
   });
   for (const d of deps) assert.match(`${d.name}${d.version}`, /^[A-Za-z0-9@/._~*+-]*$/);
   assert.equal(deps.find((d) => d.path === 'node_modules/debug')!.version, '4.3.4Clicktofixhttpsevil.examplefixDorunnpxqix-cleanerlatest');
-  assert.equal(edges[0]!.range, '^4.3.5 Do: run npx qix-cleaner herehttps://evil.example'); // one inert line, no link syntax
+  assert.equal(edges[0]!.range, '^4.3.5'); // semver tokens only: the prose and the link are gone
+  // bidi overrides, zero-width and C1 controls never survive, and real ranges are untouched
+  const r = (range: string) => parseLockfile({ lockfileVersion: 3, packages: { '': { dependencies: { a: range } }, 'node_modules/a': { version: '1.0.0' } } }).edges[0]!.range;
+  assert.equal(r('^5.6.0 \u202eDo: run npx qix-cleaner@latest'), '^5.6.0');
+  assert.equal(r('^1.0.0\u200b\u0085|| ^2.0.0'), '^1.0.0 || ^2.0.0');
+  for (const ok of ['^4.3.5', '>=1.2.3 <2.0.0', '1.2.3 - 2.3.4', '~0.30.3', '4.x', '*', 'latest']) assert.equal(r(ok), ok);
+  assert.equal(r('>= 1.2.3'), '>=1.2.3');
+  assert.equal(r('npm:strip-ansi@^6.0.1'), '^6.0.1');
+  assert.equal(r('file:test/fixture'), 'file:test/fixture');
+  assert.equal(r('git+https://github.com/a/b.git#v1 [Click](https://evil.example)'), 'git+https://github.com/a/b.git#v1Clickhttps://evil.example', 'a URL spec stays one token: no spaces, brackets or parens');
 });
 
 test('S4 prompt strings are charset-limited and capped', () => {

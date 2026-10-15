@@ -1,6 +1,8 @@
 // npm package-lock.json (lockfileVersion 2/3) -> one Dep per `packages` key + the edges npm actually resolves.
 // Resolution mirrors Node's lookup: from the depending entry's folder try <dir>/node_modules/<name>, then walk
 // up one folder at a time until the root node_modules/<name>. `link: true` entries are followed to `resolved`.
+import semver from 'semver';
+
 type Deps = Record<string, string>;
 type Entry = {
   name?: string; version?: string; dev?: boolean; optional?: boolean; link?: boolean; resolved?: string; workspaces?: unknown;
@@ -30,10 +32,18 @@ const keyName = (k: string) => {
 export const LIMITS = { entries: 6000, segments: 40, depsPerEntry: 1000, edges: 50_000, range: 128 };
 
 // A pasted repo's lockfile is attacker text, and names, versions and ranges are quoted in verdicts, fix steps and exports
-// (S1/S4): names keep npm's name characters, versions semver's, ranges lose control characters and Markdown link/code syntax.
+// (S1/S4): names keep npm's name characters, versions semver's, and a range keeps only its semver tokens (loose semver
+// would accept "^5.6.0 <any prose>"), with no control, format or bidi characters.
 const safeName = (s: string) => s.replace(/[^A-Za-z0-9@/._~*-]/g, '').slice(0, 214);
 const safeVersion = (s: string) => s.replace(/[^0-9A-Za-z.+-]/g, '').slice(0, 64);
-const safeRange = (s: string) => s.replace(/[`[\]()]/g, '').replace(/[\s\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, LIMITS.range);
+const PROTOCOL = /^(file|link|workspace|portal|git(\+[a-z]+)?|https?|github|gitlab|bitbucket):/i; // not a semver range at all
+const safeRange = (s: string) => {
+  const spec = s.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, ' ').replace(/^\s*npm:@?[^@\s]+@/, '').trim();
+  if (PROTOCOL.test(spec)) return spec.replace(/[^A-Za-z0-9._~:/?#@!$&+,;=%*-]/g, '').slice(0, LIMITS.range); // a path or URL: one token
+  return spec.replace(/([<>=~^]+)\s+/g, '$1').split(/\s+/)
+    .filter((t) => t === '||' || t === '-' || t === 'latest' || semver.validRange(t, { loose: true }) !== null)
+    .join(' ').slice(0, LIMITS.range);
+};
 
 export function parseLockfile(lock: unknown): { deps: Dep[]; edges: Edge[]; unresolved: number } {
   const l = lock as { name?: string; lockfileVersion?: unknown; packages?: Record<string, unknown> } | null;

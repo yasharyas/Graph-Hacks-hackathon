@@ -110,7 +110,7 @@ export type TriageEvent =
   // words); `mode`/`provider` describe the pick.
   // `at`: the scenario clock the narration describes (the UI dims it when the scrubber moves away).
   // `draft`: the verdict is final, but an analyst pick may still follow in the next narration event (no guard yet).
-  | { type: 'narration'; mode: LlmMode; provider: string | null; text: string; note?: string | null; at?: number; draft?: boolean }
+  | { type: 'narration'; mode: LlmMode; provider: string | null; text: string; note?: string | null; at?: number; draft?: boolean; unanswered?: boolean } // unanswered: an Ask with no model and no graph answer
   // `claims`: every claim the server checked; the UI marks a span verified only if it appears here with ok=true.
   | { type: 'guard'; verified: number; total: number; flagged: string[]; claims?: { text: string; ok: boolean }[] }
   | { type: 'error'; message: string; requestId: string }
