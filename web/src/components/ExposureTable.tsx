@@ -8,7 +8,7 @@
  *   badVersions         malicious name@version ids (IncidentMeta.versions) so chips can underline them
  *   selectedRepo        drives the left bar and, through the parent, the graph; null = none
  *   remediated          repo -> epoch ms of a local or server remediation
- *   undoable            repos still inside the 10 s Undo window
+ *   undoable            repos marked in this session and not yet written (Undo still possible)
  *   fixable             repos the triage run drafted for (a table scrubbed to another clock can list repos it did not); omit = all
  *   onSelect(repo), onOpenFix(repo), onUndo(repo)
  *   onExport(format)    optional: downloads the whole report and returns the file name; no button without it
