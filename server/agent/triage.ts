@@ -100,7 +100,7 @@ export async function* triage({ graph: g, scenario, at, alert, session, signal }
       incident, at, counts, minutesAhead: T.minutesAhead(incident),
       scope: guest ? { kind: 'guest', label: rows[0]?.repo ?? 'pasted repo', repos: rows.length } : { kind: 'org', label: 'Acme demo org', repos: rows.length },
       scanner: T.rowsOf<ScannerHit>(scan.result), grepCount: scan.grepCount,
-      exposures, paths, owners, remediations, notices: guest ? [] : notices(incident, exposures, owners), concentration,
+      exposures, paths, owners, remediations, notices: guest ? [] : notices(incident, exposures, owners, remediations), concentration,
     };
     yield { type: 'report', report };
 
@@ -136,16 +136,19 @@ export async function* triage({ graph: g, scenario, at, alert, session, signal }
 }
 
 // One plain-text notice per owning team (synthetic team channels only).
-function notices(incident: IncidentMeta, exposures: Exposure[], owners: OwnerGroup[]): Notice[] {
+// One plain-text notice per owning team (synthetic team channels only): each repo with its tier in words, what it
+// reaches, and its own fix, so the message stands on its own in Slack.
+function notices(incident: IncidentMeta, exposures: Exposure[], owners: OwnerGroup[], remediations: Remediation[]): Notice[] {
+  const fix = (repo: string) => Object.entries(remediations.find((m) => m.repo === repo)?.overrides ?? {}).map(([k, v]) => `${k} -> ${v}`).join(', ');
+  const line = (e: Exposure) => {
+    const pins = fix(e.repo);
+    if (e.tier === 'LOCKED') return `- ${e.repo}: LOCKED, its lockfile pins ${e.versions.join(', ')}. Rotate build secrets, rebuild${pins ? `, and override ${pins}` : ''}.`;
+    if (e.tier === 'WOULD_PULL') return `- ${e.repo}${e.dev ? ' (dev-only)' : ''}: WOULD_PULL, a fresh resolve would fetch ${e.versions.slice(0, 3).join(', ')}${e.versions.length > 3 ? ` +${e.versions.length - 3} more` : ''}${e.ranges[0] ? ` via ${e.ranges[0]}` : ''}. Keep npm ci on the committed lockfile${pins ? `; only if you must re-resolve, override ${pins}` : ''}.`;
+    return `- ${e.repo}: depends on packages from the compromised account; no malicious version is live for it.`;
+  };
   return owners.map((o) => {
-    const of = (t: Tier) => exposures.filter((e) => e.tier === t && o.repos.includes(e.repo)).map((e) => e.repo);
-    const [lk, wp, mt] = [of('LOCKED'), of('WOULD_PULL'), of('MAINTAINER')];
-    const parts = [
-      lk.length ? `${lk.join(', ')} ${lk.length === 1 ? 'locks' : 'lock'} a malicious version: rotate build secrets and rebuild` : '',
-      wp.length ? `${wp.join(', ')} would pull a malicious version only on a fresh resolve: keep npm ci on the committed lockfile, and add the version-qualified overrides only if you must re-resolve` : '',
-      mt.length ? `${mt.join(', ')} ${mt.length === 1 ? 'depends' : 'depend'} on packages from the compromised account` : '',
-    ].filter(Boolean);
-    return { team: o.team, channel: o.channel, text: `${o.team}: npm incident ${incident.id}. ${parts.join('. ')}. Paths and fix PRs are in Patient Zero.` };
+    const mine = exposures.filter((e) => e.tier !== 'CLEAN' && o.repos.includes(e.repo));
+    return { team: o.team, channel: o.channel, text: `${o.team}: npm incident ${incident.id}.\n${mine.map(line).join('\n')}\nPaths and fix PRs are in Patient Zero.` };
   });
 }
 

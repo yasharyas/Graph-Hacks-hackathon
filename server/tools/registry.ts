@@ -224,6 +224,7 @@ export async function draftRemediation(g: Graph, p: { repo: unknown; versions: u
   // Override keys are version-qualified ("debug@4.4.2": "4.4.1"): npm then replaces only the malicious version, so a
   // dependent on another major (log-symbols on chalk ^4) is never forced onto an incompatible one.
   const overrides: Record<string, string> = {};
+  const direct: Record<string, string> = {};
   const notes: string[] = [];
   for (const bad of params.versions) {
     const name = nameOf(bad);
@@ -233,6 +234,7 @@ export async function draftRemediation(g: Graph, p: { repo: unknown; versions: u
     if (!pin) notes.push(`${name} had no clean release at ${utc(params.at)}: remove it, or pin the package that pulls it in`);
     else {
       overrides[bad] = pin;
+      if (mine.some((r) => r.direct)) direct[name] = pin;
       if (mine.some((r) => r.direct)) notes.push(`If you add the ${name} override, set the root dependency on ${name} to ${pin} too: npm rejects an override that conflicts with a direct dependency`);
     }
   }
@@ -260,8 +262,9 @@ export async function draftRemediation(g: Graph, p: { repo: unknown; versions: u
       ...notes,
     ]).filter(Boolean);
   const prBody = `${isLocked ? 'The lockfile resolves' : 'Declared ranges admit'} ${params.versions.join(', ')}. `
-    + (pairs ? `This adds version-qualified overrides (${pairs}) that replace only the malicious versions.` : 'No clean version to pin yet.');
-  const row: Remediation = { repo: params.repo, overrides, steps: uniq(steps), prBody };
+    + (pairs ? `This adds version-qualified overrides (${pairs}) that replace only the malicious versions.` : 'No clean version to pin yet.')
+    + (Object.keys(direct).length ? ` It also sets the direct ${Object.entries(direct).map(([n, v]) => `${n} to ${v}`).join(', ')}, which npm requires next to an override of a direct dependency.` : '');
+  const row: Remediation = { repo: params.repo, overrides, ...(Object.keys(direct).length && { direct }), steps: uniq(steps), prBody };
   const summary = `${params.repo}: lockfile pins ${isLocked ? `${badLocked.join(', ')} (malicious)` : safeLocked.length ? `${safeLocked.join(', ')} (safe)` : 'no malicious version'}; `
     + `${pins.length ? `override to ${pins.join(', ')}` : 'nothing safe to pin'}${missing.length ? `; no clean ${missing.join(', ')}` : ''}${isLocked ? '; rotate secrets and rebuild' : ''}`;
   return toMemo(key, c.result('draft_remediation', params, summary, [row], [params.repo, ...pins, ...Object.keys(overrides), ...badLocked, ...safeLocked]));

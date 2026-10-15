@@ -51,7 +51,7 @@ Why one `Dep` node per lockfile location instead of shared `Version -> Version` 
 ## The agent
 
 - **Triage** (default): a deterministic, graph-driven playbook (suspect versions -> exposure -> blast radius -> paths -> owners -> remediation -> concentration -> scanner view). The verdict, notify list and fix steps are built straight from those results, so they are complete with no LLM at all. **One** LLM call then picks the observation most worth acting on from a few the server builds from the graph (the carrier dependency, the prod share, the advisory gap and so on). It answers with an id, so it chooses but never writes. A guard checks every claim (repos, `name@version`, counts, `[E#]` citations) against the tool results. Free tiers: Groq `qwen/qwen3.8-27b` -> Groq `gpt-oss-120b` -> Gemini `3.5-flash-lite` -> recorded pick -> none.
-- **Ask**: a bounded tool loop (4 LLM calls, 6 tool calls) where the model picks graph tools itself. For list questions ("which exposures are prod-only?") the server runs `filter_exposures` first and replaces any answer that silently drops matches.
+- **Ask**: questions the graph can answer itself get a server-built answer and server-chosen tool calls. These are lists and filters ("which exposures are prod-only?"), a named repo ("what should acme/checkout-web do?"), "which repos need secrets rotated, is npm ci safe?", who to notify, and when it started. Anything else goes to a bounded tool loop (4 LLM calls, 6 tool calls) where the model picks graph tools itself, and the guard checks every name in its answer.
 - **MCP**: the same read-only tools over stdio for Claude Code / Claude Desktop (`docs/mcp.md`).
 
 ## Every Cypher query

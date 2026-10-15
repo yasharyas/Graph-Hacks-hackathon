@@ -17,7 +17,7 @@ export function evidenceSet(r: Report): Evidence {
   const entities = new Set<string>();
   const teams = new Set<string>();
   const add = (...xs: (string | null | undefined)[]) => xs.forEach((x) => x && entities.add(x));
-  add(r.incident.id, r.incident.maintainer);
+  add(r.incident.id, r.incident.maintainer, r.scope?.kind === 'guest' ? r.scope.label : undefined);
   const bad = new Set([...r.incident.versions.map((v) => v.id), ...r.exposures.flatMap((e) => e.versions), ...r.paths.map((p) => p.version)]);
   for (const nv of bad) add(nv, ...split(nv));
   for (const e of r.exposures) {
@@ -185,6 +185,7 @@ export function parsePick(text: unknown, obs: Observation[]): Observation | null
 
 const tk = (s: string) => `\`${s}\``;
 const hm = (t: number) => `${new Date(t).toISOString().slice(11, 16)} UTC`;
+const day = (t: number) => new Date(t).toISOString().slice(0, 10);
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
 const and = (xs: string[]) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
 const SHOWN = 3; // path lines in an org verdict; the rest are counted, never dropped silently
@@ -204,6 +205,62 @@ function why(r: Report, e: Exposure): string {
   return `${declares} ${tk(p.range ?? '')}, which admits ${tk(p.version)}${tail}`;
 }
 
+// Notify: every exposed repo, grouped by owning team (most severe team first); MAINTAINER repos are not exposures.
+function notifyList(r: Report, exposed: Exposure[]): string {
+  const label = (e: Exposure) => `${tk(e.repo)}${e.tier === 'LOCKED' ? ' (LOCKED)' : e.dev ? ' (dev)' : ''}${e.remediated ? ' (remediated)' : ''}`;
+  const groups = new Map<string, Exposure[]>();
+  for (const e of exposed) groups.set(e.team ?? '', [...(groups.get(e.team ?? '') ?? []), e]);
+  const channel = (t: string) => r.owners.find((o) => o.team === t)?.channel;
+  return [...groups].map(([t, es]) => (t ? `${tk(t)}${channel(t) ? ` (${tk(channel(t)!)})` : ''}: ` : 'no owner on record: ') + es.map(label).join(', ')).join('; ');
+}
+
+// ---------- answers the graph gives itself (Ask) ----------
+// Safety-critical follow-ups are answered from the report, never in a model's words: free-text answers said "npm ci is
+// not safe" and dropped rotate-secrets for a LOCKED repo while every name in them checked out.
+
+// One repo: tier in plain words, its path, owner, and its own fix steps in order.
+export function repoFacts(r: Report, e: Exposure): string {
+  const ch = e.team ? r.owners.find((o) => o.team === e.team)?.channel : undefined;
+  const owner = e.team ? ` (owned by ${tk(e.team)}${ch ? `, ${tk(ch)}` : ''})` : '';
+  const head = e.tier === 'LOCKED'
+    ? `${tk(e.repo)}${owner} is LOCKED: ${why(r, e)}. Every install from that lockfile in the window installed the malicious version, so rotate secrets.`
+    : e.tier === 'WOULD_PULL'
+      ? `${tk(e.repo)}${owner} is WOULD_PULL${e.dev ? ', dev-only' : ''}: ${why(r, e)}. Installing from its committed lockfile (npm ci) is safe; only a fresh resolve would fetch it.`
+      : e.tier === 'MAINTAINER'
+        ? `${tk(e.repo)}${owner} depends on packages from the compromised account (${and(e.packages.slice(0, 3).map(tk))}), with no malicious version live for it.`
+        : `${tk(e.repo)} is not exposed.`;
+  const steps = r.remediations.find((m) => m.repo === e.repo)?.steps ?? [];
+  return head + (e.remediated ? ' It is marked remediated.' : '') + (steps.length && e.tier !== 'MAINTAINER' ? ` Do: ${steps.map((s, i) => `${i + 1}) ${s}`).join('. ')}.` : '');
+}
+
+// "Which repos need secrets rotated, and is npm ci safe for the rest?"
+export function rotateFacts(r: Report): string {
+  const exposed = r.exposures.filter(exposedTier);
+  const locked = exposed.filter((e) => e.tier === 'LOCKED');
+  const pull = exposed.filter((e) => e.tier === 'WOULD_PULL');
+  const one = locked.length === 1;
+  return (locked.length
+    ? `Rotate secrets for the ${plural(locked.length, 'LOCKED repo')}: ${and(locked.map((e) => tk(e.repo)))}. ${one ? 'Its lockfile pins' : 'Their lockfiles pin'} a malicious version, so every install from ${one ? 'it' : 'them'} in the window ran it.`
+    : 'No repo is LOCKED: no committed lockfile pins a malicious version, so installs from lockfiles need no secret rotation.')
+    + (pull.length ? ` For the ${locked.length ? 'other ' : ''}${plural(pull.length, 'WOULD_PULL repo')}, installing from the committed lockfile (npm ci) is safe: none pins a malicious version. Only a fresh resolve in the window (npm install without the lockfile, a regenerated lockfile, Dependabot, npx) would have fetched one; anywhere that happened, treat it like LOCKED.` : '');
+}
+
+// Who to tell, grouped by team.
+export const notifyFacts = (r: Report) => {
+  const exposed = bySeverity(r).filter(exposedTier);
+  return exposed.length ? `Notify: ${notifyList(r, exposed)}.` : `No repo is exposed at ${hm(r.at)}, so there is no one to notify.`;
+};
+
+// When it started, when the record came, whether it is over (only what is known at the scenario clock, plus the OSV gap).
+export function whenFacts(r: Report): string {
+  const first = r.incident.firstExposureAt;
+  const v = r.incident.versions.find((x) => x.publishedAt === first);
+  const start = first == null ? 'No repo here was exposed.' : `Exposure began at ${hm(first)}${v ? `, when ${tk(v.id)} was published` : ''}.`;
+  const gap = first != null && r.minutesAhead > 0 ? ` The first OSV record came at ${hm(r.incident.advisoryAt)}, ${r.minutesAhead} minutes later.` : '';
+  const end = r.at >= r.incident.removedAt ? ` The malicious versions were removed around ${hm(r.incident.removedAt)} (approximate).` : ` At ${hm(r.at)} they were still live.`;
+  return start + gap + end;
+}
+
 // "replace `debug@4.4.2` with `debug@4.4.1`", from a version-qualified override.
 const replace = (overrides: Record<string, string>) => Object.entries(overrides).map(([k, v]) => `${tk(k)} with ${tk(`${split(k)[0]}@${v}`)}`);
 
@@ -217,7 +274,7 @@ export function verdictText(r: Report): string {
   const who = r.incident.maintainer ? `the ${tk(r.incident.maintainer)} account compromise` : `incident ${tk(r.incident.id)}`;
   const first = r.incident.firstExposureAt ?? null;
   const closed = r.at >= r.incident.removedAt; // as known at the scenario clock: the removal is in the past
-  const window = first === null ? 'in the window' : closed ? `between ${hm(first)} and ${hm(r.incident.removedAt)}` : `since ${hm(first)} (still open at ${hm(r.at)})`;
+  const window = first === null ? 'in the window' : closed ? `between ${hm(first)} and ${hm(r.incident.removedAt)} on ${day(first)}` : `since ${hm(first)} on ${day(first)} (still open at ${hm(r.at)})`;
   const ahead = r.minutesAhead > 0 && first !== null && r.at >= first ? ` The graph showed this ${r.minutesAhead} minutes before the first OSV record.` : '';
   const total = r.scope?.repos ?? Object.values(r.counts).reduce((a, b) => a + b, 0);
   const fixFor = (e: Exposure) => r.remediations.find((m) => m.repo === e.repo)?.overrides ?? {};
@@ -255,7 +312,7 @@ export function verdictText(r: Report): string {
   }
   const prod = pull.filter((e) => !e.dev).length;
   const verdict = [
-    `Verdict: ${exposed.length} of ${plural(total, 'repo')} ${exposed.length === 1 ? 'is' : 'are'} exposed to ${who} at ${hm(r.at)}.${ahead}`,
+    `Verdict: ${exposed.length} of ${plural(total, 'repo')} ${exposed.length === 1 ? 'is' : 'are'} exposed to ${who} at ${hm(r.at)} on ${day(r.at)}.${ahead}`,
     locked.length ? ` LOCKED (${locked.length}: ${and(locked.map((e) => tk(e.repo)))}): the lockfile itself pins the malicious version, so rotate secrets and rebuild.` : '',
     pull.length ? ` WOULD_PULL (${pull.length}: ${prod} prod, ${pull.length - prod} dev-only): exposed only on a fresh install ${window}; installing from the committed lockfile was safe.` : '',
     fixed.length ? ` Marked remediated: ${and(fixed.map((e) => tk(e.repo)))}.` : '',
@@ -264,13 +321,6 @@ export function verdictText(r: Report): string {
 
   const lines = open.slice(0, SHOWN).map((e) => why(r, e));
   const whyLine = lines.length ? `Why: ${lines.join('; ')}${open.length > SHOWN ? ` (paths for ${SHOWN} of ${open.length}; +${open.length - SHOWN} more in the table)` : ''}.` : '';
-
-  // Notify: every exposed repo, grouped by owning team (most severe team first); MAINTAINER repos are not exposures.
-  const label = (e: Exposure) => `${tk(e.repo)}${e.tier === 'LOCKED' ? ' (LOCKED)' : e.dev ? ' (dev)' : ''}${e.remediated ? ' (remediated)' : ''}`;
-  const groups = new Map<string, Exposure[]>();
-  for (const e of exposed) groups.set(e.team ?? '', [...(groups.get(e.team ?? '') ?? []), e]);
-  const channel = (t: string) => r.owners.find((o) => o.team === t)?.channel;
-  const notify = [...groups].map(([t, es]) => (t ? `${tk(t)}${channel(t) ? ` (${tk(channel(t)!)})` : ''}: ` : 'no owner on record: ') + es.map(label).join(', '));
 
   const example = pull.map((e) => replace(fixFor(e))[0]).find(Boolean);
   const steps = [
@@ -282,7 +332,7 @@ export function verdictText(r: Report): string {
   return [
     verdict,
     whyLine,
-    `Notify: ${notify.join('; ')}.`,
+    `Notify: ${notifyList(r, exposed)}.`,
     `Do: ${steps.length ? steps.map((s, i) => `${i + 1}) ${s}`).join(' ') : 'nothing open: every exposed repo is marked remediated.'}`,
   ].filter(Boolean).join('\n');
 }

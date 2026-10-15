@@ -71,7 +71,8 @@ export interface ExposurePath {
 }
 
 export interface OwnerGroup { team: string; channel: string; repos: string[] }
-export interface Remediation { repo: string; overrides: Record<string, string>; steps: string[]; prBody: string }
+// direct: root dependencies to set to the same safe version (npm rejects an override that conflicts with a direct dependency)
+export interface Remediation { repo: string; overrides: Record<string, string>; direct?: Record<string, string>; steps: string[]; prBody: string }
 export interface Notice { team: string; channel: string; text: string }
 export interface Concentration { maintainer: string; influence: number; packages: number; reposReached: number }
 export interface ScannerHit { repo: string; version: string; advisory: string }

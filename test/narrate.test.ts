@@ -33,9 +33,9 @@ test('org verdict: complete, plain-language, cited, guard-clean, no markdown', (
   clean(r, t);
   assert.ok(guard(t, evidenceSet(r)).total > 15);
   const [verdict, why, notify, todo] = t.split('\n');
-  assert.match(verdict, /^Verdict: 5 of 17 repos are exposed to the `qix` account compromise at 13:30 UTC\. The graph showed this 74 minutes before the first OSV record\./);
+  assert.match(verdict, /^Verdict: 5 of 17 repos are exposed to the `qix` account compromise at 13:30 UTC on 2025-09-08\. The graph showed this 74 minutes before the first OSV record\./);
   assert.match(verdict, /LOCKED \(1: `acme\/checkout-web`\): the lockfile itself pins the malicious version, so rotate secrets and rebuild\./);
-  assert.match(verdict, /WOULD_PULL \(4: 4 prod, 0 dev-only\): exposed only on a fresh install since 13:12 UTC \(still open at 13:30 UTC\); installing from the committed lockfile was safe\./);
+  assert.match(verdict, /WOULD_PULL \(4: 4 prod, 0 dev-only\): exposed only on a fresh install since 13:12 UTC on 2025-09-08 \(still open at 13:30 UTC\); installing from the committed lockfile was safe\./);
   assert.match(verdict, /1 more repo depends on packages from the compromised account/); // MAINTAINER is counted, never listed as exposed
   assert.match(why, /^Why: `acme\/checkout-web` locks `debug@4\.4\.2` through `express@5\.1\.0` \[E1\], and also `chalk@5\.6\.1`; /);
   assert.match(why, /`mochajs\/mocha` declares `\^4\.3\.5`, which admits `debug@4\.4\.2` \[E2\]/);
@@ -60,7 +60,7 @@ test('a range declared by a dependency says so; dev-only repos are marked; the w
   assert.match(t, /`mochajs\/mocha`: its dependency `log-symbols@4\.1\.0` declares `\^4\.3\.4`, which admits `debug@4\.4\.2` \[E2\]/);
   assert.match(t, /`remy\/nodemon` \(dev\)/);
   assert.match(t, /WOULD_PULL \(4: 3 prod, 1 dev-only\)/);
-  assert.match(t, /exposed only on a fresh install between 13:12 UTC and 15:15 UTC/);
+  assert.match(t, /exposed only on a fresh install between 13:12 UTC and 15:15 UTC on 2025-09-08/);
   assert.match(t, /The malicious versions are gone from npm/);
 });
 
@@ -100,7 +100,7 @@ test('a pasted repo gets one plain answer: what its lockfile pins, no Notify, co
   r.notices = [];
   let t = verdictText(r);
   clean(r, t);
-  assert.match(t, /^Verdict: `mochajs\/mocha` is exposed only on a fresh install since 13:12 UTC \(still open at 13:30 UTC\); installing from your committed lockfile was safe: it pins `debug@4\.3\.7`\./);
+  assert.match(t, /^Verdict: `mochajs\/mocha` is exposed only on a fresh install since 13:12 UTC on 2025-09-08 \(still open at 13:30 UTC\); installing from your committed lockfile was safe: it pins `debug@4\.3\.7`\./);
   assert.match(t, /Do: 1\) Keep installing from your committed lockfile \(npm ci\); it pins `debug@4\.3\.7` \(safe\)\. 2\) Only if you must re-resolve before the malicious versions are removed, add overrides that replace `debug@4\.4\.2` with `debug@4\.4\.1`/);
   assert.doesNotMatch(t, /Notify|#your-team|Your team/);
 

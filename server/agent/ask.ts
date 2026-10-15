@@ -1,14 +1,15 @@
 // Ask: follow-up questions about one triage run. A bounded LLM tool loop (at most 4 LLM calls) over the registry's
 // read-only tools on the run's own graph; the final text goes through the guard against the run's evidence plus
 // whatever the tools returned. Run context lives in memory (30 min TTL, 200 runs), scoped to the session (S10).
-// List questions are grounded deterministically: filter_exposures runs up front, and an answer that names fewer
-// matches than it returned (without saying "N of M") is replaced by the complete list.
+// Questions the report answers (a list or filter, a named repo, rotate secrets / is npm ci safe, who to notify, when)
+// get the graph's own answer and server-chosen tool calls, no model: free-text answers to exactly these were wrong while
+// every name in them checked out. Everything else goes to the model's tool loop.
 import type { LlmMode, Report, ScenarioId, ToolName, ToolResult, TriageEvent } from '../../shared/events.ts';
 import { graph } from '../graph/client.ts';
 import { forPrompt } from '../security.ts';
 import { filterExposures, plural, TOOLS, utc } from '../tools/registry.ts';
 import { chat, type ChatReq, type ChatRes, type Msg } from './llm.ts';
-import { evidenceBlock, evidenceSet } from './narrate.ts';
+import { evidenceBlock, evidenceSet, notifyFacts, repoFacts, rotateFacts, whenFacts } from './narrate.ts';
 import { guardEvent } from './replay.ts';
 
 export type Run = { runId: string; session: string; graph: string; scenario: ScenarioId; at: number; report: Report };
@@ -111,6 +112,21 @@ export function enforceCoverage(text: string, res: ToolResult): { text: string; 
   return named ? { text: completeList(res), replaced: true } : { text: `${text}\n${completeList(res)}`, replaced: false };
 }
 
+// ponytail: keyword intents, not language understanding; whatever they miss, the model answers (names still checked).
+const ROTATE = /\b(rotat\w*|secrets?|credentials?|tokens?|npm ci|safe(ly)?)\b/i;
+const NOTIFY = /\b(notify|owners?|owns?|teams?|channels?|ping|tell|contact)\b|\bwho (should|do|to|must|needs?)\b/i;
+const WHEN = /\b(when|window|how long|timeline|ahead|advisory|osv|removed|still live)\b/i;
+export function graphAnswer(q: string, r: Report, repo?: string): string | null {
+  const e = repo ? r.exposures.find((x) => x.repo === repo) : undefined;
+  const parts = [
+    e ? repoFacts(r, e) : '',
+    ROTATE.test(q) ? rotateFacts(r) : '',
+    !e && NOTIFY.test(q) ? notifyFacts(r) : '',
+    WHEN.test(q) ? whenFacts(r) : '',
+  ].filter(Boolean);
+  return parts.length ? parts.join('\n') : null;
+}
+
 const stripMarkdown = (s: string) => s.replace(/\*\*|__/g, '').replace(/^#{1,6}\s+/gm, '').replace(/^([ \t]*)\*[ \t]+/gm, '$1- '); // [ \t], not \s: \s spans newlines and backtracks quadratically
 
 export async function* ask({ run, question, chatFn = pinned, signal }: { run: Run; question: string; chatFn?: ChatFn; signal?: AbortSignal }): AsyncGenerator<TriageEvent> {
@@ -125,26 +141,53 @@ export async function* ask({ run, question, chatFn = pinned, signal }: { run: Ru
     rows: r.rows.map((x) => ({ ...x, path: run.report.paths.find((p) => p.repo === x.repo)?.id ?? null, remediated: !!run.report.exposures.find((e) => e.repo === x.repo)?.remediated })),
   };
 
-  // A list or filter question gets the complete filter_exposures result before the model says anything.
-  let attached = '';
-  const pre = questionFilter(question, run.report);
-  if (pre) {
-    const params = { incident: run.scenario, at: run.at, ...pre };
+  async function* step(tool: ToolName, params: Record<string, unknown>): AsyncGenerator<TriageEvent, ToolResult> {
     const id = `t${++ids}`;
-    yield { type: 'tool_start', id, tool: 'filter_exposures', params };
-    const result = decorate(await filterExposures(g, params));
+    yield { type: 'tool_start', id, tool, params };
+    let result: ToolResult;
+    try {
+      result = decorate(await TOOLS[tool].run(g, { ...params, session: run.session }));
+    } catch {
+      result = { tool, summary: 'the query did not run (check the arguments): no rows', rows: [], evidence: [], cypher: [], params, ms: 0 };
+    }
     results.push(result);
     yield { type: 'tool_result', id, result };
-    attached = `\n${compact(result, 'FILTER RESULT')}`;
+    return result;
   }
 
+  const pre = questionFilter(question, run.report);
+  const list = pre !== undefined && (!Object.keys(pre).length || Object.keys(pre).some((k) => k !== 'repo')); // a filter or "list all", not just a repo name
+  const repo = typeof pre?.repo === 'string' ? run.report.exposures.find((e) => e.repo === pre.repo) : undefined;
+  const facts = graphAnswer(question, run.report, repo?.repo);
+  let attached = '';
+  let filtered: ToolResult | undefined;
+  if (pre && (list || !facts)) {
+    filtered = yield* step('filter_exposures', { incident: run.scenario, at: run.at, ...pre });
+    attached = `\n${compact(filtered, 'FILTER RESULT')}`;
+  }
+
+  let provider: string | undefined;
+  let text = '';
+  let mode: LlmMode = 'live';
+  if (list || facts) {
+    // The graph answers: the proof is the tool calls (the repo's path and fix, or the filter), the words are the report's.
+    if (repo && repo.tier !== 'MAINTAINER' && repo.versions.length) {
+      yield* step('explain_path', { repo: repo.repo, version: repo.versions[0], at: run.at });
+      yield* step('draft_remediation', { repo: repo.repo, versions: repo.versions, at: run.at });
+    }
+    mode = 'template';
+    text = [list && filtered ? completeList(filtered) : '', facts ?? ''].filter(Boolean).join('\n');
+  } else {
+    text = yield* modelAnswer();
+  }
+
+  async function* modelAnswer(): AsyncGenerator<TriageEvent, string> {
   const messages: Msg[] = [
     { role: 'system', content: system(run) },
     { role: 'user', content: `${evidenceBlock(run.report)}${attached}\nQUESTION: ${question}` },
   ];
-  let provider: string | undefined;
   let text = '';
-  let n = pre ? 1 : 0; // the server's own filter counts toward the S7 budget
+  let n = filtered ? 1 : 0; // the server's own filter counts toward the S7 budget
   try {
     for (let round = 1; round <= ROUNDS; round++) {
       if (round === ROUNDS && n) messages.push({ role: 'user', content: 'Answer now from the evidence and tool results above. No more tool calls.' });
@@ -183,25 +226,14 @@ export async function* ask({ run, question, chatFn = pinned, signal }: { run: Ru
           .map((k) => [k, (k === 'repo' && e ? e.repo : call.args[k]) ?? defaults[k]]).filter(([, v]) => v !== undefined));
         if (e && def.name === 'explain_path' && !e.versions.includes(String(params.version))) params.version = e.versions[0];
         if (e && def.name === 'draft_remediation' && e.versions.length) params.versions = e.versions;
-        const id = `t${++ids}`;
-        yield { type: 'tool_start', id, tool: def.name, params };
-        let result: ToolResult;
-        try {
-          result = decorate(await def.run(g, { ...params, session: run.session }));
-        } catch {
-          result = { tool: def.name, summary: 'the query did not run (check the arguments): no rows', rows: [], evidence: [], cypher: [], params, ms: 0 };
-        }
-        results.push(result);
-        yield { type: 'tool_result', id, result };
+        const result = yield* step(def.name, params);
         messages.push({ role: 'tool', tool_call_id: call.id, content: compact(result) });
       }
     }
   } catch {
-    if (signal?.aborted) return; // the client left
+    if (signal?.aborted) return ''; // the client left
     text = ''; // every provider failed: fall through to the graph-only answer
   }
-
-  let mode: LlmMode = 'live';
   if (!text) {
     mode = 'template';
     text = results.length
@@ -215,6 +247,9 @@ export async function* ask({ run, question, chatFn = pinned, signal }: { run: Ru
     text = c.text;
     if (c.replaced) mode = 'template';
   }
+  return text;
+  }
+  if (!text) return; // the client left mid-answer
   const ev = evidenceSet(run.report);
   for (const r of results) {
     r.evidence.forEach((e) => ev.entities.add(e));

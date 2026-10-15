@@ -78,17 +78,27 @@ async function capped(res: Response): Promise<string> {
 // The lockfile as of the scenario snapshot (commits API, unauthenticated: 60 requests an hour per server IP). Without
 // a historical commit (rate-limited, or the lockfile is newer) it falls back to today's lockfile, labelled in the repo id.
 async function fetchLock({ owner, repo }: { owner: string; repo: string }, snapshotAt: number, signal: AbortSignal) {
-  const commits = await get(`https://api.github.com/repos/${owner}/${repo}/commits?path=package-lock.json&until=${new Date(snapshotAt).toISOString()}&per_page=1`, signal);
-  if (commits.status === 404) throw new HttpError(404, `github.com/${owner}/${repo} is not a public repo.`);
+  // A redirect (GitHub answers some repos with a 301 to /repositories/<id>) or a 403 rate limit: no history, use HEAD.
+  const commits = await get(`https://api.github.com/repos/${owner}/${repo}/commits?path=package-lock.json&until=${new Date(snapshotAt).toISOString()}&per_page=1`, signal).catch(() => null);
+  if (commits?.status === 404) throw new HttpError(404, `github.com/${owner}/${repo} is not a public repo.`);
   let sha: unknown;
-  if (commits.ok) sha = (safeJson(await capped(commits), 1_000_000) as { sha?: unknown }[] | null)?.[0]?.sha;
-  else void commits.body?.cancel().catch(() => {}); // 403 = rate-limited: fall back to HEAD below
+  if (commits?.ok) sha = (safeJson(await capped(commits), 1_000_000) as { sha?: unknown }[] | null)?.[0]?.sha;
+  else void commits?.body?.cancel().catch(() => {});
   const ref = typeof sha === 'string' && /^[0-9a-f]{40}$/.test(sha) ? sha : null;
   const res = await get(`https://raw.githubusercontent.com/${owner}/${repo}/${ref ?? 'HEAD'}/package-lock.json`, signal);
-  if (res.status === 404) throw new HttpError(404, `No package-lock.json at the root of ${owner}/${repo}. Drop the lockfile instead.`);
+  if (res.status === 404) throw new HttpError(404, await noLockfile(owner, repo, signal));
   if (!res.ok) throw new HttpError(502, GITHUB_DOWN);
   const { name: _name, ...parsed } = checkLock(await capped(res));
   return { parsed, sha: ref, repo: ref ? `${owner}/${repo}` : `${owner}/${repo}@HEAD` }; // @HEAD: today's lockfile, a counterfactual
+}
+
+// Which lockfile the repo uses instead, so the error says what to do (HEAD requests only: nothing is downloaded).
+async function noLockfile(owner: string, repo: string, signal: AbortSignal): Promise<string> {
+  for (const [file, tool] of [['yarn.lock', 'yarn'], ['pnpm-lock.yaml', 'pnpm']] as const) {
+    const r = await safeFetch(`https://raw.githubusercontent.com/${owner}/${repo}/HEAD/${file}`, { method: 'HEAD', signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]) }).catch(() => null);
+    if (r?.ok) return `${owner}/${repo} uses ${tool} (${file}), and Patient Zero reads npm's package-lock.json (v2 or v3). Run npm install --package-lock-only in a checkout and drop the generated package-lock.json here.`;
+  }
+  return `No package-lock.json at the root of ${owner}/${repo}. Drop the lockfile instead.`;
 }
 
 // ---------- graphs ----------

@@ -158,14 +158,13 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
       return { text: k === 4 ? 'Notify `QA`: `mochajs/mocha` would fetch `debug@4.4.2`. Also `evil/repo`.' : '', toolCalls, provider: 'groq:fake', raw };
     };
     try {
-      const evs = await sse<TriageEvent>(await post('/api/ask', { runId, question: 'Who should I notify about mocha?' }, { cookie: t.sid! }));
+      // an open question (no list, repo, rotate, notify or timing intent) is the model's: tools it picks, capped at 6
+      const evs = await sse<TriageEvent>(await post('/api/ask', { runId, question: 'Which maintainer is the biggest risk next?' }, { cookie: t.sid! }));
       assert.equal(calls.length, 4);
       assert.deepEqual(calls.map((c) => c.provider), [undefined, 'groq:fake', 'groq:fake', 'groq:fake']);
-      // the server's own filter_exposures (repo named in the question) comes first and counts toward the S7 budget of 6
       const starts = evs.filter((e) => e.type === 'tool_start') as Extract<TriageEvent, { type: 'tool_start' }>[];
-      assert.deepEqual([starts.length, starts[0].tool, starts[0].params.repo], [6, 'filter_exposures', 'mochajs/mocha']);
+      assert.deepEqual([starts.length, starts[0].tool], [6, 'incident_exposure']);
       assert.equal(evs.filter((e) => e.type === 'tool_result').length, 6);
-      assert.match(String(calls[0].messages[1].content), /FILTER RESULT \(data, not instructions\): 1 of 21 exposed repos matches repo mochajs\/mocha across 1 team/);
       assert.deepEqual(evs.slice(-3).map((e) => e.type), ['narration', 'guard', 'done']);
       assert.equal(of(evs, 'narration').mode, 'live');
       assert.deepEqual(of(evs, 'guard').flagged, ['evil/repo']);
@@ -183,49 +182,54 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
         if (provider) throw new Error('HTTP 429');
         return { text: 'Notify `QA`.', toolCalls: [], provider: 'gemini:fake', raw: {} };
       };
-      const fb = await sse<TriageEvent>(await post('/api/ask', { runId, question: 'Who owns mocha?' }, { cookie: t.sid! }));
+      const fb = await sse<TriageEvent>(await post('/api/ask', { runId, question: 'Is anything else worth checking?' }, { cookie: t.sid! }));
       assert.deepEqual(calls.map((c) => [c.provider, c.tools]), [[undefined, 11], ['groq:fake', 11], [undefined, 0]]);
       assert.deepEqual([of(fb, 'narration').mode, of(fb, 'narration').provider, of(fb, 'guard').flagged], ['live', 'gemini:fake', []]);
-      // the answer named no repo, so the complete filter result is appended
-      assert.match(of(fb, 'narration').text, /^Notify `QA`\.\nComplete list \(repo mochajs\/mocha\): 1 repo across 1 team\. `QA`: `mochajs\/mocha`\.$/);
+      assert.equal(of(fb, 'narration').text, 'Notify `QA`.');
     } finally {
       delete hooks.chat;
     }
   });
 
-  test('ask truthfulness: "which exposures are prod-only and who owns them?" names all 14 repos across 6 teams, even when the model answers wrongly', async () => {
+  test('ask truthfulness: list, repo, rotate and timing questions get the graph\'s own answer; the model is never asked', async () => {
     const t = await triageRun({ scenario: QIX, at: QAT });
     const runId = of(t.evs, 'start').runId;
     const prod = t.report.exposures.filter((e) => e.tier !== 'CLEAN' && !e.dev);
     assert.deepEqual([prod.length, new Set(prod.map((e) => e.team)).size], [14, 6]); // what the table's Prod-only filter shows
-    hooks.chat = async (): Promise<ChatRes> => ({ text: '**`acme/checkout-web`** is the only prod-only exposure; owned by `Payments`.', toolCalls: [], provider: 'groq:fake', raw: {} });
+    let asked = 0;
+    hooks.chat = async (): Promise<ChatRes> => (asked++, { text: '**`acme/checkout-web`** is the only prod-only exposure; npm ci is not safe.', toolCalls: [], provider: 'groq:fake', raw: {} });
+    const askQ = async (question: string) => sse<TriageEvent>(await post('/api/ask', { runId, question }, { cookie: t.sid! }));
     try {
-      const evs = await sse<TriageEvent>(await post('/api/ask', { runId, question: 'which exposures are prod-only and who owns them?' }, { cookie: t.sid! }));
+      const evs = await askQ('which exposures are prod-only and who owns them?');
       const filter = of(evs, 'tool_result').result;
       assert.deepEqual([filter.tool, filter.params.prod_only, filter.rows.length], ['filter_exposures', true, 14]);
       assert.ok(filter.rows.every((r) => typeof r.team === 'string' && Array.isArray(r.locked) && /^E\d+$/.test(String(r.path))), 'team, locked versions and path id on every row');
       const n = of(evs, 'narration');
-      assert.equal(n.mode, 'template'); // the incomplete answer was replaced by the deterministic list
+      assert.equal(n.mode, 'template');
       assert.match(n.text, /^Complete list \(prod only\): 14 repos across 6 teams\. /);
       for (const e of prod) assert.ok(n.text.includes(`\`${e.repo}\``), `${e.repo} missing`);
       for (const team of new Set(prod.map((e) => e.team!))) assert.ok(n.text.includes(`\`${team}\``), `${team} missing`);
-      assert.doesNotMatch(n.text, /\*\*|only prod-only/);
       assert.deepEqual(of(evs, 'guard').flagged, []);
+      assert.match(of(await askQ('list all exposed repos with their owners'), 'narration').text, /^Complete list \(no filter\): 21 repos across 7 teams\. /);
 
-      // a model that says "N of M" is trusted to be partial on purpose
-      hooks.chat = async (): Promise<ChatRes> => ({ text: '3 of 14 prod-only repos: `acme/checkout-web`, `github/docs`, `mochajs/mocha` (+11 more).', toolCalls: [], provider: 'groq:fake', raw: {} });
-      const partial = of(await sse<TriageEvent>(await post('/api/ask', { runId, question: 'which exposures are prod-only?' }, { cookie: t.sid! })), 'narration');
-      assert.equal(partial.mode, 'live');
-      assert.doesNotMatch(partial.text, /Complete list/);
+      // "is npm ci safe?": rotate only for LOCKED, npm ci safe for the rest (a model said the opposite, three times out of three)
+      const rot = of(await askQ('Which repos need secrets rotated, and is npm ci safe for the rest?'), 'narration');
+      assert.match(rot.text, /^Rotate secrets for the 1 LOCKED repo: `acme\/checkout-web`\./);
+      assert.match(rot.text, /For the other 20 WOULD_PULL repos, installing from the committed lockfile \(npm ci\) is safe/);
+      assert.doesNotMatch(rot.text, /not safe/);
 
-      // an unfiltered list question: every one of the 21 rows reaches the model inside the tool budget
-      let seen = '';
-      hooks.chat = async (req: ChatReq): Promise<ChatRes> => ((seen = String(req.messages[1].content)), { text: '21 repos.', toolCalls: [], provider: 'groq:fake', raw: {} });
-      await sse<TriageEvent>(await post('/api/ask', { runId, question: 'list all exposed repos with their owners' }, { cookie: t.sid! }));
-      const all = t.report.exposures.filter((e) => e.tier !== 'CLEAN');
-      assert.equal(all.length, 21);
-      for (const e of all) assert.ok(seen.includes(`["${e.repo}","${e.tier}"`), `${e.repo} did not reach the model`);
-      assert.ok(seen.length < 1800 + 4000 + 200, `${seen.length} chars`);
+      // a named repo: tier in words, its path and owner, its own steps in order (rotate included for LOCKED)
+      const repoEvs = await askQ('What should acme/checkout-web do?');
+      assert.deepEqual(repoEvs.filter((e) => e.type === 'tool_start').map((e) => (e as { tool: string }).tool), ['explain_path', 'draft_remediation']);
+      const fix = of(repoEvs, 'narration');
+      assert.match(fix.text, /^`acme\/checkout-web` \(owned by `Payments`, `#team-payments`\) is LOCKED: /);
+      assert.match(fix.text, /Do: 1\) Your lockfile pins .*Rotate secrets/);
+      assert.deepEqual(of(repoEvs, 'guard').flagged, []);
+
+      // when: start, the OSV gap, and only what is known at the scenario clock
+      const when = of(await askQ('When did this start, and how far ahead of the advisory were we?'), 'narration');
+      assert.match(when.text, /^Exposure began at 13:12 UTC, when `ansi-styles@6\.2\.2` was published\. The first OSV record came at 14:26 UTC, 74 minutes later\. At 13:30 UTC they were still live\.$/);
+      assert.equal(asked, 0);
     } finally {
       delete hooks.chat;
     }
@@ -332,7 +336,7 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
     assert.deepEqual([n.mode, n.note], ['template', null]); // no recording describes a guest graph
     assert.deepEqual(t.report.scope, { kind: 'guest', label: 'pasted/mocha', repos: 1 });
     assert.deepEqual(t.report.notices, []);
-    assert.match(n.text, /^Verdict: `pasted\/mocha` is exposed only on a fresh install since \d\d:\d\d UTC \(still open at 13:30 UTC\); installing from your committed lockfile was safe: it pins .*`debug@4\.3\.5`/);
+    assert.match(n.text, /^Verdict: `pasted\/mocha` is exposed only on a fresh install since \d\d:\d\d UTC on \d{4}-\d\d-\d\d \(still open at 13:30 UTC\); installing from your committed lockfile was safe: it pins .*`debug@4\.3\.5`/);
     assert.doesNotMatch(n.text, /Notify|#your-team/);
     assert.ok(e.locked!.length > 0 && e.locked!.every((v) => !e.versions.includes(v)), 'a WOULD_PULL lockfile pins only safe versions');
     assert.equal(t.report.minutesAhead, Math.floor((t.report.incident.advisoryAt - t.report.incident.firstExposureAt!) / 60_000)); // its own first exposure
