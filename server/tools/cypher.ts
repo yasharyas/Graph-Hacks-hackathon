@@ -99,3 +99,6 @@ CREATE (t:Triage {id: $id, at: $at, session: $session, summary: $summary})-[:FOR
 WITH t UNWIND $assessed AS x
 MATCH (r:Repo {id: x.repo})
 CREATE (t)-[:ASSESSED {tier: x.tier, action: x.action}]->(r)`;
+
+// recordTriage (server only): keep runtime triage memory bounded in the shared graphs; oldest marks go first.
+export const PRUNE_TRIAGE = `MATCH (t:Triage) WITH t ORDER BY t.at DESC SKIP 1000 DETACH DELETE t`;

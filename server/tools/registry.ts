@@ -210,6 +210,7 @@ export async function recordTriage(graphName: string, t: { session: string; inci
     action: a.action !== null && ACTIONS.has(a.action) ? a.action : null,
   }));
   await write(graphName, Q.RECORD_TRIAGE, { id, session: str(t.session, 64), incident: str(t.incident), at: time(t.at), summary: str(t.summary, 500), assessed });
+  await write(graphName, Q.PRUNE_TRIAGE); // shared org graphs get no TTL, so cap what visitors can accumulate
   return id;
 }
 
