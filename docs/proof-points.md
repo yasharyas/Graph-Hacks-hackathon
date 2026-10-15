@@ -26,13 +26,13 @@ The only numbers the README, video, blog and posts may quote. Each line names it
 ## Data scope
 
 - 20 real public repos + 2 synthetic (badged), lockfiles as of 2025-09-08T13:00Z and 2026-03-31T00:00Z.
-- 5,739 package names, maintainers as usernames only (no emails). 92 packuments with full version timelines.
+- Graph size (Graph stats in the app): the qix graph holds 5,373 packages, 10,210 versions and 27,349 lockfile entries for 21 repos; the axios graph 5,490 packages, 9,941 versions and 27,211 entries. Maintainers are stored as usernames only (no emails). 92 packuments carry full version timelines.
 
 ## Agent behaviour (source: live runs against the dev graphs, 2026-10-15/16; `test/api.test.ts`, `test/narrate.test.ts`)
 
 - Ask "which exposures are prod-only and who owns them?" at qix 13:30Z: **14 repos across 6 teams**, answered from the graph (`filter_exposures`), never in a model's words.
-- Analyst pick at qix 13:30Z: the LLM chose, from graph-built observations, "**4 repos get a malicious version through the same dependency, `@babel/core`**" (socket.io, jquery, pdf.js and 1 more). At axios 01:30Z it picked "2 repos … through `nx`" (appium, nest).
-- Every claim in the narrative is checked against the run's evidence: a qix run traces **all of its claims, about 60** (58 to 61, depending on what the session has marked remediated).
+- Analyst pick: the LLM chooses one of the observations the server built from the graph, so its words are always the graph's. The pick varies by run and provider; the recorded replays pick the shared-dependency observation: at qix 13:30Z "4 repos get a malicious version through the same dependency, `@babel/core`" (socket.io, jquery, pdf.js and 1 more), at axios 01:30Z "2 repos ... through `nx`" (appium, nest). A live run may pick another observation; every option is built from the graph.
+- Every claim in the narrative is checked against the run's evidence: a qix run traces **all of its claims, about 60** (the exact count depends on the analyst pick and on what the session has marked remediated).
 
 ## Free-tier speed (source: `docker run --cpus=0.1 --memory=512m` of the production image, 2026-10-16)
 
