@@ -9,7 +9,7 @@ RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY web/src/design/fetch-fonts.mjs web/src/design/
 RUN node web/src/design/fetch-fonts.mjs
 COPY . .
-RUN npx vite build && npm prune --omit=dev --ignore-scripts
+RUN npx vite build && node scripts/precompress.ts && npm prune --omit=dev --ignore-scripts
 
 FROM falkordb/falkordb-server@sha256:2e99eb1cfa3309ce338beebe24b5e9f44f9eb8ead6d6ef63dcaca436afbbaeec
 COPY --from=build /usr/local/bin/node /usr/local/bin/node

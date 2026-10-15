@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "node --watch --env-file-if-exists=.env server/index.ts",
     "start": "node server/index.ts",
-    "build:web": "vite build",
+    "build:web": "vite build && node scripts/precompress.ts",
     "build:graph": "node --env-file-if-exists=.env server/ingest/build.ts",
     "triage": "node --env-file-if-exists=.env server/agent/triage.ts",
     "mcp": "node --env-file-if-exists=.env server/mcp.ts",

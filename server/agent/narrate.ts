@@ -43,7 +43,8 @@ export function evidenceSet(r: Report): Evidence {
     exposed.filter((e) => !e.dev).length, exposed.filter((e) => e.dev).length, exposed.filter((e) => e.remediated).length,
     r.scope?.repos ?? Object.values(r.counts).reduce((a, b) => a + b, 0), ...reach(r).slice(0, 4).map(([, n]) => n),
   ]);
-  return { entities, numbers, pathIds: new Set(r.paths.map((p) => p.id)), reach: new Map(reach(r)) };
+  const pairs = new Set(r.paths.filter((p) => p.range).map((p) => `${p.version}|${p.range}`));
+  return { entities, numbers, pathIds: new Set(r.paths.map((p) => p.id)), reach: new Map(reach(r)), pairs };
 }
 
 // How many exposed repos reach each malicious version, most first: lets the note say "15 repos would fetch chalk@5.6.1"
@@ -143,11 +144,20 @@ function pairsOk(note: string, ev: Evidence): boolean {
     if (/\bit\b/i.test(clause)) return false;
     const n = /^\d+$/.test(m[1]) ? Number(m[1]) : NUMBER_WORDS.indexOf(m[1].toLowerCase()) + 1;
     const need = n + (/\bother\b/i.test(clause) ? 1 : 0);
-    const versions = [...clause.matchAll(/`((?:@[\w.-]+\/)?[\w.-]+@\d[\w.+-]*)`/g)].map((v) => v[1]);
-    if (versions.some((v) => (ev.reach?.get(v) ?? 0) < need)) return false;
+    if (versions(clause).some((v) => (ev.reach?.get(v) ?? 0) < need)) return false;
+  }
+  // "would fetch `chalk@5.6.1` and `debug@4.4.2` due to `^6.1.0` and `^4.1.0`": a clause naming versions and ranges
+  // pairs them, so each version needs a range in the clause (and each range a version) that a graph path joins.
+  for (const clause of note.split(/[.;:]\s+/)) {
+    const vs = versions(clause);
+    const rs = [...clause.matchAll(/`([\^~<>=]*\d[\w.+ <>=|-]*|\*)`/g)].map((x) => x[1]);
+    if (!vs.length || !rs.length) continue;
+    const joined = (v: string, r: string) => ev.pairs?.has(`${v}|${r}`) ?? false;
+    if (!vs.every((v) => rs.some((r) => joined(v, r))) || !rs.every((r) => vs.some((v) => joined(v, r)))) return false;
   }
   return true;
 }
+const versions = (clause: string) => [...clause.matchAll(/`((?:@[\w.-]+\/)?[\w.-]+@\d[\w.+-]*)`/g)].map((v) => v[1]);
 
 // ---------- the deterministic Verdict / Notify / Do ----------
 

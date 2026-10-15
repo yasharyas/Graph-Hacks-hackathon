@@ -50,3 +50,11 @@ Opus reviewer, read-only, against rules S1–S13: **fail** (3 high, 3 medium) �
 - **Cross-judge (Haiku, read-only):** A 4/4/4/4, B 2/2/3/4, C 3/3/4/4 (correctness/security/simplicity/perf). Agreed on base A and on both B grafts; added C's header comment. It hand-traced bugs the suite missed: B crashes on a `null` entry or a numeric spec and duplicates prod+optional edges; C makes a phantom edge for a link resolving to `constructor` and mangles `npm:@s/x`. All are now regression tests that the merged parser passes.
 - **Known ceiling:** resolution rebuilds key strings per ancestor (O(depth × key length)); fine at 5 ms for 1.1 MB, cache per folder if hostile nesting ever matters.
 - **Verification after merge:** 11 parser tests + 7 security tests pass, `tsc --noEmit` clean, oracle unchanged (0.9953 / 0.9915).
+
+## QA fix round (Phase 3 persona scores below 9) — 2026-10-15
+
+- **Narration split:** the persona QA found wrong "verified" answers and truncated narratives, so the LLM no longer writes the verdict. `text` (Verdict / Why / Notify / Do) is built from the report; the LLM writes at most a 40-word `note`, which is dropped unless every claim passes the guard. Without any LLM, triage is still complete.
+- **Count-to-version pairing:** the entity guard passed "20 other repositories would fetch it" and "nine repos would fetch `axios@1.14.1`" (uptime-kuma fetches 0.30.4), and the prompt rule against this was ignored. `acceptNote` now drops a clause that ties a repo count to a version (or "it") unless that many exposed repos reach it. Both replay notes were re-recorded and reviewed under the rule.
+- **LOCKED timing:** a lockfile cannot pin a version before it is published, so LOCKED counts from the repo's newest locked bad publish. This removed the axios 128-vs-105 split; `firstExposureAt` gives one minutes-ahead figure everywhere (qix 74, axios 105, floored).
+- **Narration at the clock:** before removal, the window reads "still open at 13:30 UTC", never "until 15:15". The narration never uses knowledge from after the scenario clock.
+- **Ask list questions:** `filter_exposures` runs server-side first, and an LLM answer naming fewer matches than it found without saying "N of M" is replaced by the complete list (prod-only at qix 13:30: 14 repos across 6 teams).

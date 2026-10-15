@@ -117,10 +117,12 @@ RETURN r.id AS repo, a.tier AS tier, a.action AS action, t.at AS at ORDER BY at 
 
 // recordTriage (server only, GRAPH.QUERY): never exposed as a tool.
 export const RECORD_TRIAGE = `MATCH (i:Incident {id: $incident})
-CREATE (t:Triage {id: $id, at: $at, session: $session, summary: $summary})-[:FOR]->(i)
+CREATE (t:Triage {id: $id, at: $at, session: $session, summary: $summary, marked: $marked})-[:FOR]->(i)
 WITH t UNWIND $assessed AS x
 MATCH (r:Repo {id: x.repo})
 CREATE (t)-[:ASSESSED {tier: x.tier, action: x.action}]->(r)`;
 
-// recordTriage (server only): keep runtime triage memory bounded in the shared graphs; oldest marks go first.
-export const PRUNE_TRIAGE = `MATCH (t:Triage) WITH t ORDER BY t.at DESC SKIP 1000 DETACH DELETE t`;
+// recordTriage (server only): keep runtime triage memory bounded in the shared graphs, oldest first. Runs and
+// remediation marks are capped apart, so other visitors' runs can never push a session's marks out.
+export const PRUNE_TRIAGE = `MATCH (t:Triage) WHERE coalesce(t.marked, false) = $marked
+WITH t ORDER BY t.at DESC SKIP 1000 DETACH DELETE t`;

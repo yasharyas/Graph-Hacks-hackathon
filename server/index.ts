@@ -59,15 +59,18 @@ app.use(
     permissionsPolicy: { camera: [], microphone: [], geolocation: [] },
   }),
 );
-// gzip for JSON, HTML, JS and CSS over 1 KB. Hono's filter never matches text/event-stream, so SSE streams untouched.
-// ponytail: gzip only (Hono's compress has no brotli); precompress web/dist at build time if the last ~15% matters.
+// gzip for API JSON over 1 KB; web/dist ships .br/.gz made at build (scripts/precompress.ts), which compress() leaves
+// alone because they already carry Content-Encoding. Hono's filter never matches text/event-stream, so SSE is untouched.
 app.use(compress());
 // Vite's hashed /assets/* never change under the same name; the HTML shell is revalidated so a deploy shows at once.
+// API responses can carry Set-Cookie (pz_sid), so no shared cache may keep them.
 app.use('*', async (c, next) => {
   await next();
-  if (c.req.path.startsWith('/api/') || c.res.status !== 200) return;
-  if (c.req.path.startsWith('/assets/')) c.res.headers.set('Cache-Control', 'public, max-age=31536000, immutable');
-  else if (c.res.headers.get('content-type')?.startsWith('text/html')) c.res.headers.set('Cache-Control', 'no-cache');
+  if (c.req.path.startsWith('/api/')) return void c.res.headers.set('Cache-Control', 'no-store');
+  if (c.res.status !== 200) return;
+  const html = c.res.headers.get('content-type')?.startsWith('text/html');
+  if (c.req.path.startsWith('/assets/') && !html) c.res.headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+  else if (html) c.res.headers.set('Cache-Control', 'no-cache');
 });
 // S7: 8 KB everywhere, except a 5 MB lockfile once JSON-escaped (quotes and newlines grow it by up to ~25%).
 app.use('/api/*', (c, next) =>
@@ -354,8 +357,9 @@ app.get('/api/plan', async (c) => {
 
 app.all('/api/*', (c) => c.json({ error: 'Not found.', requestId: c.get('requestId') }, 404));
 
-app.use('/*', serveStatic({ root: './web/dist' }));
-app.get('*', serveStatic({ path: './web/dist/index.html' }));
+app.use('/*', serveStatic({ root: './web/dist', precompressed: true }));
+app.all('/assets/*', (c) => c.text('Not found.', 404)); // a stale chunk after a deploy must 404, not get the SPA shell
+app.get('*', serveStatic({ path: './web/dist/index.html', precompressed: true }));
 
 if (import.meta.main) {
   const port = Number(process.env.PORT ?? 8080);

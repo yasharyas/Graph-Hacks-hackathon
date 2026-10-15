@@ -256,7 +256,7 @@ recordTriage (server only, GRAPH.QUERY): never exposed as a tool.
 
 ```cypher
 MATCH (i:Incident {id: $incident})
-CREATE (t:Triage {id: $id, at: $at, session: $session, summary: $summary})-[:FOR]->(i)
+CREATE (t:Triage {id: $id, at: $at, session: $session, summary: $summary, marked: $marked})-[:FOR]->(i)
 WITH t UNWIND $assessed AS x
 MATCH (r:Repo {id: x.repo})
 CREATE (t)-[:ASSESSED {tier: x.tier, action: x.action}]->(r)
@@ -264,10 +264,11 @@ CREATE (t)-[:ASSESSED {tier: x.tier, action: x.action}]->(r)
 
 #### `PRUNE_TRIAGE`
 
-recordTriage (server only): keep runtime triage memory bounded in the shared graphs; oldest marks go first.
+recordTriage (server only): keep runtime triage memory bounded in the shared graphs, oldest first. Runs and remediation marks are capped apart, so other visitors' runs can never push a session's marks out.
 
 ```cypher
-MATCH (t:Triage) WITH t ORDER BY t.at DESC SKIP 1000 DETACH DELETE t
+MATCH (t:Triage) WHERE coalesce(t.marked, false) = $marked
+WITH t ORDER BY t.at DESC SKIP 1000 DETACH DELETE t
 ```
 
 <!-- cypher:end -->

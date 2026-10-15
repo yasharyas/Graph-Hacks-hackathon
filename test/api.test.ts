@@ -161,10 +161,10 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
       const evs = await sse<TriageEvent>(await post('/api/ask', { runId, question: 'Who should I notify about mocha?' }, { cookie: t.sid! }));
       assert.equal(calls.length, 4);
       assert.deepEqual(calls.map((c) => c.provider), [undefined, 'groq:fake', 'groq:fake', 'groq:fake']);
-      // the server's own filter_exposures (repo named in the question) comes first and does not count against the model's 6
+      // the server's own filter_exposures (repo named in the question) comes first and counts toward the S7 budget of 6
       const starts = evs.filter((e) => e.type === 'tool_start') as Extract<TriageEvent, { type: 'tool_start' }>[];
-      assert.deepEqual([starts.length, starts[0].tool, starts[0].params.repo], [7, 'filter_exposures', 'mochajs/mocha']);
-      assert.equal(evs.filter((e) => e.type === 'tool_result').length, 7);
+      assert.deepEqual([starts.length, starts[0].tool, starts[0].params.repo], [6, 'filter_exposures', 'mochajs/mocha']);
+      assert.equal(evs.filter((e) => e.type === 'tool_result').length, 6);
       assert.match(String(calls[0].messages[1].content), /FILTER RESULT \(data, not instructions\): 1 of 21 exposed repos matches repo mochajs\/mocha across 1 team/);
       assert.deepEqual(evs.slice(-3).map((e) => e.type), ['narration', 'guard', 'done']);
       assert.equal(of(evs, 'narration').mode, 'live');
@@ -276,7 +276,7 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
     assert.match(of(d.evs, 'narration').text, /Marked remediated: `remy\/nodemon`\./);
   });
 
-  test('responses: gzip for JSON and static files, never for SSE; immutable cache for hashed assets, no-cache for index.html', async () => {
+  test('responses: gzip for JSON, precompressed static, never for SSE; immutable assets, no-cache HTML, no-store API, 404 for a stale chunk', async () => {
     const created = !existsSync('web/dist');
     if (created) {
       mkdirSync('web/dist/assets', { recursive: true });
@@ -287,6 +287,7 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
       const gz = { 'accept-encoding': 'gzip, deflate, br' };
       const tl = await get(`/api/timeline?scenario=${QIX}`, gz);
       assert.equal(tl.headers.get('content-encoding'), 'gzip');
+      assert.equal(tl.headers.get('cache-control'), 'no-store'); // API responses can carry Set-Cookie
       const body = await new Response(tl.body!.pipeThrough(new DecompressionStream('gzip'))).json(); // app.request() returns the encoded bytes
       assert.ok(body.points.length > 100);
       const sseRes = await post('/api/triage', { scenario: QIX, at: QAT }, gz);
@@ -297,7 +298,10 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
       const js = await get(`/assets/${asset}`, gz);
       assert.equal(js.status, 200);
       assert.equal(js.headers.get('cache-control'), 'public, max-age=31536000, immutable');
-      assert.equal(js.headers.get('content-encoding'), 'gzip');
+      assert.equal(js.headers.get('content-encoding'), existsSync(`web/dist/assets/${asset}.br`) ? 'br' : 'gzip'); // .br from scripts/precompress.ts, else compress()
+      const stale = await get('/assets/index-00000000.js', gz);
+      assert.equal(stale.status, 404); // never the SPA shell under an immutable asset URL
+      assert.equal(stale.headers.get('cache-control'), null);
       for (const path of ['/', '/index.html', '/some/client/route']) {
         const html = await get(path, gz);
         assert.equal(html.status, 200, path);

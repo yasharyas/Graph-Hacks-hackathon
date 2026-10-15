@@ -111,7 +111,7 @@ export function enforceCoverage(text: string, res: ToolResult): { text: string; 
   return named ? { text: completeList(res), replaced: true } : { text: `${text}\n${completeList(res)}`, replaced: false };
 }
 
-const stripMarkdown = (s: string) => s.replace(/\*\*|__/g, '').replace(/^#{1,6}\s+/gm, '').replace(/^(\s*)\*\s+/gm, '$1- ');
+const stripMarkdown = (s: string) => s.replace(/\*\*|__/g, '').replace(/^#{1,6}\s+/gm, '').replace(/^([ \t]*)\*[ \t]+/gm, '$1- '); // [ \t], not \s: \s spans newlines and backtracks quadratically
 
 export async function* ask({ run, question, chatFn = pinned, signal }: { run: Run; question: string; chatFn?: ChatFn; signal?: AbortSignal }): AsyncGenerator<TriageEvent> {
   const t0 = performance.now();
@@ -144,7 +144,7 @@ export async function* ask({ run, question, chatFn = pinned, signal }: { run: Ru
   ];
   let provider: string | undefined;
   let text = '';
-  let n = 0;
+  let n = pre ? 1 : 0; // the server's own filter counts toward the S7 budget
   try {
     for (let round = 1; round <= ROUNDS; round++) {
       if (round === ROUNDS && n) messages.push({ role: 'user', content: 'Answer now from the evidence and tool results above. No more tool calls.' });

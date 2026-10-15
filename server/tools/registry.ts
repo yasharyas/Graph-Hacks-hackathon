@@ -232,7 +232,8 @@ export async function draftRemediation(g: Graph, p: { repo: unknown; versions: u
       `Keep installing from your committed lockfile (npm ci): ${safeLocked.length ? `it pins ${safeLocked.join(', ')} (safe)` : 'it never resolved the malicious version'}`,
       !pairs ? ''
         : Number.isFinite(until) && until <= params.at ? `The malicious versions stopped resolving at ${utc(until)}, so a fresh resolve now gets a clean one; to be sure anyway, add the overrides ${pairs} to package.json`
-          : `Only if you must re-resolve dependencies${Number.isFinite(until) ? ` before ${utc(until)}` : ' while the malicious versions are live'}, add the overrides ${pairs} to package.json; each replaces only the malicious version`,
+          // the removal time is not known yet at params.at, so the step never names it
+          : `Only if you must re-resolve dependencies while the malicious versions are live, add the overrides ${pairs} to package.json; each replaces only the malicious version`,
       ...notes,
     ]).filter(Boolean);
   const prBody = `${isLocked ? 'The lockfile resolves' : 'Declared ranges admit'} ${params.versions.join(', ')}. `
@@ -277,8 +278,9 @@ export async function recordTriage(graphName: string, t: { session: string; inci
     tier: TIERS.has(a.tier) ? a.tier : 'CLEAN',
     action: a.action !== null && ACTIONS.has(a.action) ? a.action : null,
   }));
-  await write(graphName, Q.RECORD_TRIAGE, { id, session: str(t.session, 64), incident: str(t.incident), at: time(t.at), summary: str(t.summary, 500), assessed });
-  await write(graphName, Q.PRUNE_TRIAGE); // shared org graphs get no TTL, so cap what visitors can accumulate
+  const marked = assessed.some((a) => a.action !== null);
+  await write(graphName, Q.RECORD_TRIAGE, { id, session: str(t.session, 64), incident: str(t.incident), at: time(t.at), summary: str(t.summary, 500), assessed, marked });
+  await write(graphName, Q.PRUNE_TRIAGE, { marked }); // shared org graphs get no TTL, so cap what visitors can accumulate
   return id;
 }
 

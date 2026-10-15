@@ -144,6 +144,15 @@ test('acceptNote: a repo count tied to a version must be true for every repo cou
   ok('`acme/checkout-web` locks `debug@4.4.2` [E1], while 4 other repos would fetch malicious versions on a fresh resolve.');
 });
 
+test('acceptNote: versions and ranges named together must be joined by a graph path (E2 debug ^4.3.5, E3 chalk ^5.4.1)', () => {
+  const ev = evidenceSet(report());
+  const ok = (note: string) => assert.equal(acceptNote(note, ev), note);
+  ok('`github/docs` would fetch `chalk@5.6.1` through `^5.4.1` [E3].');
+  ok('`debug@4.4.2` and `chalk@5.6.1` arrive through `^4.3.5` and `^5.4.1`.');
+  assert.equal(acceptNote('`mochajs/mocha` would fetch `debug@4.4.2` through `^5.4.1` [E2].', ev), null); // every entity is known; the pairing is not
+  assert.equal(acceptNote('`debug@4.4.2` and `chalk@5.6.1` arrive through `^5.4.1` and `^10.0.0`.', ev), null);
+});
+
 test('evidenceSet covers repos, teams, channels, versions, ranges, chain deps, locked pins, override keys and numbers', () => {
   const ev = evidenceSet(report());
   for (const e of [
