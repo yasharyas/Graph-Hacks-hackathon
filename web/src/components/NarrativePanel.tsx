@@ -24,7 +24,7 @@
  * NarrationBlock props:  the same body without the heading, reused by Ask follow-ups; idSuffix keeps ids unique.
  * A trailing "6 of 14 ..." line (the server's coverage of an enumerating answer) is set apart, not buried in the text.
  */
-import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode } from 'react';
+import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode } from 'react';
 import { plural, utcLabel } from '../data/format.ts';
 import { claimMap, crowded, lines, splitCoverage, type ProofCard, type Segment } from '../data/narration.ts';
 import type { Guard, Narration } from '../data/useTriage.ts';
@@ -48,7 +48,7 @@ interface BlockProps {
   fold?: boolean;
   /** The verdict is final but the analyst pick may still follow: reserve its place. */
   drafting?: boolean;
-  /** Floats at the end of the first line (the "as of" stamp), so it costs no row of its own. */
+  /** Shown on the first label's line, above the text (the "as of" stamp). */
   stamp?: ReactNode;
 }
 
@@ -255,13 +255,24 @@ export function NarrationBlock({ narration, guard, onTrace, cards = [], idSuffix
   };
 
   // A labelled line runs the label into the text: the 320px feed has no width for a label column.
-  const row = (r: Row, i: number, first = false) => (
-    <p key={`${r.label}-${i}`} onFocus={open} data-clamp={clamp && r.label && CLAMP[r.label] ? '' : undefined} className={`max-w-(--measure) text-fg-0 ${r.label === 'Verdict' || !r.label ? 'text-md' : 'text-sm'} ${clamp && r.label ? (CLAMP[r.label] ?? '') : ''}`}>
-      {first && stamp}
-      {r.label && <span className={`${LABEL} mr-2`}>{r.label}</span>}
-      <Spans segs={r.segs} onTrace={onTrace} hint={hint} checking={checking} />
-    </p>
-  );
+  // The "as of" stamp shares the first label's line, above the text, so it never sits mid-sentence.
+  const row = (r: Row, i: number, first = false) => {
+    const head = first && stamp;
+    return (
+      <Fragment key={`${r.label}-${i}`}>
+        {head && (
+          <p className="flex max-w-(--measure) items-baseline justify-between gap-2">
+            {r.label ? <span className={LABEL}>{r.label}</span> : <span />}
+            {stamp}
+          </p>
+        )}
+        <p onFocus={open} data-clamp={clamp && r.label && CLAMP[r.label] ? '' : undefined} className={`max-w-(--measure) text-fg-0 ${r.label === 'Verdict' || !r.label ? 'text-md' : 'text-sm'} ${clamp && r.label ? (CLAMP[r.label] ?? '') : ''}`}>
+          {!head && r.label && <span className={`${LABEL} mr-2`}>{r.label}</span>}
+          <Spans segs={r.segs} onTrace={onTrace} hint={hint} checking={checking} />
+        </p>
+      </Fragment>
+    );
+  };
 
   return (
     <div ref={box} className={`flex flex-col gap-1.5 transition-opacity duration-(--dur-slow) ${stale ? 'opacity-70' : ''}`}>
@@ -372,7 +383,7 @@ export function NarrativePanel({
         stale={stale}
         fold
         drafting={drafting ?? narration.draft ?? false}
-        stamp={narration.at !== undefined ? <span className="float-right ml-2 font-mono text-xs leading-6 text-fg-1 tabular-nums">as of {utcLabel(narration.at)}</span> : undefined}
+        stamp={narration.at !== undefined ? <span className="font-mono text-xs text-fg-1 tabular-nums">as of {utcLabel(narration.at)}</span> : undefined}
       />
     </section>
   );

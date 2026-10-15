@@ -83,7 +83,7 @@ export function ContrastCard({ snapshot, grepCount, grepName, minutesAhead, reve
     ['WOULD_PULL', c?.WOULD_PULL, 'text-tier-would-pull'],
     ['MAINTAINER', c?.MAINTAINER, 'text-tier-maintainer'],
   ] as const).map(([name, n, cls]) => ({ name, n, cls }));
-  const found = tiers.reduce((n, t) => n + (t.n ?? 0), 0);
+  const found = (c?.LOCKED ?? 0) + (c?.WOULD_PULL ?? 0); // the arrow lands on a hit, never on "0 LOCKED 0 WOULD_PULL"
   const arrow = snapshot !== null && snapshot.scanner === 0 && found > 0;
   return (
     <section aria-label="Scanner versus graph" className="@container p-3 sm:p-4">

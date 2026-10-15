@@ -127,6 +127,10 @@ export function AlertField({ onRun, disabled }: { onRun: (text: string) => void;
           value={text}
           placeholder="qix compromised, 13:16 UTC"
           onChange={(e) => setText(e.target.value)}
+          // Enter runs it, like a search box; Shift+Enter keeps a newline.
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) (e.preventDefault(), e.currentTarget.form?.requestSubmit());
+          }}
           aria-describedby={`${id}-count`}
         />
         <p id={`${id}-count`} className="mt-1 font-mono text-2xs text-fg-2">

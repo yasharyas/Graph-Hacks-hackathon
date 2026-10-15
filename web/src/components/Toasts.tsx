@@ -98,7 +98,7 @@ export function Toasts() {
   return (
     <ul
       aria-live="polite"
-      className="pointer-events-none fixed bottom-[calc(var(--tabbar-h)+8px)] left-4 z-(--z-toast) flex w-[min(320px,calc(100vw-32px))] flex-col gap-2 lg:bottom-4"
+      className="pointer-events-none fixed bottom-[calc(var(--tabbar-h)+8px)] left-4 z-(--z-toast) flex w-[min(320px,calc(100vw-32px))] flex-col gap-2 lg:bottom-[calc(var(--ask-h)+8px)]"
     >
       <AnimatePresence>
         {list.map((item) => (

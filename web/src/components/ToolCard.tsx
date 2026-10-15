@@ -426,11 +426,11 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
                                 type="button"
                                 aria-expanded={wanted}
                                 aria-controls={id}
-                                aria-label={stmts.length > 1 ? `Show plan for query ${s.n} of ${s.of}` : 'Show plan'}
+                                aria-label={stmts.length > 1 ? `${wanted ? 'Hide' : 'Show'} plan for query ${s.n} of ${s.of}` : undefined}
                                 onClick={() => void togglePlan(i)}
                                 className="shrink-0 rounded-xs px-1 text-xs text-fg-1 underline underline-offset-2 pointer-coarse:min-h-11 hov:text-fg-0"
                               >
-                                Show plan
+                                {wanted ? 'Hide plan' : 'Show plan'}
                               </button>
                             )}
                           </div>

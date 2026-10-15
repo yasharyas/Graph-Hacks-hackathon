@@ -219,7 +219,6 @@ export function ToolFeed({ cards, followUps, narration, guard, status, error, sc
             title="No triage yet"
             cause="Every tool call, its Cypher and its FalkorDB time will appear here as the triage runs."
             fix="Pick a scenario or describe an alert, then run it."
-            action={{ label: 'Run triage', onClick: onRun }}
           />
         )}
       </div>

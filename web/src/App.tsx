@@ -211,7 +211,7 @@ export function App() {
   // A new run aligns the scrubber with the run's clock, so every number on screen is true at the same time (and says so).
   useEffect(() => {
     if (triage.at === null) return;
-    if (at !== null && !sameMinute(at, triage.at) && !playback.playing && !stale) {
+    if (userAt !== null && at !== null && !sameMinute(at, triage.at) && !playback.playing && !stale) {
       toast({ message: `Scrubber moved from ${utcLabel(at)} to ${utcLabel(triage.at)}, the clock this triage ran at.` });
     }
     playback.seek(triage.at);
@@ -675,8 +675,7 @@ export function App() {
               <EmptyState
                 title="No exposures to show yet"
                 cause="The table lists every repo that reaches a malicious version, with its tier, path and owner."
-                fix="Run the triage to fill it."
-                action={{ label: runLabel, onClick: run }}
+                fix={`${runLabel} above to fill it.`}
               />
             )}
           </section>

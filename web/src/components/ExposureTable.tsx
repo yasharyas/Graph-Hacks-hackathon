@@ -68,9 +68,14 @@ export interface ExposureTableProps {
 /** `name@1.2.3` on one line: the name truncates, the version never does. */
 function Ref({ item, badVersions, dim = false }: { item: string; badVersions: ReadonlySet<string>; dim?: boolean }) {
   const [name, version] = splitRef(item);
+  // A scoped name gives up its scope first ("@typescript-eslint/parser" -> "@typ…/parser"): three packages of one scope
+  // must not all read "@typescript…".
+  const cut = name.startsWith('@') ? name.indexOf('/') + 1 : 0;
+  const tone = dim ? 'text-fg-1' : 'text-fg-0';
   return (
     <span className="flex min-w-0 items-baseline whitespace-nowrap">
-      <span className={`min-w-0 truncate ${dim ? 'text-fg-1' : 'text-fg-0'}`}>{name}</span>
+      {cut > 0 && <span className={`min-w-0 shrink-[100] truncate ${tone}`}>{name.slice(0, cut)}</span>}
+      <span className={`min-w-0 truncate ${tone}`}>{name.slice(cut)}</span>
       {version && <span className={`shrink-0 ${badVersions.has(item) ? 'text-infect-400 underline decoration-1 underline-offset-2' : 'text-fg-1'}`}>@{version}</span>}
     </span>
   );
@@ -417,7 +422,7 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
             <colgroup>
               <col />
               <col className="w-28" />
-              <col className="w-[34%]" />
+              <col className="w-[40%]" />
               <col className="hidden w-24 md:table-column xl:hidden" />
               <col className="w-16" />
             </colgroup>
