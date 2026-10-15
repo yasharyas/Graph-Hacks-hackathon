@@ -18,7 +18,9 @@ export function useTimeline(scenario: ScenarioId) {
 
   useEffect(() => {
     const ctrl = new AbortController();
-    setState({ status: 'loading', incident: null, points: [], error: null });
+    // The previous incident stays in `state` while the next one loads: the screen dims it (incident.id tells which one it is)
+    // instead of wiping the whole dashboard to skeletons.
+    setState((s) => ({ ...s, status: 'loading', error: null }));
     getTimeline(scenario, ctrl.signal).then(
       (t) => setState({ status: 'ready', incident: t.incident, points: t.points, error: null }),
       (err: unknown) => {
@@ -45,7 +47,7 @@ const none: ExposureAt = { exposures: [], grepCount: null, grepName: null };
 
 /** Exposure list for the scrubber position (debounced 150 ms, re-fetched only when `point`'s counts change). */
 export function useExposureAt(scenario: ScenarioId, point: TimelinePoint | null): ExposureAt {
-  const [value, setValue] = useState<ExposureAt>(none);
+  const [value, setValue] = useState<ExposureAt & { scenario: ScenarioId | null }>({ ...none, scenario: null });
   const key = point ? countsKey(point.counts) : null;
   const atRef = useRef<number | undefined>(undefined);
   atRef.current = point?.at; // read when the counts change; the position alone never re-fetches
@@ -57,7 +59,7 @@ export function useExposureAt(scenario: ScenarioId, point: TimelinePoint | null)
     const timer = setTimeout(() => {
       getExposure(scenario, at, ctrl.signal).then(
         // an aborted request must not overwrite a newer answer (the mock ignores the signal)
-        (r) => ctrl.signal.aborted || setValue({ exposures: r.exposures, grepCount: r.grepCount, grepName: r.grepName ?? null }),
+        (r) => ctrl.signal.aborted || setValue({ scenario, exposures: r.exposures, grepCount: r.grepCount, grepName: r.grepName ?? null }),
         () => {}, // the contrast card keeps its last numbers; the triage run reports real errors
       );
     }, 150);
@@ -67,7 +69,8 @@ export function useExposureAt(scenario: ScenarioId, point: TimelinePoint | null)
     };
   }, [scenario, key]);
 
-  return value;
+  // Another incident's answer is never shown for this one (no stale graph flash on a scenario switch).
+  return value.scenario === scenario ? value : none;
 }
 
 export interface ExposureQuery {

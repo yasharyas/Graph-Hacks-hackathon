@@ -1,7 +1,7 @@
 // Run: node --test web/src/data/narration.test.ts
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { segments } from './narration.ts';
+import { claimMap, lines, proofFor, segments, splitCoverage, stripMarkdown, type ProofCard } from './narration.ts';
 
 const verdicts = (text: string, g: Parameters<typeof segments>[1]) =>
   segments(text, g).flatMap((s) => (s.kind === 'entity' ? [[s.text, s.verdict]] : s.kind === 'cite' ? [[s.id, s.verdict]] : s.kind === 'struck' ? [[s.text, 'struck']] : []));
@@ -35,4 +35,71 @@ test('unverified prose claims are struck, verified ones are left alone; [E1, E2]
 test('hostile text stays text: regex metacharacters in a flagged claim do not throw or match elsewhere', () => {
   const g = { claims: [{ text: 'a.b(c)', ok: false }], flagged: ['a.b(c)'] };
   assert.deepEqual(verdicts('axb(c) and a.b(c)', g), [['a.b(c)', 'struck']]);
+});
+
+test('only the first mention of an entity is a chip; a flagged one is struck every time', () => {
+  const g = { claims: [{ text: 'debug@4.4.2', ok: true }, { text: 'x/y', ok: false }], flagged: ['x/y'] };
+  const e = segments('`debug@4.4.2` then `debug@4.4.2` and `x/y` `x/y`', g).flatMap((s) => (s.kind === 'entity' ? [[s.text, s.first]] : []));
+  assert.deepEqual(e, [['debug@4.4.2', true], ['debug@4.4.2', false], ['x/y', true], ['x/y', true]]);
+});
+
+test('markdown never reaches the screen: bold, headings, bullets, stray asterisks and a dangling backtick are gone', () => {
+  assert.equal(stripMarkdown('**Verdict:** `acme/web` is **LOCKED**'), 'Verdict: acme/web is LOCKED');
+  assert.equal(stripMarkdown('## Do\n- pin `debug@4.4.1`\n* rotate secrets'), 'Do\npin debug@4.4.1\nrotate secrets');
+  assert.equal(stripMarkdown('Notify: Payments, Docs, `'), 'Notify: Payments, Docs, ');
+  const segs = segments('**Notify the `Payments` team** first', { claims: [{ text: 'Payments', ok: true }], flagged: [] });
+  assert.ok(segs.every((s) => s.kind !== 'text' || !s.text.includes('*')));
+  assert.deepEqual(verdicts('**Notify the `Payments` team** first', { claims: [{ text: 'Payments', ok: true }], flagged: [] }), [['Payments', 'verified']]);
+});
+
+test('Verdict / Notify / Do lines carry their label and share one first-mention set', () => {
+  const g = { claims: [{ text: 'Payments', ok: true }], flagged: [] };
+  const ls = lines('Verdict: `acme/web` is LOCKED.\n**Notify:** `Payments`.\nDo: tell `Payments` and `acme/web`.', g);
+  assert.deepEqual(ls.map((l) => l.label), ['Verdict', 'Notify', 'Do']);
+  const firsts = ls.flatMap((l) => l.segs.flatMap((s) => (s.kind === 'entity' ? [[s.text, s.first]] : [])));
+  assert.deepEqual(firsts, [['acme/web', true], ['Payments', true], ['Payments', false], ['acme/web', false]]);
+  assert.equal(lines('just prose', null)[0]!.label, null);
+});
+
+test('the coverage line is split off only when it is a separate last line that counts something', () => {
+  assert.deepEqual(splitCoverage('Platform owns four.\n\n6 of 14 prod-only repos listed.'), { body: 'Platform owns four.', coverage: '6 of 14 prod-only repos listed.' });
+  assert.equal(splitCoverage('Coverage: 6 of 14 repos').coverage, null); // a one-line answer is the answer
+  assert.equal(splitCoverage('Verdict: x.\nDo: fix 3 of 5 repos').coverage, null);
+  assert.equal(splitCoverage('A.\nCoverage: **6 of 14** repos.').coverage, '6 of 14 repos.');
+});
+
+const card = (id: string, tool: string, rows: Record<string, unknown>[], evidence: string[], params: Record<string, unknown> = {}, summary = ''): ProofCard => ({ id, tool, params, result: { summary, rows, evidence } });
+const cards: ProofCard[] = [
+  card('0:t1', 'suspect_versions', [{ version: 'debug@4.4.2', package: 'debug' }], ['qix', 'debug@4.4.2'], { maintainer: 'qix' }),
+  card('0:t2', 'incident_exposure', [{ repo: 'acme/web', team: 'Payments' }, { repo: 'github/docs', team: 'Docs' }], ['acme/web', 'Payments', 'github/docs', 'Docs'], { incident: 'qix-2025-09-08' }, 'at 13:30: 1 LOCKED of 21 repos'),
+  card('0:t3', 'route_owners', [{ team: 'Docs', repos: ['github/docs'] }, { team: 'Payments', repos: ['acme/web'] }], ['Docs', 'Payments']),
+  card('0:t4', 'explain_path', [{ repo: 'github/docs', version: 'chalk@5.6.1', id: 'E2' }, { repo: 'github/docs', version: 'chalk@5.6.1' }], ['github/docs']),
+  card('0:t5', 'draft_remediation', [{ repo: 'acme/web', overrides: { debug: '4.4.1' } }], ['acme/web', 'debug@4.4.1']),
+];
+
+test('proofFor: an [E#] is the explain_path row that carries it', () => {
+  const p = proofFor('E2', cards)!;
+  assert.equal(p.card.tool, 'explain_path');
+  assert.equal(p.row, 0);
+  assert.equal(proofFor('E9', cards), null);
+});
+
+test('proofFor: the card whose first column is the entity wins, and its row is named', () => {
+  assert.deepEqual([proofFor('acme/web', cards)!.card.tool, proofFor('acme/web', cards)!.row], ['incident_exposure', 0]);
+  assert.deepEqual([proofFor('Payments', cards)!.card.tool, proofFor('Payments', cards)!.row], ['route_owners', 1]); // not the exposure card, where team is the 2nd column
+  assert.deepEqual([proofFor('debug@4.4.2', cards)!.card.tool, proofFor('debug@4.4.2', cards)!.row], ['suspect_versions', 0]);
+});
+
+test('proofFor: evidence, arguments and the summary count when no row holds the entity', () => {
+  assert.equal(proofFor('debug@4.4.1', cards)!.card.tool, 'draft_remediation');
+  assert.equal(proofFor('debug@4.4.1', cards)!.row, null);
+  assert.equal(proofFor('qix-2025-09-08', cards)!.card.tool, 'incident_exposure'); // an argument
+  assert.equal(proofFor('21 repos', cards)!.card.tool, 'incident_exposure'); // a count in the summary
+  assert.equal(proofFor('nothing/here', cards), null);
+});
+
+test('claimMap groups verified claims by card in feed order and keeps the rest apart', () => {
+  const m = claimMap([{ text: 'Payments', ok: true }, { text: 'acme/web', ok: true }, { text: 'E2', ok: true }, { text: 'ghost', ok: false }, { text: '99 widgets', ok: true }, { text: 'acme/web', ok: true }], cards);
+  assert.deepEqual(m.groups.map((g) => [g.card.tool, g.claims]), [['incident_exposure', ['acme/web']], ['route_owners', ['Payments']], ['explain_path', ['E2']]]);
+  assert.deepEqual(m.unmatched, ['99 widgets']);
 });

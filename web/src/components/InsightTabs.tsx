@@ -2,9 +2,12 @@
  * Props: report (Report), cards (all ToolCardState of the run), graph (graph name from the start event or null),
  *        totalMs (server-reported run time or null).
  * Tabs: Concentration (bars), All Cypher used (one <pre>, Copy all), Triage history (recall_triage rows; empty
- * until that tool has run), Graph stats (counts from this run's real tool results). role=tablist, arrow keys.
+ * until that tool has run), Graph stats (graph name, per-tool queries / rows / FalkorDB ms, and the schema this run's
+ * Cypher touched; all read from this run's real tool results). The Concentration tab says where its scores come from
+ * (algo.pageRank at ingest). role=tablist, arrow keys.
  */
 import { useId, useRef, useState, type KeyboardEvent } from 'react';
+import { schemaOf } from '../data/cypher.ts';
 import { fmtMs, utc } from '../data/format.ts';
 import type { Report } from '../data/types.ts';
 import type { ToolCardState } from '../data/useTriage.ts';
@@ -29,6 +32,7 @@ export function InsightTabs({ report, cards, graph, totalMs }: InsightTabsProps)
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   const results = cards.flatMap((c) => (c.result ? [{ card: c, r: c.result }] : []));
   const cypher = results.flatMap(({ r }) => r.cypher.map((q) => `// ${r.tool}\n${q}`)).join('\n\n');
+  const schema = schemaOf(results.flatMap(({ r }) => r.cypher));
   const history = results.find(({ r }) => r.tool === 'recall_triage')?.r.rows ?? [];
   const shares = influenceShares(report.concentration);
   const repos = Object.values(report.counts).reduce((a, b) => a + b, 0);
@@ -92,6 +96,10 @@ export function InsightTabs({ report, cards, graph, totalMs }: InsightTabsProps)
                   </li>
                 ))}
               </ul>
+              <p className="mt-3 max-w-(--measure) text-xs text-fg-2">
+                The scores come from <code className="font-mono text-fg-1">algo.pageRank(&apos;Package&apos;, &apos;PKG_DEPENDS&apos;)</code>, run once when the graph was ingested and stored on each package. The
+                concentration_risk query sums them per maintainer.
+              </p>
             </>
           ) : (
             <EmptyState className="p-0" title="No concentration data" cause="The concentration_risk tool returned no maintainers for this run." />
@@ -102,7 +110,7 @@ export function InsightTabs({ report, cards, graph, totalMs }: InsightTabsProps)
               Copy all
             </Button>
             {cypher ? (
-              <pre tabIndex={0} role="region" aria-label="Cypher queries" className="max-h-72 w-full overflow-auto rounded-xs bg-bg-3 p-2 text-xs leading-[18px] text-fg-0">
+              <pre tabIndex={0} role="region" aria-label="Cypher queries" className="max-h-72 w-full overflow-auto rounded-xs bg-bg-3 p-2 text-xs leading-[18px] whitespace-pre-wrap text-fg-0 [overflow-wrap:anywhere]">
                 <code>{cypher}</code>
               </pre>
             ) : (
@@ -125,11 +133,11 @@ export function InsightTabs({ report, cards, graph, totalMs }: InsightTabsProps)
           ))}
         {tab === 3 && (
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5">
-            <dt className="text-fg-1">Graph</dt>
+            <dt className="text-fg-1">FalkorDB graph</dt>
             <dd className="font-mono text-xs text-fg-0">{graph ?? '–'}</dd>
             <dt className="text-fg-1">Queries run</dt>
             <dd className="font-mono text-xs text-fg-0 tabular-nums">{results.reduce((n, { r }) => n + r.cypher.length, 0)}</dd>
-            <dt className="text-fg-1">FalkorDB time</dt>
+            <dt className="text-fg-1">Time in FalkorDB</dt>
             <dd className="font-mono text-xs text-fg-0 tabular-nums">{fmtMs(results.reduce((n, { r }) => n + r.ms, 0))}</dd>
             {totalMs !== null && (
               <>
@@ -139,11 +147,21 @@ export function InsightTabs({ report, cards, graph, totalMs }: InsightTabsProps)
             )}
             <dt className="text-fg-1">Repos analysed</dt>
             <dd className="font-mono text-xs text-fg-0 tabular-nums">{repos}</dd>
+            {schema.labels.length > 0 && (
+              <>
+                <dt className="text-fg-1">Schema these queries touch</dt>
+                <dd className="font-mono text-xs break-words text-fg-0">
+                  {schema.labels.join(', ')}
+                  <span className="text-fg-1"> · </span>
+                  {schema.rels.join(', ')}
+                </dd>
+              </>
+            )}
             {results.map(({ card, r }) => (
               <div key={card.id} className="contents">
-                <dt className="font-mono text-xs text-fg-2">{r.tool}</dt>
+                <dt className="font-mono text-xs break-words text-fg-2">{r.tool}</dt>
                 <dd className="font-mono text-xs text-fg-1 tabular-nums">
-                  {r.rows.length} rows · {fmtMs(r.ms)}
+                  {r.cypher.length} {r.cypher.length === 1 ? 'query' : 'queries'} · {r.rows.length} rows · {fmtMs(r.ms)}
                 </dd>
               </div>
             ))}

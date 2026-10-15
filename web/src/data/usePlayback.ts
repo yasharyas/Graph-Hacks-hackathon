@@ -7,11 +7,14 @@ import { useReducedMotion } from 'motion/react';
 const MIN = 60_000;
 const floorMin = (ms: number) => Math.floor(ms / MIN) * MIN;
 
-export function usePlayback(from: number | null, to: number | null, durationMs = 12_000) {
+/** `startAt`: a position restored from a shared link (epoch ms, clamped by the caller): the track opens there, paused, instead of autoplaying. */
+export function usePlayback(from: number | null, to: number | null, durationMs = 12_000, startAt: number | null = null) {
   const reduce = useReducedMotion();
   const [at, setAt] = useState<number | null>(null);
   const [playing, setPlaying] = useState(false);
   const raf = useRef(0);
+  const startRef = useRef(startAt);
+  startRef.current = startAt;
 
   const stop = useCallback(() => {
     cancelAnimationFrame(raf.current);
@@ -54,7 +57,8 @@ export function usePlayback(from: number | null, to: number | null, durationMs =
   // First load (and each scenario change): autoplay, or jump to the end under reduced motion.
   useEffect(() => {
     if (from === null || to === null) return;
-    if (reduce) setAt(to);
+    if (startRef.current !== null && startRef.current >= from) setAt(floorMin(startRef.current));
+    else if (reduce) setAt(to);
     else {
       setAt(from);
       playFrom(from);

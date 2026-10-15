@@ -29,8 +29,9 @@ export function PathChip({ item, bad = false }: { item: string; bad?: boolean })
 export function HopDots({ hops }: { hops: number }) {
   const label = hops === 0 ? 'declared directly by the repo' : `${hops} ${hops === 1 ? 'hop' : 'hops'}`;
   return (
-    <span aria-label={label} title={label} className="font-mono text-2xs text-fg-2">
-      {hops === 0 ? 'direct' : '•'.repeat(Math.min(hops, 5)) + (hops > 5 ? `+${hops - 5}` : '')}
+    <span title={label} className="font-mono text-2xs text-fg-1">
+      <span aria-hidden>{hops === 0 ? 'direct' : '•'.repeat(Math.min(hops, 5)) + (hops > 5 ? `+${hops - 5}` : '')}</span>
+      <span className="sr-only">{label}</span>
     </span>
   );
 }

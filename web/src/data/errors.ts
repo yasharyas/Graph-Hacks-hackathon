@@ -38,6 +38,19 @@ export function fixFor(e: Failure, doing: Doing): string {
     case 404:
       return doing === 'analyze' ? 'Check the URL or lockfile, or try a sample repo.' : RETRY[doing];
     default:
-      return e.status && e.status >= 500 ? `The server hit an error. ${RETRY[doing]} If it keeps failing, share the request id.` : RETRY[doing];
+      return e.status && e.status >= 500 ? `${RETRY[doing]} If it keeps failing, share the request id.` : RETRY[doing];
   }
+}
+
+// Raw strings that leak from a proxy, a stream or a catch-all handler, in words a person can act on. The server's own
+// messages (already written for people, S12) pass through untouched.
+const PLAIN: [RegExp, string][] = [
+  [/upstream failure|bad gateway|gateway time-?out/i, "The graph server didn't answer. Try again."],
+  [/^something went wrong on our side/i, 'The graph server hit an error. Try again.'],
+  [/^triage failed on our side/i, 'The triage stopped on the server. Try again.'],
+  [/^the stream ended before the run finished/i, 'The run stopped before it finished.'],
+  [/^request failed \(5\d\d\)/i, "The graph server didn't answer. Try again."],
+];
+export function plainError(e: Pick<Failure, 'message'>): string {
+  return PLAIN.find(([re]) => re.test(e.message))?.[1] ?? e.message;
 }

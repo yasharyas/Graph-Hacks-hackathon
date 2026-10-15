@@ -158,7 +158,7 @@
   --cell-x: 12px;
   --cell-y: 8px;
   --pane-left: 320px;       /* tool feed; 360px from 1440 */
-  --pane-right: 420px;      /* exposure table; 480px from 1440 */
+  --pane-right: clamp(420px, 36vw, 600px); /* exposure table: 460 at 1280, 492 at 1366, 518 at 1440, 600 from 1667; the graph keeps >= 500 */
   --measure: 68ch;          /* narrative line length */
   --gutter: 16px;           /* 24px from 768 */
 
@@ -171,8 +171,9 @@
 }
 
 @media (min-width: 768px) { :root { --gutter: 24px; } }
-@media (min-width: 1440px) { :root { --pane-left: 360px; --pane-right: 480px; } }
-@media (pointer: coarse) { :root { --control-h: 44px; --row-h: 44px; } }
+@media (min-width: 1440px) { :root { --pane-left: 360px; } }
+/* Touch and phones: 44px controls (a phone emulated without a coarse pointer still gets them) and a 12px type floor. */
+@media (pointer: coarse), (max-width: 767px) { :root { --control-h: 44px; --row-h: 44px; --text-2xs: 0.75rem; } }
 
 /* ───────────────────────────── 3. Tailwind v4 theme ───────────────────────────────────────────── */
 
@@ -322,8 +323,11 @@
     outline-offset: var(--focus-ring-offset);
   }
   tr:focus-visible { outline-offset: -2px; scroll-margin-top: 40px; }
+  /* Programmatic focus targets (skip links, panes, tab panels) show where focus landed, inside their own edge. */
+  [tabindex='-1']:focus-visible { outline-offset: -2px; }
   button, [role='button'], a, summary { touch-action: manipulation; }
   code, kbd, pre, samp { font-family: var(--font-mono); font-size: 0.92em; }
+  @media (pointer: coarse), (max-width: 767px) { code, kbd, pre, samp { font-size: max(0.92em, 12px); } } /* 12px type floor on touch */
   .tabular, td[data-num], time { font-variant-numeric: tabular-nums; }
   [aria-disabled='true'], :disabled { opacity: var(--opacity-disabled); cursor: not-allowed; }
 }

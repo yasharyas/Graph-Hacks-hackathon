@@ -11,17 +11,23 @@
  *   onRemediate(repo)
  *   running, onCancelRun   "Cancel run" appears only while a triage is running
  *   onExport('md' | 'json') -> the downloaded file name; onShare() -> whether the link was copied
- * Footer: Copy (the active tab), Export report, Share link, Mark remediated (+ Undo), Cancel run. The dialog is modal,
- * so page toasts would sit dimmed and inert under its scrim: every outcome (copied, exported, marked, undone) is
- * reported by the polite status line inside it. Untrusted text renders as text.
+ * Fix tab: what the lockfile pins ("your lockfile pins chalk@5.4.1: safe", from Exposure.locked), then the server's
+ * overrides, steps and PR body verbatim (the server writes version-qualified keys and puts "npm ci from the committed
+ * lockfile" first: nothing here reorders or rewrites them). Notice tab: one Slack message for THIS repo, complete on its
+ * own (data/export.ts slackMessage). Every untrusted string renders as text.
+ * Footer, one row: Copy (the active tab), Mark remediated (+ Undo), and a "More actions" menu (whole-report .md / .json,
+ * share link). The dialog is modal, so page toasts would sit dimmed and inert under its scrim: every outcome (copied,
+ * exported, marked, undone) is reported by the polite status line inside it. Buttons are named by their visible text.
  */
 import { useEffect, useId, useRef, useState } from 'react';
+import { lockedOf, pinTargets, slackMessage } from '../data/export.ts';
 import { HEAD_NOTE, isHead, utc } from '../data/format.ts';
 import type { Report } from '../data/types.ts';
 import { Button, IconButton } from './Button.tsx';
 import { copyText } from './copy.ts';
 import { Check, Close, Copy, Download, LinkIcon } from './icons/Glyphs.tsx';
-import { PathChain } from './PathChip.tsx';
+import { IconFrame } from './icons/IconFrame.tsx';
+import { PathChain, PathChip } from './PathChip.tsx';
 import { HONEST_SEMANTICS, TierChip } from './TierChip.tsx';
 
 export type DrawerTab = 'fix' | 'notice';
@@ -48,10 +54,34 @@ const Block = ({ text }: { text: string }) => (
   </pre>
 );
 
+const Dots = () => (
+  <IconFrame size={16}>
+    <circle cx="5" cy="12" r="1" />
+    <circle cx="12" cy="12" r="1" />
+    <circle cx="19" cy="12" r="1" />
+  </IconFrame>
+);
+
+const menuItem = 'flex min-h-(--control-h) w-full items-center gap-2 rounded-xs px-3 text-left text-base text-fg-0 hov:bg-bg-3';
+
+/** The link a Slack message carries: this screen's address, pointed at the repo. */
+const linkFor = (repo: string): string => {
+  try {
+    const u = new URL(location.href);
+    u.searchParams.set('repo', repo);
+    return u.toString();
+  } catch {
+    return location.href;
+  }
+};
+
 export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, canUndo, onUndo, onRemediate, running, onCancelRun, onExport, onShare }: FixDrawerProps) {
   const ref = useRef<HTMLDialogElement>(null);
   const undoRef = useRef<HTMLButtonElement>(null);
+  const moreRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const [note, setNote] = useState('');
+  const [menu, setMenu] = useState(false);
   const say = (text: string) => setNote(text);
   const shown = useRef<string | null>(repo);
   if (repo) shown.current = repo; // keep the content on screen while the exit transition runs
@@ -63,22 +93,37 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
     if (repo && !d.open) d.showModal();
     else if (!repo && d.open) d.close();
     setNote(''); // a new repo or a closed drawer starts with a clean status line
+    setMenu(false);
   }, [repo]);
   // "Mark remediated" unmounts the button that had focus: land on Undo, the next thing a person might want.
   useEffect(() => {
     if (canUndo) undoRef.current?.focus();
   }, [canUndo]);
+  // The menu closes on a press outside it; Escape closes it before it closes the dialog (see onCancel).
+  useEffect(() => {
+    if (!menu) return;
+    const away = (e: PointerEvent) => {
+      if (!menuRef.current?.contains(e.target as Node) && !moreRef.current?.contains(e.target as Node)) setMenu(false);
+    };
+    document.addEventListener('pointerdown', away);
+    return () => document.removeEventListener('pointerdown', away);
+  }, [menu]);
 
   const r = shown.current;
   const exposure = report.exposures.find((e) => e.repo === r);
-  const path = report.paths.find((p) => p.repo === r);
+  const paths = report.paths.filter((p) => p.repo === r);
+  const path = paths[0];
   const fix = report.remediations.find((f) => f.repo === r);
   const notice = report.notices.find((n) => n.team === exposure?.team);
   const bad = new Set(report.incident.versions.map((v) => v.id));
-  const fixText = fix ? `${JSON.stringify({ overrides: fix.overrides }, null, 2)}\n\n${fix.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\n${fix.prBody}` : '';
+  const overrides = fix ? JSON.stringify({ overrides: fix.overrides }, null, 2) : '';
+  const qualified = fix ? Object.keys(fix.overrides).some((k) => k.lastIndexOf('@') > 0) : false;
+  const fixText = fix ? `${overrides}\n\n${fix.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\n${fix.prBody}` : '';
+  const slack = exposure ? slackMessage({ exposure, paths, fix, incident: report.incident, link: linkFor(exposure.repo) }) : '';
   const copyLabel = tab === 'fix' ? 'Fix' : 'Slack message';
-  const copyBody = tab === 'fix' ? fixText : (notice?.text ?? '');
+  const copyBody = tab === 'fix' ? fixText : slack;
   const copy = async () => say((await copyText(copyBody, copyLabel, true)) ? `${copyLabel} copied` : `Clipboard blocked. Select the ${copyLabel.toLowerCase()} text above and copy it manually.`);
+  const pinned = exposure ? lockedOf(exposure) : [];
 
   return (
     <dialog
@@ -86,6 +131,12 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
       className="drawer"
       aria-labelledby={`${id}-title`}
       onClose={onClose}
+      onCancel={(e) => {
+        if (!menu) return;
+        e.preventDefault(); // Escape closes the open menu first, not the whole drawer
+        setMenu(false);
+        moreRef.current?.focus();
+      }}
       onClick={(e) => e.target === ref.current && onClose()}
     >
       {r && exposure && (
@@ -118,6 +169,27 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
                 <PathChain path={path} badVersions={bad} />
               </div>
             )}
+            {pinned.length > 0 && (
+              <div className="mb-4">
+                <p className="label-caps mb-1.5">Your lockfile pins</p>
+                <ul className="flex flex-col gap-1.5 text-sm text-fg-0">
+                  {pinned.map((p) => (
+                    <li key={p} className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <PathChip item={p} bad={bad.has(p)} />
+                      <span className="inline-flex items-center gap-1 text-fg-1">
+                        {bad.has(p) ? (
+                          'a malicious version: npm ci installs it'
+                        ) : (
+                          <>
+                            <Check size={14} className="text-tier-clean" /> safe: npm ci installs exactly this
+                          </>
+                        )}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             <div role="tablist" aria-label="Drawer" className="mb-3 flex gap-1 border-b border-line-1">
               {(['fix', 'notice'] as const).map((t) => (
@@ -137,7 +209,7 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
                       document.getElementById(`${id}-${t === 'fix' ? 'notice' : 'fix'}`)?.focus();
                     }
                   }}
-                  className={`-mb-px border-b-2 px-3 py-2 text-base ${tab === t ? 'border-fg-0 text-fg-0' : 'border-transparent text-fg-1'}`}
+                  className={`-mb-px border-b-2 px-3 py-2 text-base pointer-coarse:min-h-11 ${tab === t ? 'border-fg-0 text-fg-0' : 'border-transparent text-fg-1'}`}
                 >
                   {t === 'fix' ? 'Fix' : 'Notice'}
                 </button>
@@ -149,11 +221,13 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
                 (fix ? (
                   <>
                     <p className="label-caps">package.json overrides</p>
-                    <Block text={JSON.stringify({ overrides: fix.overrides }, null, 2)} />
+                    <Block text={overrides} />
+                    {qualified && <p className="text-xs text-fg-1">Each key names the exact bad version it replaces, so other versions of the same package in the tree are untouched.</p>}
+                    {pinTargets(fix.overrides).length > 0 && <p className="text-xs text-fg-1">Pins: <span className="font-mono">{pinTargets(fix.overrides).join(', ')}</span></p>}
                     <p className="label-caps">Steps</p>
                     <ol className="list-decimal pl-5 text-fg-0">
-                      {fix.steps.map((s) => (
-                        <li key={s} className="mb-1">
+                      {fix.steps.map((s, i) => (
+                        <li key={i} className="mb-1">
                           {s}
                         </li>
                       ))}
@@ -168,70 +242,82 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
                       : `No fix was drafted for this repo. Each run drafts a path and a fix for its top ${report.remediations.length || 5} exposures only. Ask a follow-up about this repo to get its path.`}
                   </p>
                 ))}
-              {tab === 'notice' &&
-                (notice ? (
-                  <>
-                    <p className="text-fg-1">
-                      For <span className="text-fg-0">{notice.team}</span> in <span className="font-mono text-xs text-fg-0">{notice.channel}</span> (draft only, nothing is sent).
-                    </p>
-                    <Block text={notice.text} />
-                  </>
-                ) : (
-                  <p className="text-fg-1">No notice was drafted: this repo has no owning team in the graph.</p>
-                ))}
+              {tab === 'notice' && (
+                <>
+                  <p className="text-fg-1">
+                    {notice ? (
+                      <>
+                        For <span className="text-fg-0">{notice.team}</span> in <span className="font-mono text-xs text-fg-0">{notice.channel}</span>
+                      </>
+                    ) : (
+                      'No owning team is mapped for this repo'
+                    )}{' '}
+                    (draft only, nothing is sent). It names this repo only.
+                  </p>
+                  <Block text={slack} />
+                </>
+              )}
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 border-t border-line-1 p-4">
-            <p role="status" className="min-h-5 basis-full text-xs text-fg-1 empty:hidden">
+          <div className="flex flex-col gap-2 border-t border-line-1 p-4">
+            <p role="status" className="min-h-5 text-xs text-fg-1 empty:hidden">
               {note}
             </p>
-            <Button variant="primary" icon={<Copy size={16} />} disabled={!copyBody} onClick={() => void copy()}>
-              {tab === 'fix' ? 'Copy fix' : 'Copy as Slack message'}
-            </Button>
-            <Button
-              icon={<Download size={16} />}
-              aria-label="Export the whole report as Markdown"
-              title="The whole triage report, not just this repo"
-              onClick={() => say(`Exported ${onExport('md')}`)}
-            >
-              Report .md
-            </Button>
-            <Button
-              icon={<Download size={16} />}
-              aria-label="Export the whole report as JSON"
-              title="The whole triage report, not just this repo"
-              onClick={() => say(`Exported ${onExport('json')}`)}
-            >
-              Report .json
-            </Button>
-            <IconButton
-              label="Copy share link"
-              icon={<LinkIcon size={16} />}
-              onClick={async () => say((await onShare()) ? 'Link copied' : 'Clipboard blocked. Copy the address from the browser bar.')}
-            />
-            {remediatedAt !== null ? (
-              <span className="inline-flex items-center gap-1.5 text-sm text-tier-clean">
-                <Check size={16} /> remediated {utc(remediatedAt)}
-                {canUndo && (
-                  <button
-                    ref={undoRef}
-                    type="button"
-                    className="ml-1 inline-flex min-h-(--control-h) items-center rounded-xs text-link underline underline-offset-2"
-                    onClick={() => (onUndo(r), say('Undone: not marked remediated'))}
-                  >
-                    Undo
-                  </button>
-                )}
-              </span>
-            ) : (
-              <Button onClick={() => (onRemediate(r), say('Marked remediated. Undo is available for 10 seconds.'))}>Mark remediated</Button>
-            )}
-            {running && (
-              <Button variant="ghost" onClick={onCancelRun}>
-                Cancel run
+            <div className="relative flex flex-wrap items-center gap-2">
+              <Button variant="primary" className="px-3" icon={<Copy size={16} />} disabled={!copyBody} onClick={() => void copy()}>
+                {tab === 'fix' ? 'Copy fix' : 'Copy message'}
               </Button>
-            )}
+              {remediatedAt !== null ? (
+                <span className="inline-flex items-center gap-1.5 text-sm text-tier-clean">
+                  <Check size={16} /> remediated {utc(remediatedAt)}
+                  {canUndo && (
+                    <button
+                      ref={undoRef}
+                      type="button"
+                      className="ml-1 inline-flex min-h-(--control-h) items-center rounded-xs text-link underline underline-offset-2"
+                      onClick={() => (onUndo(r), say('Undone: not marked remediated'))}
+                    >
+                      Undo
+                    </button>
+                  )}
+                </span>
+              ) : (
+                <Button className="px-3" onClick={() => (onRemediate(r), say('Marked remediated. Undo is available for 10 seconds.'))}>Mark remediated</Button>
+              )}
+              <IconButton ref={moreRef} label="More actions" aria-expanded={menu} aria-controls={`${id}-menu`} icon={<Dots />} onClick={() => setMenu((m) => !m)} />
+              {menu && (
+                <div
+                  ref={menuRef}
+                  id={`${id}-menu`}
+                  role="group"
+                  aria-label="More actions"
+                  className="absolute right-0 bottom-full z-(--z-dropdown) mb-2 w-64 origin-bottom-right animate-enter rounded-sm border border-line-2 bg-bg-2 p-1 shadow-popover"
+                  onBlur={(e) => {
+                    if (!e.currentTarget.contains(e.relatedTarget) && e.relatedTarget !== moreRef.current) setMenu(false);
+                  }}
+                >
+                  <button type="button" className={menuItem} onClick={() => (say(`Exported ${onExport('md')}`), setMenu(false))}>
+                    <Download size={16} /> Whole report (.md)
+                  </button>
+                  <button type="button" className={menuItem} onClick={() => (say(`Exported ${onExport('json')}`), setMenu(false))}>
+                    <Download size={16} /> Whole report (.json)
+                  </button>
+                  <button
+                    type="button"
+                    className={menuItem}
+                    onClick={async () => (say((await onShare()) ? 'Link copied' : 'Clipboard blocked. Copy the address from the browser bar.'), setMenu(false))}
+                  >
+                    <LinkIcon size={16} /> Copy share link
+                  </button>
+                </div>
+              )}
+              {running && (
+                <Button variant="ghost" onClick={onCancelRun}>
+                  Cancel run
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       )}

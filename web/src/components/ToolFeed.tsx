@@ -1,27 +1,35 @@
-/* ToolFeed: the left pane. Tool cards (triage round), the narrative with claim chips, then each Ask follow-up
- * (question, its tool cards, its narration), then the Ask box.
- * The verdict comes first: when the narrative exists it sits above the tool calls that produced it, so the answer is
- * not buried under 17 cards (a follow-up reads the same way: question, answer, then its tool calls).
+/* ToolFeed: the left pane. The narrative (verdict first), then the tool calls that produced it, then each Ask
+ * follow-up (question, its answer, its tool calls), with the Ask box pinned to the bottom of the pane.
  * Props:
  *   cards, followUps, narration, guard   straight from useTriage()
  *   status       TriageState['status']; drives the empty and error states and the live summary
  *   error        TriageError | null: a full-pane state when there are no cards, a banner above them otherwise
  *   scenario     for each card's "Show plan"
- *   onRun        empty / error state action (the primary "Run triage")
- *   onSelectEntity(entity)   a claim chip or [E1] was clicked: highlight that path
- *   footer       the AskBox (rendered last)
+ *   onRun        empty / error state action, and the stale narrative's "Re-run to update"
+ *   onSelectEntity(entity)   a claim chip or [E1] was clicked: highlight that path in the graph (desktop only: below
+ *                1024px the graph is another panel and the proof is what the person asked for)
+ *   clockAt      scenario clock now (epoch ms); passed to the narrative, which dims itself when it describes another clock
+ *   footer       the AskBox, pinned: sticky at the bottom of the pane, fixed above the tab bar below 1024px
+ *
+ * Proof: every claim chip, [E#] tag and claim-map entry calls trace(entity). The tool call that returned it (data/
+ * narration.ts proofFor) opens, opens its Cypher, scrolls into view, takes focus and flashes the row; a polite status
+ * line says what opened. Tool cards are collapsed by default (one line, one tab stop); "Expand all" opens them.
+ * A run of one tool (21 explain_path calls) shows its first 3; the rest sit behind one toggle unless opened or traced.
+ * (A phone held sideways has no height to spare: below 560px tall the Ask box scrolls with the feed instead.)
+ * Keyboard: two skip links open the feed ("Skip to Ask", "Skip to exposure table").
  * The live region announces a throttled summary ("2 of 5 tools done"), never each card.
  */
-import { useEffect, useRef, type ReactNode } from 'react';
-import { fixFor } from '../data/errors.ts';
-import type { FollowUp, Guard, Narration, ToolCardState, TriageError, TriageState } from '../data/useTriage.ts';
+import { Fragment, useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { fixFor, plainError } from '../data/errors.ts';
+import { proofFor } from '../data/narration.ts';
 import type { ScenarioId } from '../data/types.ts';
+import type { FollowUp, Guard, Narration, ToolCardState, TriageError, TriageState } from '../data/useTriage.ts';
 import { Button } from './Button.tsx';
 import { EmptyState } from './EmptyState.tsx';
 import { CircleAlert } from './icons/Glyphs.tsx';
 import { NarrationBlock, NarrativePanel } from './NarrativePanel.tsx';
 import { scrollPaneTo } from './scrollPane.ts';
-import { ToolCard } from './ToolCard.tsx';
+import { subject, ToolCard, type Trace } from './ToolCard.tsx';
 
 export interface ToolFeedProps {
   cards: ToolCardState[];
@@ -33,22 +41,46 @@ export interface ToolFeedProps {
   scenario: ScenarioId | null;
   onRun: () => void;
   onSelectEntity: (entity: string) => void;
+  clockAt?: number;
   footer?: ReactNode;
 }
 
-/** "Tool calls · 17 · 187.4 ms" */
+/** Consecutive cards of the same tool, in feed order. */
+const runs = (cs: ToolCardState[]) => cs.reduce<ToolCardState[][]>((rs, c) => (rs.at(-1)?.[0].tool === c.tool ? rs.at(-1)!.push(c) : rs.push([c]), rs), []);
+
+/** "Tool calls . 17 . 187.4 ms" */
 const calls = (cs: ToolCardState[]) => `Tool calls · ${cs.length} · ${cs.reduce((n, c) => n + (c.result?.ms ?? 0), 0).toFixed(1)} ms`;
 
 const failTitle = (e: TriageError) =>
   e.status === 0 ? 'The server is not reachable' : e.status === 429 ? 'Triage is rate limited' : e.status === 413 || e.status === 415 ? 'The request was refused' : 'The triage did not run';
 
-export function ToolFeed({ cards, followUps, narration, guard, status, error, scenario, onRun, onSelectEntity, footer }: ToolFeedProps) {
+const skip =
+  'sr-only focus:not-sr-only focus:rounded-sm focus:bg-bg-3 focus:px-3 focus:py-2 focus:text-sm focus:text-fg-0';
+const wide = () => matchMedia('(min-width: 1024px)').matches;
+const RUN = 3; // cards of one tool shown before "Show N more"
+
+export function ToolFeed({ cards, followUps, narration, guard, status, error, scenario, onRun, onSelectEntity, clockAt, footer }: ToolFeedProps) {
   const lastRef = useRef<HTMLElement>(null);
+  const nonce = useRef(0);
+  const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
+  const [target, setTarget] = useState<(Trace & { id: string }) | null>(null);
+  const [said, setSaid] = useState('');
+  const [more, setMore] = useState<ReadonlySet<string>>(new Set()); // runs shown in full, keyed by their first card id
   useEffect(() => {
     if (followUps.length && lastRef.current) scrollPaneTo(lastRef.current);
   }, [followUps.length]);
+  // A new run starts with no cards; card ids repeat from run to run, so what was open (or pointed at) must not carry over.
+  const empty = cards.length === 0;
+  useEffect(() => {
+    if (!empty) return;
+    setOpen(new Set());
+    setMore(new Set());
+    setTarget(null);
+    setSaid('');
+  }, [empty]);
 
   const round = (n: number) => cards.filter((c) => c.round === n);
+  const pool = (n: number) => [...round(n), ...cards.filter((c) => c.round !== n)]; // a follow-up may cite the triage's cards too
   const last = followUps.at(-1);
   const done = round(0).filter((c) => c.status === 'done').length;
   const summary =
@@ -67,6 +99,80 @@ export function ToolFeed({ cards, followUps, narration, guard, status, error, sc
                 : status === 'error'
                   ? 'Triage failed'
                   : '';
+
+  /** A claim was clicked: open the tool call that returned it, and (desktop) highlight its path in the graph. */
+  const trace = (entity: string, n: number) => {
+    if (wide()) onSelectEntity(entity);
+    const hit = proofFor(entity, pool(n));
+    if (!hit) return setSaid(`No single tool call returned ${entity}: it was checked against the run as a whole.`);
+    const sub = subject(hit.card.params);
+    setOpen((s) => new Set(s).add(hit.card.id));
+    setTarget({ id: hit.card.id, row: hit.row, nonce: ++nonce.current });
+    setSaid(`Opened ${hit.card.tool}${sub ? `, ${sub}` : ''}, the call that returned ${entity}. Its Cypher is open${hit.row !== null ? ' and the matching row is highlighted' : ''}.`);
+  };
+
+  const toAsk = (e: MouseEvent) => {
+    e.preventDefault();
+    document.getElementById('ask-question')?.focus();
+  };
+  const toTable = (e: MouseEvent) => {
+    e.preventDefault();
+    const focus = () => document.getElementById('exposures')?.focus();
+    if (wide()) return focus();
+    document.querySelector<HTMLButtonElement>('nav[aria-label="Panels"] button:last-child')?.click(); // below 1024px the table is another panel
+    requestAnimationFrame(() => requestAnimationFrame(focus));
+  };
+
+  const list = (n: number) => {
+    const cs = round(n);
+    if (!cs.length) return null;
+    const every = cs.every((c) => c.status !== 'done' || open.has(c.id));
+    return (
+      <>
+        <div className="flex items-baseline justify-between gap-2">
+          <h3 className="label-caps">{calls(cs)}</h3>
+          {cs.some((c) => c.status === 'done') && (
+            <button
+              type="button"
+              className="rounded-xs text-xs text-fg-1 underline underline-offset-2 pointer-coarse:min-h-11 hov:text-fg-0"
+              onClick={() => setOpen((s) => (every ? new Set([...s].filter((id) => !cs.some((c) => c.id === id))) : new Set([...s, ...cs.filter((c) => c.status === 'done').map((c) => c.id)])))}
+            >
+              {every ? 'Collapse all' : 'Expand all'}
+            </button>
+          )}
+        </div>
+        {runs(cs).map((run) => {
+          const full = more.has(run[0].id);
+          const hidden = full ? [] : run.slice(RUN).filter((c) => !open.has(c.id) && target?.id !== c.id);
+          return (
+            <Fragment key={run[0].id}>
+              {run.filter((c) => !hidden.includes(c)).map((c) => (
+                <ToolCard
+                  key={c.id}
+                  card={c}
+                  scenario={scenario}
+                  index={cs.indexOf(c)}
+                  open={open.has(c.id)}
+                  onOpenChange={(o) => setOpen((s) => new Set(o ? [...s, c.id] : [...s].filter((id) => id !== c.id)))}
+                  trace={target?.id === c.id ? target : null}
+                />
+              ))}
+              {(full || hidden.length > 0) && (
+                <button
+                  type="button"
+                  aria-expanded={full}
+                  className="self-start rounded-xs text-xs text-fg-1 underline underline-offset-2 pointer-coarse:min-h-11 hov:text-fg-0"
+                  onClick={() => setMore((s) => (full ? new Set([...s].filter((id) => id !== run[0].id)) : new Set(s).add(run[0].id)))}
+                >
+                  {full ? `Show fewer ${run[0].tool} calls` : `Show ${hidden.length} more ${run[0].tool} ${hidden.length === 1 ? 'call' : 'calls'}`}
+                </button>
+              )}
+            </Fragment>
+          );
+        })}
+      </>
+    );
+  };
 
   if (cards.length === 0 && status !== 'running') {
     return (
@@ -102,23 +208,31 @@ export function ToolFeed({ cards, followUps, narration, guard, status, error, sc
       <p role="status" className="sr-only">
         {summary}
       </p>
+      <p role="status" className="sr-only">
+        {said}
+      </p>
+      <nav aria-label="Skip links" className="flex flex-wrap gap-2">
+        {footer && (
+          <a href="#ask-question" onClick={toAsk} className={skip}>
+            Skip to Ask
+          </a>
+        )}
+        <a href="#exposures" onClick={toTable} className={skip}>
+          Skip to exposure table
+        </a>
+      </nav>
       {cards.length === 0 && <p className="p-1 text-sm text-fg-1">Connecting to the graph&hellip;</p>}
-      <NarrativePanel narration={narration} guard={guard} onSelectEntity={onSelectEntity} />
-      {narration && round(0).length > 0 && <h3 className="label-caps">{calls(round(0))}</h3>}
-      {round(0).map((c, i) => (
-        <ToolCard key={c.id} card={c} scenario={scenario} index={i} />
-      ))}
+      <NarrativePanel narration={narration} guard={guard} onTrace={(e) => trace(e, 0)} cards={pool(0)} clockAt={clockAt} onRerun={onRun} />
+      {list(0)}
       {status === 'error' && error && cards.length > 0 && (
-        <div role="alert" className="flex flex-col items-start gap-1.5 text-sm">
-          <p className="flex items-start gap-2 text-infect-400">
-            <CircleAlert size={16} className="mt-0.5 shrink-0" />
-            {error.message}
+        <div role="alert" className="flex flex-col items-start gap-1.5 rounded-sm border border-line-3 p-3 text-sm">
+          <p className="flex items-start gap-2 text-fg-0">
+            <CircleAlert size={16} className="mt-0.5 shrink-0 text-fg-1" />
+            {plainError(error)}
           </p>
           <p className="text-fg-1">{fixFor(error, 'triage')}</p>
           {error.requestId && <p className="font-mono text-xs text-fg-2">request <span className="select-all text-fg-1">{error.requestId}</span></p>}
-          <Button variant="primary" onClick={onRun}>
-            Run triage again
-          </Button>
+          <Button onClick={onRun}>Run triage again</Button>
         </div>
       )}
       {followUps.map((f, i) => (
@@ -132,15 +246,22 @@ export function ToolFeed({ cards, followUps, narration, guard, status, error, sc
             <span className="label-caps mr-2">You asked</span>
             {f.question}
           </p>
-          {f.narration && <NarrationBlock narration={f.narration} guard={f.guard} onSelectEntity={onSelectEntity} idSuffix={`-${i}`} />}
-          {f.narration && round(i + 1).length > 0 && <h3 className="label-caps">{calls(round(i + 1))}</h3>}
-          {round(i + 1).map((c, j) => (
-            <ToolCard key={c.id} card={c} scenario={scenario} index={j} />
-          ))}
+          {f.narration && <NarrationBlock narration={f.narration} guard={f.guard} onTrace={(e) => trace(e, i + 1)} cards={pool(i + 1)} idSuffix={`-${i}`} />}
+          {list(i + 1)}
           {f.status === 'error' && !f.narration && <p className="text-sm text-fg-2">This follow-up got no answer. It does not count toward the limit.</p>}
         </section>
       ))}
-      {footer}
+      {footer && (
+        <>
+          <div aria-hidden className="h-20 lg:hidden [@media(max-height:559px)]:hidden" />
+          <div
+            id="ask"
+            className="z-(--z-sticky) -mx-3 -mb-3 border-t border-line-1 bg-bg-1 px-3 pt-2 pb-3 max-lg:mx-0 max-lg:mb-0 max-lg:[@media(min-height:560px)]:fixed max-lg:[@media(min-height:560px)]:inset-x-0 max-lg:[@media(min-height:560px)]:bottom-(--tabbar-h) lg:sticky lg:-bottom-3"
+          >
+            {footer}
+          </div>
+        </>
+      )}
     </div>
   );
 }

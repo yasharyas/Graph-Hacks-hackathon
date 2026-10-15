@@ -2,7 +2,7 @@
  * toast({ message, tone?: 'info' | 'success' | 'error', action?: { label, onClick }, ms? }) returns the id;
  * dismissToast(id) removes it. Defaults: 4 s, 10 s when an action (Undo) is attached.
  * Bottom-left, above the tab bar on mobile, never steals focus, announced politely. Timers pause on hover and
- * while the tab is hidden.
+ * while the tab is hidden. Errors are neutral, never infection red.
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
@@ -61,7 +61,8 @@ function ToastView({ item }: { item: ToastItem }) {
   }, [hover, hidden, item.id]);
 
   const Icon = item.tone === 'success' ? Check : CircleAlert;
-  const iconColor = item.tone === 'success' ? 'text-tier-clean' : item.tone === 'error' ? 'text-infect-400' : 'text-fg-1';
+  // red means infected here: a failed copy or save is neutral (fg-0 on the dark toast), only success is tinted
+  const iconColor = item.tone === 'success' ? 'text-tier-clean' : item.tone === 'error' ? 'text-fg-0' : 'text-fg-1';
   return (
     <motion.li
       initial={{ opacity: 0, y: 12 }}

@@ -26,7 +26,12 @@ export interface ToolCardState {
 export interface Narration {
   mode: LlmMode;
   provider: string | null;
+  /** The deterministic Verdict / Notify / Do built from the report. */
   text: string;
+  /** An optional short analyst summary written by the LLM (server-guarded); `mode` / `provider` describe it. */
+  note?: string | null;
+  /** The scenario clock this narration describes (epoch ms): the narrative dims when the scrubber is elsewhere. */
+  at?: number;
 }
 export interface Guard {
   verified: number;
@@ -133,7 +138,7 @@ function fold(s: TriageState, e: TriageEvent): TriageState {
     case 'report':
       return { ...s, report: e.report };
     case 'narration': {
-      const narration = { mode: e.mode, provider: e.provider, text: e.text };
+      const narration = { mode: e.mode, provider: e.provider, text: e.text, note: e.note ?? null, at: e.at };
       return asking(s) ? { ...s, followUps: patchLast(s, { narration }) } : { ...s, narration, mode: e.mode };
     }
     case 'guard': {

@@ -16,9 +16,10 @@ import { ShieldPulseIcon } from './icons/ShieldPulseIcon.tsx';
 
 export type ScenarioChoice = ScenarioId | 'alert';
 
-const OPTIONS: { id: ScenarioChoice; label: string }[] = [
-  { id: 'qix-2025-09-08', label: 'qix · Sept 2025' },
-  { id: 'axios-2026-03-31', label: 'axios · Mar 2026' },
+// `tail` (the date) is dropped on phones so all three segments fit in 328px without a hidden, clipped third one.
+const OPTIONS: { id: ScenarioChoice; label: string; tail?: string }[] = [
+  { id: 'qix-2025-09-08', label: 'qix', tail: ' · Sept 2025' },
+  { id: 'axios-2026-03-31', label: 'axios', tail: ' · Mar 2026' },
   { id: 'alert', label: 'Describe an alert…' },
 ];
 
@@ -50,7 +51,8 @@ export function ScenarioControl({
   };
 
   return (
-    <div role="radiogroup" aria-label="Scenario" className="inline-flex h-8 shrink-0 rounded-sm border border-line-2 p-px pointer-coarse:h-11">
+    // 48px tall on phones and touch: the segments inside are 44px.
+    <div role="radiogroup" aria-label="Scenario" className="inline-flex h-8 shrink-0 rounded-sm border border-line-2 p-px max-md:h-12 pointer-coarse:h-12">
       {OPTIONS.map((o, i) => {
         const selected = o.id === value;
         return (
@@ -63,16 +65,19 @@ export function ScenarioControl({
             tabIndex={selected ? 0 : -1}
             onClick={() => onChange(o.id)}
             onKeyDown={(e) => onKey(e, i)}
-            className={`inline-flex items-center gap-2 whitespace-nowrap rounded-xs px-3 text-sm transition-colors duration-(--dur-fast) ease-out hov:bg-bg-3 aria-checked:bg-bg-3 aria-checked:text-fg-0 ${
+            className={`inline-flex items-center gap-2 whitespace-nowrap rounded-xs px-3 text-sm transition-colors duration-(--dur-fast) ease-out max-sm:gap-1.5 max-sm:px-2.5 hov:bg-bg-3 aria-checked:bg-bg-3 aria-checked:text-fg-0 ${
               selected ? '' : 'text-fg-1'
             }`}
           >
             {o.id !== 'alert' && (
-              <span className={selected ? 'text-infect-400' : 'text-fg-2'}>
+              <span className={selected ? 'text-fg-0' : 'text-fg-2'}>
                 <BiohazardIcon size={16} turn={selected && running} turnKey={turnKey} />
               </span>
             )}
-            {o.label}
+            <span>
+              {o.label}
+              {o.tail && <span className="max-sm:hidden">{o.tail}</span>}
+            </span>
           </button>
         );
       })}

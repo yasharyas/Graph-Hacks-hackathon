@@ -7,3 +7,5 @@ web/dist/
 .cache/
 qa/tmp/
 .claude/worktrees/
+# QA screenshots stay local (large); the written reports are committed.
+qa/reports/*/

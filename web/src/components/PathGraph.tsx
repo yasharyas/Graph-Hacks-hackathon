@@ -1,6 +1,7 @@
 /* PathGraph: the centre pane. Wraps the lazy canvas (PathGraphCanvas) with the legend, an empty state, a
- * visually-hidden list of chains that mirrors the canvas, and, below 768px, a breadcrumb chain instead of the graph
- * (docs/design.md section 5). Hover details are drawn by the canvas itself, never as DOM text.
+ * visually-hidden list of chains that mirrors the canvas, and, below 768px, a compact top-to-bottom path (one hop per
+ * row, ending at the owner) instead of the graph (docs/design.md section 5). Hover details are drawn by the canvas
+ * itself, never as DOM text.
  * Props:
  *   exposures, paths, incident   graph input; before a triage the parent passes the scrubber's exposures and no paths
  *   selectedRepo                 the table drives selection; keyboard users select rows in the table
@@ -11,7 +12,7 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import type { Exposure, ExposurePath, IncidentMeta } from '../data/types.ts';
 import { EmptyState } from './EmptyState.tsx';
-import { PathChain, PathChip } from './PathChip.tsx';
+import { PathChip } from './PathChip.tsx';
 
 const Canvas = lazy(() => import('./PathGraphCanvas.tsx'));
 
@@ -68,6 +69,37 @@ function useWide() {
     return () => mq.removeEventListener('change', on);
   }, []);
   return wide;
+}
+
+/** Phone path view: the chain top to bottom, one hop per row with what each hop is, ending at the owner. The canvas needs room a phone does not have. */
+function CompactPath({ path, badVersions, team }: { path: ExposurePath; badVersions: ReadonlySet<string>; team: string | null }) {
+  const nodes = path.chain.at(-1) === path.version ? path.chain : [...path.chain, path.version];
+  return (
+    <ol className="flex w-full flex-col" aria-label={`Path for ${path.repo}`}>
+      {nodes.map((item, i) => {
+        const last = i === nodes.length - 1;
+        const isBad = badVersions.has(item);
+        const role = i === 0 ? 'repo' : last ? (path.kind === 'ADMITS' && path.range ? `range ${path.range} admits this version` : 'malicious version') : 'dependency';
+        return (
+          <li key={`${item}-${i}`} className={`relative flex flex-col items-start gap-0.5 pl-7 ${last && !team ? '' : 'pb-4'} ${last && !team ? '' : 'before:absolute before:top-5 before:bottom-0 before:left-[5px] before:w-px before:bg-line-3'}`}>
+            <span
+              aria-hidden
+              className={`absolute top-1 left-0 size-3 rounded-full border-2 ${isBad ? 'border-graph-bad bg-graph-bad' : i === 0 ? 'border-graph-repo' : 'border-graph-dep'}`}
+            />
+            <PathChip item={item} bad={isBad} />
+            <span className="text-xs text-fg-1">{role}</span>
+          </li>
+        );
+      })}
+      {team && (
+        <li className="relative flex flex-col items-start gap-0.5 pl-7">
+          <span aria-hidden className="absolute top-1 left-0 size-3 rotate-45 rounded-xs border-2 border-graph-team" />
+          <span className="text-sm text-fg-0">{team}</span>
+          <span className="text-xs text-fg-1">owner</span>
+        </li>
+      )}
+    </ol>
+  );
 }
 
 const versionsText = (versions: string[], shown = 3) =>
@@ -140,11 +172,11 @@ export function PathGraph({ exposures, paths, incident, selectedRepo, playing, o
       ) : (
         <div className="flex flex-col items-start gap-3 p-4">
           <p className="label-caps">{selectedRepo ? 'Path for the selected repo' : 'Path'}</p>
-          {selectedRepo && <PathChip item={selectedRepo} />}
           {shownPath ? (
-            <PathChain path={shownPath} badVersions={bad} />
+            <CompactPath path={shownPath} badVersions={bad} team={(selected ?? exposures.find((e) => e.repo === shownPath.repo))?.team ?? null} />
           ) : selected ? (
             <div className="flex flex-col items-start gap-2">
+              <PathChip item={selected.repo} />
               <p className="text-sm text-fg-1">No drafted path for this repo. It reaches:</p>
               <div className="flex flex-wrap gap-1">
                 {selected.versions.slice(0, 5).map((v) => (
@@ -156,7 +188,7 @@ export function PathGraph({ exposures, paths, incident, selectedRepo, playing, o
           ) : (
             <p className="text-sm text-fg-1">No drafted path yet.</p>
           )}
-          <p className="text-xs text-fg-2">Select a repo in the table to change the path.</p>
+          <p className="text-xs text-fg-1">Tap a repo in the Table tab to change the path.</p>
         </div>
       )}
 
