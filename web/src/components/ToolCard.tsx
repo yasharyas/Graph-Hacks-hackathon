@@ -89,7 +89,7 @@ function Cell({ k, v }: { k: string; v: unknown }) {
   const s = fmtCell(k, v);
   const id = typeof v === 'string' && (/[/@^~]|\d\.\d/.test(v) || CAPS.test(v));
   return (
-    <td data-col={k} className={`py-1 pr-2 align-top break-words ${typeof v === 'number' ? 'tabular-nums' : id ? 'font-mono' : ''} text-fg-0`}>
+    <td data-col={k} className={`py-1 pr-2 align-top ${typeof v === 'string' && CAPS.test(v) ? 'whitespace-nowrap' : 'break-words'} ${typeof v === 'number' ? 'tabular-nums' : id ? 'font-mono' : ''} text-fg-0`}>
       {id
         ? s.split('/').map((part, i) => (
             <Fragment key={i}>

@@ -687,7 +687,7 @@ export function App() {
                   onSelect={pick}
                   onOpenFix={(repo) => (dismissHint(), setDrawer({ repo, tab: 'fix' }))}
                   onUndo={remediation.undo}
-                  onExport={(f) => downloadReport(exported ?? report, f)}
+                  onExport={(f, view) => downloadReport(exported ?? report, f, view)}
                 />
                 <InsightTabs report={report} cards={triage.toolCards} graph={triage.graph} totalMs={triage.ms} remediated={remediated} />
               </>

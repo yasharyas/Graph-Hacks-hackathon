@@ -44,29 +44,32 @@ export function ReportClock({ runAt, viewAt, wantAt, loading, error, guest, head
         </p>
       ))}
       {wantAt !== null && !other && (
-        <div className="flex flex-col gap-2" role="status">
-          {loading ? (
-            <p aria-hidden className="font-mono text-xs text-fg-1">
-              Updating to {utcLabel(wantAt)}&hellip; showing {utcLabel(viewAt)} meanwhile
-            </p>
-          ) : error ? (
-            <div className="flex flex-col gap-1">
-              <p className="flex items-start gap-2 text-infect-400">
-                <CircleAlert size={16} className="mt-0.5 shrink-0" />
-                Could not load exposure at {utcLabel(wantAt)}: {error.message}
+        <div className="flex flex-col gap-2">
+          {/* Only the sentence is the live region: the buttons below would make every settled scrub a long announcement. */}
+          <div role="status">
+            {loading ? (
+              <p aria-hidden className="font-mono text-xs text-fg-1">
+                Updating to {utcLabel(wantAt)}&hellip; showing {utcLabel(viewAt)} meanwhile
               </p>
-              <p className="text-fg-1">{error.fix}</p>
-              {error.requestId && <p className="font-mono text-xs text-fg-2">request <span className="select-all text-fg-1">{error.requestId}</span></p>}
-            </div>
-          ) : guest ? (
-            <p className="max-w-(--measure) text-fg-1">
-              A pasted repo is analysed at one clock. The table stays at {utcLabel(runAt)} while the timeline shows {utcLabel(wantAt)}.
-            </p>
-          ) : (
-            <p className="max-w-(--measure) text-fg-1">
-              Showing exposure at <span className="font-mono text-xs text-fg-0">{utcLabel(viewAt)}</span>. Paths and fix drafts belong to the triage run at {utcLabel(runAt)}.
-            </p>
-          )}
+            ) : error ? (
+              <div className="flex flex-col gap-1">
+                <p className="flex items-start gap-2 text-infect-400">
+                  <CircleAlert size={16} className="mt-0.5 shrink-0" />
+                  Could not load exposure at {utcLabel(wantAt)}: {error.message}
+                </p>
+                <p className="text-fg-1">{error.fix}</p>
+                {error.requestId && <p className="font-mono text-xs text-fg-2">request <span className="select-all text-fg-1">{error.requestId}</span></p>}
+              </div>
+            ) : guest ? (
+              <p className="max-w-(--measure) text-fg-1">
+                A pasted repo is analysed at one clock. The table stays at {utcLabel(runAt)} while the timeline shows {utcLabel(wantAt)}.
+              </p>
+            ) : (
+              <p className="max-w-(--measure) text-fg-1">
+                Showing exposure at <span className="font-mono text-xs text-fg-0">{utcLabel(viewAt)}</span>. Paths and fix drafts belong to the triage run at {utcLabel(runAt)}.
+              </p>
+            )}
+          </div>
           <div className="flex flex-wrap gap-2">
             {error && !guest && <Button onClick={onRetry}>Retry</Button>}
             <Button onClick={onBack}>Back to {utcLabel(runAt)}</Button>

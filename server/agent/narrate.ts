@@ -251,7 +251,9 @@ export function rotateFacts(r: Report): string {
 }
 
 // Who to tell, grouped by team.
+const NO_TEAM = 'A pasted repo has no team on record here: send the fix to whoever owns it.'; // its "Your team" is a placeholder
 export const notifyFacts = (r: Report) => {
+  if (r.scope?.kind === 'guest') return NO_TEAM;
   const exposed = bySeverity(r).filter(exposedTier);
   return exposed.length ? `Notify: ${notifyList(r, exposed)}.` : `No repo is exposed at ${hm(r.at)}, so there is no one to notify.`;
 };
@@ -261,7 +263,7 @@ export function summaryFacts(r: Report): string {
   const exposed = r.exposures.filter(exposedTier);
   const head = verdictText(r).split('\n')[0]!.replace(/^Verdict[^:]*: /, '');
   const teams = new Set(exposed.map((e) => e.team).filter(Boolean)).size;
-  return exposed.length && teams ? `${head} The exposed repos belong to ${plural(teams, 'team')}.` : head;
+  return exposed.length && teams && r.scope?.kind !== 'guest' ? `${head} The exposed repos belong to ${plural(teams, 'team')}.` : head;
 }
 
 // "Can I ignore dev-only?": no; what dev-only does and does not change.
@@ -288,6 +290,7 @@ function openByTeam(r: Report): [string, Exposure[]][] {
 }
 // "Which team has the most work?"
 export function teamFacts(r: Report): string {
+  if (r.scope?.kind === 'guest') return NO_TEAM;
   const rows = openByTeam(r);
   if (!rows.length) return `No team has an open exposure at ${hm(r.at)}.`;
   return `Open exposures by team, most first: ${rows.map(([t, es]) => `${t ? tk(t) : 'no owner on record'} ${plural(es.length, 'repo')}${es.some((e) => e.tier === 'LOCKED') ? ' (one LOCKED: rotate secrets)' : ''}`).join('; ')}.`;
