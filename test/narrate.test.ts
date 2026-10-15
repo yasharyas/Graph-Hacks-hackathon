@@ -34,8 +34,8 @@ test('org verdict: complete, plain-language, cited, guard-clean, no markdown', (
   assert.ok(guard(t, evidenceSet(r)).total > 15);
   const [verdict, why, notify, todo] = t.split('\n');
   assert.match(verdict, /^Verdict: 5 of 17 repos are exposed to the `qix` account compromise at 13:30 UTC on 2025-09-08\. The graph showed this 74 minutes before the first OSV record\./);
-  assert.match(verdict, /LOCKED \(1: `acme\/checkout-web`\): the lockfile itself pins the malicious version, so rotate secrets and rebuild\./);
-  assert.match(verdict, /WOULD_PULL \(4: 4 prod, 0 dev-only\): exposed only on a fresh install since 13:12 UTC on 2025-09-08 \(still open at 13:30 UTC\); installing from the committed lockfile was safe\./);
+  assert.match(verdict, /LOCKED, 1 repo \(`acme\/checkout-web`\): the lockfile itself pins the malicious version, so rotate secrets and rebuild\./);
+  assert.match(verdict, /WOULD_PULL, 4 repos \(4 prod, 0 dev-only\): exposed only on a fresh install since 13:12 UTC on 2025-09-08 \(still open at 13:30 UTC\); installing from the committed lockfile was safe\./);
   assert.match(verdict, /1 more repo depends on packages from the compromised account/); // MAINTAINER is counted, never listed as exposed
   assert.match(why, /^Why: `acme\/checkout-web` locks `debug@4\.4\.2` through `express@5\.1\.0` \[E1\], and also `chalk@5\.6\.1`; /);
   assert.match(why, /`mochajs\/mocha` declares `\^4\.3\.5`, which admits `debug@4\.4\.2` \[E2\]/);
@@ -59,7 +59,7 @@ test('a range declared by a dependency says so; dev-only repos are marked; the w
   clean(r, t);
   assert.match(t, /`mochajs\/mocha`: its dependency `log-symbols@4\.1\.0` declares `\^4\.3\.4`, which admits `debug@4\.4\.2` \[E2\]/);
   assert.match(t, /`remy\/nodemon` \(dev\)/);
-  assert.match(t, /WOULD_PULL \(4: 3 prod, 1 dev-only\)/);
+  assert.match(t, /WOULD_PULL, 4 repos \(3 prod, 1 dev-only\)/);
   assert.match(t, /exposed only on a fresh install between 13:12 UTC and 15:15 UTC on 2025-09-08/);
   assert.match(t, /The malicious versions are gone from npm/);
 });
@@ -72,6 +72,10 @@ test('remediated repos are acknowledged and get no rotate step; all remediated m
   assert.match(t, /Marked remediated: `acme\/checkout-web`\./);
   assert.match(t, /`acme\/checkout-web` \(LOCKED\) \(remediated\)/);
   assert.doesNotMatch(t, /rotate secrets/);
+  r.exposures.find((e) => e.tier === 'WOULD_PULL')!.remediated = { at: 1, action: 'remediated' };
+  const t2 = verdictText(r);
+  assert.match(t2, /WOULD_PULL, 3 repos \(3 prod, 0 dev-only\)/);
+  assert.deepEqual(guard(t2, evidenceSet(r)).flagged, [], 'the still-open tier counts are evidence too');
   for (const e of r.exposures) e.remediated = { at: 1, action: 'remediated' };
   assert.match(verdictText(r), /Do: nothing open: every exposed repo is marked remediated\./);
   clean(r);

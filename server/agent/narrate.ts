@@ -43,6 +43,10 @@ export function evidenceSet(r: Report): Evidence {
     exposed.filter((e) => !e.dev).length, exposed.filter((e) => e.dev).length, exposed.filter((e) => e.remediated).length,
     r.scope?.repos ?? Object.values(r.counts).reduce((a, b) => a + b, 0), ...reach(r).slice(0, 4).map(([, n]) => n),
     ...observations(r).flatMap((o) => o.numbers),
+    ...(['LOCKED', 'WOULD_PULL'] as const).flatMap((t) => { // the verdict's still-open counts (remediated ones left out)
+      const open = exposed.filter((e) => e.tier === t && !e.remediated);
+      return [open.length, open.filter((e) => !e.dev).length, open.filter((e) => e.dev).length];
+    }),
   ]);
   return { entities, numbers, pathIds: new Set(r.paths.map((p) => p.id)) };
 }
@@ -313,8 +317,8 @@ export function verdictText(r: Report): string {
   const prod = pull.filter((e) => !e.dev).length;
   const verdict = [
     `Verdict: ${exposed.length} of ${plural(total, 'repo')} ${exposed.length === 1 ? 'is' : 'are'} exposed to ${who} at ${hm(r.at)} on ${day(r.at)}.${ahead}`,
-    locked.length ? ` LOCKED (${locked.length}: ${and(locked.map((e) => tk(e.repo)))}): the lockfile itself pins the malicious version, so rotate secrets and rebuild.` : '',
-    pull.length ? ` WOULD_PULL (${pull.length}: ${prod} prod, ${pull.length - prod} dev-only): exposed only on a fresh install ${window}; installing from the committed lockfile was safe.` : '',
+    locked.length ? ` LOCKED, ${plural(locked.length, 'repo')} (${and(locked.map((e) => tk(e.repo)))}): the lockfile itself pins the malicious version, so rotate secrets and rebuild.` : '',
+    pull.length ? ` WOULD_PULL, ${plural(pull.length, 'repo')} (${prod} prod, ${pull.length - prod} dev-only): exposed only on a fresh install ${window}; installing from the committed lockfile was safe.` : '',
     fixed.length ? ` Marked remediated: ${and(fixed.map((e) => tk(e.repo)))}.` : '',
     maint.length ? ` ${maint.length} more ${maint.length === 1 ? 'repo depends' : 'repos depend'} on packages from the compromised account, with no malicious version live for ${maint.length === 1 ? 'it' : 'them'}.` : '',
   ].join('');
