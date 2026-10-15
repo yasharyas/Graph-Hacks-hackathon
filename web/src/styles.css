@@ -20,6 +20,42 @@
   body:has(dialog[open]) {
     overflow: hidden;
   }
+  /* Sticky and fixed bars must never cover the element that has focus (WCAG 2.4.11): scrolling to it stops short of them.
+     Below 1024px the page scrolls and the bottom tab bar (plus the Ask bar above it, once a triage exists) is fixed; from 1024px
+     the feed pane scrolls and the Ask bar is sticky at its foot. A phone held sideways (under 560px tall) has no fixed Ask bar. */
+  @media (max-width: 1023px) {
+    html {
+      scroll-padding-bottom: calc(var(--tabbar-h) + 12px);
+    }
+    html:has(#ask) {
+      scroll-padding-bottom: calc(var(--tabbar-h) + var(--ask-h) + 12px);
+    }
+  }
+  @media (max-width: 1023px) and (max-height: 559px) {
+    html:has(#ask) {
+      scroll-padding-bottom: calc(var(--tabbar-h) + 12px);
+    }
+  }
+  @media (min-width: 1024px) {
+    .scroll-pane:has(#ask) {
+      scroll-padding-bottom: calc(var(--ask-h) + 12px);
+    }
+  }
+}
+
+/* Forced colors (Windows High Contrast): the selected scenario and the selected details tab are a filled system
+   colour, not a background the browser removes. */
+@media (forced-colors: active) {
+  [role='radio'][aria-checked='true'],
+  [role='tablist'][aria-label='Details'] [role='tab'][aria-selected='true'] {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+  }
+  [role='radio'][aria-checked='true'] *,
+  [role='tablist'][aria-label='Details'] [role='tab'][aria-selected='true'] * {
+    color: inherit; /* the icon's own text-fg colour would sit pale on the filled segment */
+  }
 }
 
 @layer components {

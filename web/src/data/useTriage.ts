@@ -32,6 +32,8 @@ export interface Narration {
   note?: string | null;
   /** The scenario clock this narration describes (epoch ms): the narrative dims when the scrubber is elsewhere. */
   at?: number;
+  /** The verdict is final but an analyst pick may still follow: `mode` / `provider` / `note` are not settled yet, and no guard has run. */
+  draft?: boolean;
 }
 export interface Guard {
   verified: number;
@@ -138,8 +140,9 @@ function fold(s: TriageState, e: TriageEvent): TriageState {
     case 'report':
       return { ...s, report: e.report };
     case 'narration': {
-      const narration = { mode: e.mode, provider: e.provider, text: e.text, note: e.note ?? null, at: e.at };
-      return asking(s) ? { ...s, followUps: patchLast(s, { narration }) } : { ...s, narration, mode: e.mode };
+      const narration = { mode: e.mode, provider: e.provider, text: e.text, note: e.note ?? null, at: e.at, draft: e.draft === true };
+      // A draft shows the verdict at once; its mode is the placeholder 'template', so the run's mode waits for the final one.
+      return asking(s) ? { ...s, followUps: patchLast(s, { narration }) } : { ...s, narration, mode: e.draft ? s.mode : e.mode };
     }
     case 'guard': {
       const guard = { verified: e.verified, total: e.total, flagged: e.flagged, claims: e.claims ?? [] };

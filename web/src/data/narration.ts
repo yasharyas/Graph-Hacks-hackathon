@@ -58,8 +58,8 @@ export function segments(text: string, guard: GuardClaims | null, seen: Set<stri
   });
 }
 
-const LABEL = /^[*_#\s]*(Verdict|Notify|Do)\s*[*_]*\s*:\s*[*_]*\s*/; // tolerates "**Verdict:**" and "## Do:"
-/** One narration as lines: "Verdict: ..." / "Notify: ..." / "Do: ..." split into label and body, anything else is a plain line. */
+const LABEL = /^[*_#\s]*(Verdict|Why|Notify|Do)\s*[*_]*\s*:\s*[*_]*\s*/; // tolerates "**Verdict:**" and "## Do:"
+/** One narration as lines: "Verdict: ..." / "Why: ..." / "Notify: ..." / "Do: ..." split into label and body, anything else is a plain line. */
 export function lines(text: string, guard: GuardClaims | null): { label: string | null; segs: Segment[] }[] {
   const seen = new Set<string>(); // chips are first mentions across the whole narration, not per line
   return text
@@ -70,6 +70,16 @@ export function lines(text: string, guard: GuardClaims | null): { label: string 
       const m = LABEL.exec(l);
       return { label: m ? m[1]! : null, segs: segments(m ? l.slice(m[0].length) : l, guard, seen) };
     });
+}
+
+/** More verified names than this in one line is a list, not a sentence: the chips would be a wall, so the line uses the light treatment. */
+export const LIST_MAX = 4;
+export const crowded = (segs: Segment[]): boolean => segs.filter((s) => s.kind === 'entity' && s.verdict === 'verified' && s.first).length > LIST_MAX;
+
+/** Above each Ask answer: how it was produced, so a person can tell a graph lookup from a model's words. */
+export function answerLabel(n: { mode: 'live' | 'replay' | 'template'; provider: string | null }): string {
+  const by = n.provider ? ` · ${n.provider}` : '';
+  return n.mode === 'template' ? `Answered from the graph${by}` : `${n.mode === 'replay' ? 'Recorded LLM answer' : 'LLM answer'} · names and numbers checked against the graph${by}`;
 }
 
 /** The server appends a coverage line to enumerating Ask answers ("6 of 14 prod-only repos listed"): split it off so it can be shown on its own. */

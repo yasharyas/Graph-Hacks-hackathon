@@ -3,15 +3,17 @@
  * except the biohazard's single turn on run start. Every label is real text (screen-reader-only words where the
  * visible text is short), never an aria-label on a role-less span.
  * Props:
- *   scenario, onScenario, onRun, running, turnKey   (forwarded to ScenarioControl)
- *   clockAt        scenario clock (epoch ms): the clock the table and counts are true at
+ *   scenario, onScenario, onMove, onRun, running, turnKey   (forwarded to ScenarioControl: a click chooses, an arrow only moves)
+ *   clockAt        scenario clock (epoch ms): the clock the table and counts are true at; null (no run to describe) hides the chip,
+ *                  and on a phone the chip is the bare time so the bar stays one row
  *   queryTotal     { ms, queries } summed from ToolResult.ms / cypher.length, or null before any result. "N ms in
  *                  FalkorDB" is FalkorDB's own execution time, not the run's wall clock
  *   mode           LLM mode of the triage narration (live | replay | template), or null
  *   guard          claim verification result, or null; flagged claims turn the badge amber and clickable
  *   onShowFlagged  opens the flagged-claims list
- *   onOpenStats    the "Built on FalkorDB" pill: opens the Graph stats tab under the table
- *   pasteOpen, onTogglePaste   the "Paste your repo" button (opens the PasteBox row under the header)
+ *   onOpenStats    the "Built on FalkorDB" pill: opens the graph stats (the tab under the table after a triage, the graph's own
+ *                  node and edge counts before one)
+ *   onOpenPaste    the "Paste your repo" button (opens the paste sheet)
  *   mock           true in ?mock mode: adds a "mock data" tag so fixture replays are never mistaken for results
  * Landmarks: <header>. The skip link and the autoplay pause live in App, before this header, in that tab order.
  */
@@ -32,6 +34,7 @@ const MODE_STYLE: Record<LlmMode, string> = {
 export interface HeaderProps {
   scenario: ScenarioChoice;
   onScenario: (v: ScenarioChoice) => void;
+  onMove: (v: ScenarioChoice) => void;
   onRun: () => void;
   running: boolean;
   turnKey: number;
@@ -41,8 +44,7 @@ export interface HeaderProps {
   guard: Guard | null;
   onShowFlagged: () => void;
   onOpenStats: () => void;
-  pasteOpen: boolean;
-  onTogglePaste: () => void;
+  onOpenPaste: () => void;
   mock: boolean;
 }
 
@@ -54,7 +56,7 @@ export function Header(p: HeaderProps) {
       <h1 className="mr-1 shrink-0 text-md font-bold whitespace-nowrap text-fg-0">Patient Zero</h1>
 
       <div className="order-last -mx-(--gutter) w-[calc(100%+2*var(--gutter))] overflow-x-auto px-(--gutter) [scrollbar-width:none] md:order-none md:mx-0 md:w-auto md:overflow-visible md:px-0">
-        <ScenarioControl value={p.scenario} onChange={p.onScenario} onRun={p.onRun} running={p.running} turnKey={p.turnKey} />
+        <ScenarioControl value={p.scenario} onChange={p.onScenario} onMove={p.onMove} onRun={p.onRun} running={p.running} turnKey={p.turnKey} />
       </div>
 
       <div className="ml-auto flex flex-wrap items-center justify-end gap-x-3 gap-y-2 text-sm xl:flex-nowrap">
@@ -74,7 +76,10 @@ export function Header(p: HeaderProps) {
           aria-hidden={p.clockAt === null || undefined}
           title="The clock the exposure table and counts are true at (the timeline can be ahead of it while a query loads)"
         >
-          <time>at {p.clockAt === null ? '00:00 UTC' : utcLabel(p.clockAt)}</time>
+          <time>
+            <span className="max-sm:hidden">at </span>
+            {p.clockAt === null ? '00:00 UTC' : utcLabel(p.clockAt)}
+          </time>
         </span>
         {p.mode && (
           // phones: the header is one row (title, clock, paste); the mode and the claim count are in the feed there
@@ -111,7 +116,7 @@ export function Header(p: HeaderProps) {
         <button
           type="button"
           onClick={p.onOpenStats}
-          className="hidden items-center gap-1.5 rounded-full border border-line-2 px-2.5 py-0.5 text-xs whitespace-nowrap text-fg-0 md:inline-flex hov:bg-bg-3"
+          className="hidden items-center gap-1.5 rounded-full border border-line-2 px-2.5 py-0.5 text-xs whitespace-nowrap text-fg-0 pointer-coarse:min-h-11 md:inline-flex hov:bg-bg-3"
         >
           Built on FalkorDB
           {/* 1440-1535: the time rides in the pill; from 1536 it is the "N ms in FalkorDB" label beside it; below 1440 there is no room (1280 is tight) */}
@@ -123,9 +128,8 @@ export function Header(p: HeaderProps) {
         <Button
           variant="secondary"
           icon={<Upload size={16} />}
-          aria-expanded={p.pasteOpen}
-          aria-controls="paste-panel"
-          onClick={p.onTogglePaste}
+          aria-haspopup="dialog"
+          onClick={p.onOpenPaste}
           className="whitespace-nowrap max-md:w-(--control-h) max-md:px-0"
         >
           <span className="max-md:sr-only">Paste your repo</span>

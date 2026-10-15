@@ -1,8 +1,12 @@
 /* PasteBox: analyze a public GitHub repo, or a package-lock.json pasted, dropped or chosen (docs/design.md section 5).
+ * It opens in a Sheet (a modal right drawer; a full-height sheet on a phone): the working panes never move for it, Esc and
+ * Back close it, focus is trapped and returned. Progress and errors sit directly under the heading, outside the scrolling
+ * form, so they are on screen whichever field was used, and nothing outside the sheet changes size when the analysis ends.
  * Props:
+ *   open      whether the sheet is showing (it stays mounted, so typed text survives closing)
  *   analyze   AnalyzeState from useAnalyze() (status, stage, repo, error), drives progress and errors
  *   onAnalyze({ url } | { lockfile })   called only after client-side checks pass
- *   onClose   also called by Escape inside the panel
+ *   onClose   called for every way of closing it
  * Never silent: every input that cannot be analysed gets a sentence in a role=alert next to the field, the field is
  * aria-invalid, and the Analyze buttons stay enabled so pressing one says why (data/lockfile.ts decides the wording).
  *   Repo      owner/name, github.com/owner/name, ssh and .git clones and /tree/... pages all become
@@ -18,8 +22,9 @@ import { useEffect, useId, useMemo, useRef, useState, type ClipboardEvent, type 
 import { fixFor, plainError } from '../data/errors.ts';
 import { inspectLockfile, looksLikeLockfile, MAX_LOCKFILE_BYTES, repoFromInput, TOO_BIG } from '../data/lockfile.ts';
 import type { AnalyzeState } from '../data/useAnalyze.ts';
-import { Button } from './Button.tsx';
+import { Button, IconButton } from './Button.tsx';
 import { Check, CircleAlert, Close, Upload } from './icons/Glyphs.tsx';
+import { Sheet } from './Sheet.tsx';
 
 const STAGES = [
   { id: 'fetch', label: 'Fetch lockfile' },
@@ -34,17 +39,19 @@ const SHOW_MAX = 20_000; // a bigger lockfile is analysed but not put into a tex
 export type PasteRequest = { url: string } | { lockfile: string };
 
 const Problem = ({ id, children }: { id: string; children: string }) => (
-  <p id={id} role="alert" className="mt-1.5 flex max-w-xl items-start gap-2 text-sm text-fg-0">
+  <p id={id} role="alert" className="mt-1.5 flex items-start gap-2 text-sm text-fg-0">
     <CircleAlert size={16} className="mt-0.5 shrink-0 text-fg-1" />
     {children}
   </p>
 );
 
 export function PasteBox({
+  open,
   analyze,
   onAnalyze,
   onClose,
 }: {
+  open: boolean;
   analyze: AnalyzeState;
   onAnalyze: (req: PasteRequest) => void;
   onClose: () => void;
@@ -151,176 +158,168 @@ export function PasteBox({
   const shownLockError = fileProblem ?? lockError;
 
   return (
-    <section
-      id="paste-panel"
-      aria-label="Analyze your own repo"
-      onDragOver={(e) => (e.preventDefault(), setDrag(true))}
-      onDragLeave={() => setDrag(false)}
-      onDrop={onDrop}
-      onKeyDown={(e) => {
-        if (e.key === 'Escape') {
-          e.stopPropagation();
-          onClose();
-        }
-      }}
-      className={`border-b border-line-1 bg-bg-1 px-(--gutter) py-4 ${drag ? 'outline-2 -outline-offset-4 outline-dashed outline-fg-0' : ''}`}
-    >
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <h2 className="text-base font-medium text-fg-0">Analyze your own repo</h2>
-        <Button variant="ghost" className="-mr-2" onClick={onClose}>
-          <Close size={16} /> Close
-        </Button>
-      </div>
-      <div className="grid gap-x-8 gap-y-4 md:grid-cols-2">
-        <form
-          noValidate
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!blocked) analyzeRepo();
-          }}
-        >
-          <label htmlFor={`${id}-url`} className="mb-1 block text-xs text-fg-1">
-            GitHub repo
-          </label>
-          <div className="flex gap-2">
-            <input
-              ref={urlRef}
-              id={`${id}-url`}
-              className="field aria-invalid:border-fg-0"
-              type="text"
-              inputMode="url"
-              autoComplete="off"
-              autoCapitalize="off"
-              spellCheck={false}
-              autoFocus
-              value={url}
-              placeholder="owner/name or github.com/owner/name"
-              aria-invalid={urlError ? true : undefined}
-              aria-describedby={`${id}-url-help${urlError ? ` ${id}-url-err` : ''}`}
-              onChange={(e) => (setUrl(e.target.value), e.target.value.trim() || setUrlTouched(false))}
-              onPaste={onPasteUrl}
-              onBlur={() => url.trim() && setUrlTouched(true)}
-            />
-            <Button type="submit" variant="primary" loading={running && kind === 'url'} disabled={blocked}>
-              {retryIn > 0 ? `Retry in ${retryIn} s` : 'Analyze'}
-            </Button>
-          </div>
-          <p id={`${id}-url-help`} className="mt-1.5 max-w-xl text-xs text-fg-2">
-            {urlNote ? (
-              <>
-                Will analyze <span className="font-mono text-fg-1">{urlNote}</span>.{' '}
-              </>
-            ) : null}
-            Public repos only; nothing is stored beyond one hour. If no pre-incident snapshot exists, the current lockfile is used and labelled as such.
-          </p>
-          {urlError && <Problem id={`${id}-url-err`}>{urlError}</Problem>}
-        </form>
-
-        <div>
-          <label htmlFor={`${id}-lock`} className="mb-1 block text-xs text-fg-1">
-            Or paste a package-lock.json, or drop the file anywhere on this panel
-          </label>
-          <textarea
-            ref={lockRef}
-            id={`${id}-lock`}
-            className="field h-24 resize-y font-mono text-xs aria-invalid:border-fg-0"
-            rows={4}
-            spellCheck={false}
-            value={lock}
-            placeholder={'{ "lockfileVersion": 3, "packages": { ... } }'}
-            aria-invalid={shownLockError ? true : undefined}
-            aria-describedby={shownLockError ? `${id}-lock-err` : ok ? `${id}-lock-ok` : undefined}
-            onFocus={() => url.trim() || setUrlTouched(false)} // an empty repo field is not an error while the lockfile is being filled in
-            onChange={(e) => (setLock(e.target.value), setFileProblem(null))}
-            onPaste={onPasteLock}
-            onBlur={() => lock.trim() && setLockTouched(true)}
-          />
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <Button loading={running && kind === 'lockfile'} disabled={blocked || !lock.trim()} onClick={() => analyzeLock()}>
-              Analyze lockfile
-            </Button>
-            <Button icon={<Upload size={16} />} onClick={() => fileRef.current?.click()} disabled={blocked}>
-              Choose package-lock.json
-            </Button>
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".json,application/json"
-              className="sr-only"
-              tabIndex={-1}
-              aria-label="package-lock.json file"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void readFile(f);
-                e.target.value = '';
-              }}
-            />
-          </div>
-          {ok && !shownLockError && (
-            <p id={`${id}-lock-ok`} role="status" className="mt-1.5 flex items-center gap-1.5 text-sm text-fg-0">
-              <Check size={14} className="text-tier-clean" />
-              Parsed {ok.packages.toLocaleString('en-US')} package{ok.packages === 1 ? '' : 's'} (lockfileVersion {ok.version}).
-            </p>
-          )}
-          {shownLockError && <Problem id={`${id}-lock-err`}>{shownLockError}</Problem>}
+    <Sheet id="paste-panel" open={open} onClose={onClose} labelledBy={`${id}-title`} onDragOver={(e) => (e.preventDefault(), setDrag(true))} onDragLeave={() => setDrag(false)} onDrop={onDrop}>
+      <div className={`flex h-full flex-col ${drag ? 'outline-2 -outline-offset-4 outline-dashed outline-fg-0' : ''}`}>
+        <div className="flex items-start gap-3 border-b border-line-1 p-4">
+          <h2 id={`${id}-title`} className="min-w-0 flex-1 font-display text-xl font-extrabold text-fg-0">
+            Analyze your own repo
+          </h2>
+          <IconButton label="Close" icon={<Close size={20} />} onClick={onClose} />
         </div>
-      </div>
 
-      {(serverError || running) && (
-        <div className="mt-3 min-w-0">
-          {serverError && (
-            <div role="alert" className="flex flex-col gap-1.5 text-sm">
-              <p className="flex max-w-xl items-start gap-2 text-fg-0">
-                <CircleAlert size={16} className="mt-0.5 shrink-0 text-fg-1" />
-                {serverError.message}
+        {(serverError || running) && (
+          <div className="min-w-0 border-b border-line-1 bg-bg-2 p-4">
+            {serverError && (
+              <div role="alert" className="flex flex-col gap-1.5 text-sm">
+                <p className="flex items-start gap-2 text-fg-0">
+                  <CircleAlert size={16} className="mt-0.5 shrink-0 text-fg-1" />
+                  {serverError.message}
+                </p>
+                {serverError.fix && <p className="text-fg-1">{serverError.fix}</p>}
+                {serverError.requestId && (
+                  <p className="font-mono text-xs text-fg-2">
+                    request <span className="select-all text-fg-1">{serverError.requestId}</span>
+                  </p>
+                )}
+                <p className="flex flex-wrap items-center gap-2 text-fg-1">
+                  Try a sample repo:
+                  {SAMPLES.map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      disabled={blocked}
+                      className="min-h-(--control-h) rounded-xs bg-bg-3 px-2 font-mono text-xs text-link disabled:opacity-(--opacity-disabled)"
+                      onClick={() => trySample(s)}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </p>
+              </div>
+            )}
+            {running && (
+              <div>
+                <div className="h-1 overflow-hidden rounded-xs bg-bg-3" aria-hidden>
+                  <div className="h-full origin-left bg-fg-0 transition-transform duration-(--dur-base) ease-out" style={{ transform: `scaleX(${progress})` }} />
+                </div>
+                <ol className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                  {stages.map((s) => {
+                    const state = at < 0 ? 'todo' : stages.indexOf(s) < at ? 'done' : stages.indexOf(s) === at ? 'now' : 'todo';
+                    return (
+                      <li key={s.id} aria-current={state === 'now' ? 'step' : undefined} className={`inline-flex items-center gap-1 ${state === 'now' ? 'text-fg-0' : state === 'done' ? 'text-tier-clean' : 'text-fg-2'}`}>
+                        {state === 'done' ? <Check size={12} /> : <span aria-hidden className={`size-1.5 rounded-full ${state === 'now' ? 'bg-fg-0' : 'bg-line-3'}`} />}
+                        {s.label}
+                      </li>
+                    );
+                  })}
+                </ol>
+                {/* announced on stage changes only: the counter is aria-hidden */}
+                <p role="status" className="mt-1 font-mono text-xs text-fg-1">
+                  {taken && kind === 'lockfile' ? `Parsed ${taken.packages.toLocaleString('en-US')} packages. ` : ''}
+                  {step < 0 ? 'Starting' : `Step ${at + 1} of ${stages.length}: ${STAGES[step]!.label.toLowerCase()}`}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="scroll-pane min-h-0 flex-1 p-4">
+          <div className="flex flex-col gap-6">
+            <form
+              noValidate
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!blocked) analyzeRepo();
+              }}
+            >
+              <label htmlFor={`${id}-url`} className="mb-1 block text-xs text-fg-1">
+                GitHub repo
+              </label>
+              <div className="flex gap-2">
+                <input
+                  ref={urlRef}
+                  id={`${id}-url`}
+                  data-autofocus
+                  className="field min-w-0 aria-invalid:border-fg-0"
+                  type="text"
+                  inputMode="url"
+                  autoComplete="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  value={url}
+                  placeholder="owner/name or github.com/owner/name"
+                  aria-invalid={urlError ? true : undefined}
+                  aria-describedby={`${id}-url-help${urlError ? ` ${id}-url-err` : ''}`}
+                  onChange={(e) => (setUrl(e.target.value), e.target.value.trim() || setUrlTouched(false))}
+                  onPaste={onPasteUrl}
+                  onBlur={() => url.trim() && setUrlTouched(true)}
+                />
+                <Button type="submit" variant="primary" loading={running && kind === 'url'} disabled={blocked}>
+                  {retryIn > 0 ? `Retry in ${retryIn} s` : 'Analyze'}
+                </Button>
+              </div>
+              <p id={`${id}-url-help`} className="mt-1.5 text-xs text-fg-2">
+                {urlNote ? (
+                  <>
+                    Will analyze <span className="font-mono text-fg-1">{urlNote}</span>.{' '}
+                  </>
+                ) : null}
+                Public repos only; nothing is stored beyond one hour. If no pre-incident snapshot exists, the current lockfile is used and labelled as such.
               </p>
-              {serverError.fix && <p className="max-w-xl text-fg-1">{serverError.fix}</p>}
-              {serverError.requestId && (
-                <p className="font-mono text-xs text-fg-2">
-                  request <span className="select-all text-fg-1">{serverError.requestId}</span>
+              {urlError && <Problem id={`${id}-url-err`}>{urlError}</Problem>}
+            </form>
+
+            <div>
+              <label htmlFor={`${id}-lock`} className="mb-1 block text-xs text-fg-1">
+                Or paste a package-lock.json, or drop the file anywhere on this panel
+              </label>
+              <textarea
+                ref={lockRef}
+                id={`${id}-lock`}
+                className="field h-24 resize-y font-mono text-xs aria-invalid:border-fg-0"
+                rows={4}
+                spellCheck={false}
+                value={lock}
+                placeholder={'{ "lockfileVersion": 3, "packages": { ... } }'}
+                aria-invalid={shownLockError ? true : undefined}
+                aria-describedby={shownLockError ? `${id}-lock-err` : ok ? `${id}-lock-ok` : undefined}
+                onFocus={() => url.trim() || setUrlTouched(false)} // an empty repo field is not an error while the lockfile is being filled in
+                onChange={(e) => (setLock(e.target.value), setFileProblem(null))}
+                onPaste={onPasteLock}
+                onBlur={() => lock.trim() && setLockTouched(true)}
+              />
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <Button loading={running && kind === 'lockfile'} disabled={blocked || !lock.trim()} onClick={() => analyzeLock()}>
+                  Analyze lockfile
+                </Button>
+                <Button icon={<Upload size={16} />} onClick={() => fileRef.current?.click()} disabled={blocked}>
+                  Choose package-lock.json
+                </Button>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept=".json,application/json"
+                  className="sr-only"
+                  tabIndex={-1}
+                  aria-label="package-lock.json file"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void readFile(f);
+                    e.target.value = '';
+                  }}
+                />
+              </div>
+              {ok && !shownLockError && (
+                <p id={`${id}-lock-ok`} role="status" className="mt-1.5 flex items-center gap-1.5 text-sm text-fg-0">
+                  <Check size={14} className="text-tier-clean" />
+                  Parsed {ok.packages.toLocaleString('en-US')} package{ok.packages === 1 ? '' : 's'} (lockfileVersion {ok.version}).
                 </p>
               )}
-              <p className="flex flex-wrap items-center gap-2 text-fg-1">
-                Try a sample repo:
-                {SAMPLES.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    disabled={blocked}
-                    className="min-h-(--control-h) rounded-xs bg-bg-2 px-2 font-mono text-xs text-link disabled:opacity-(--opacity-disabled)"
-                    onClick={() => trySample(s)}
-                  >
-                    {s}
-                  </button>
-                ))}
-              </p>
+              {shownLockError && <Problem id={`${id}-lock-err`}>{shownLockError}</Problem>}
             </div>
-          )}
-          {running && (
-            <div className="max-w-xl">
-              <div className="h-1 overflow-hidden rounded-xs bg-bg-3" aria-hidden>
-                <div className="h-full origin-left bg-fg-0 transition-transform duration-(--dur-base) ease-out" style={{ transform: `scaleX(${progress})` }} />
-              </div>
-              <ol className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
-                {stages.map((s) => {
-                  const state = at < 0 ? 'todo' : stages.indexOf(s) < at ? 'done' : stages.indexOf(s) === at ? 'now' : 'todo';
-                  return (
-                    <li key={s.id} aria-current={state === 'now' ? 'step' : undefined} className={`inline-flex items-center gap-1 ${state === 'now' ? 'text-fg-0' : state === 'done' ? 'text-tier-clean' : 'text-fg-2'}`}>
-                      {state === 'done' ? <Check size={12} /> : <span aria-hidden className={`size-1.5 rounded-full ${state === 'now' ? 'bg-fg-0' : 'bg-line-3'}`} />}
-                      {s.label}
-                    </li>
-                  );
-                })}
-              </ol>
-              {/* announced on stage changes only: the counter is aria-hidden */}
-              <p role="status" className="mt-1 font-mono text-xs text-fg-1">
-                {taken && kind === 'lockfile' ? `Parsed ${taken.packages.toLocaleString('en-US')} packages. ` : ''}
-                {step < 0 ? 'Starting' : `Step ${at + 1} of ${stages.length}: ${STAGES[step]!.label.toLowerCase()}`}
-              </p>
-            </div>
-          )}
+          </div>
         </div>
-      )}
-    </section>
+      </div>
+    </Sheet>
   );
 }

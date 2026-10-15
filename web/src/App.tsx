@@ -1,11 +1,13 @@
 /* App: the war room (docs/design.md sections 4 and 5). State wiring only; every pane is a component.
  *
- * Layout: header, optional panel row (paste / alert), the band, then the panes: tool feed | path graph | exposure table.
+ * Layout: header, optional alert row, the band, then the panes: tool feed | path graph | exposure table.
  * The band has two modes. Landing (nothing run yet): the purpose line, the scrubber with its counter, the contrast card
  * and the three actions. Report mode (from the click on Run triage, not from the report landing, so the layout change
  * happens inside the click and nothing shifts later): one compact row, so a laptop sees the table's header and its first
  * rows without scrolling. >= 1280px three panes in one viewport (panes scroll, the page does not); 1024-1279 feed left,
  * graph over table right; below 1024 one column with a bottom tab bar (Feed / Graph / Table) and the page scrolls.
+ * "Paste your repo" and the graph stats open in a Sheet (a modal drawer; a full-height sheet on a phone), never in the flow:
+ * the panes keep their size, Esc and Back close it, and the autoplay pauses while it is open.
  *
  * Data: useTimeline + usePlayback drive the scrubber (autoplay on first load, or a position restored from a share link);
  * useTriage owns the run; before a report exists the graph shows the scrubber's exposures, afterwards the report's.
@@ -13,10 +15,23 @@
  * /api/exposure answer after scrubbing), never a second sample of the timeline. A pasted repo has its own numbers and
  * its own label; the demo org's are always labelled as such. "Minutes ahead" has one definition (advisory minus first
  * exposure) wherever it is printed. Mock mode (?mock) replays shared/fixtures; see data/api.ts.
+ *
+ * Every run starts at ONE clock, named on its button ("Run triage at 13:30 UTC"): the minute the person scrubbed to, else
+ * the last run's, else the scenario's default (the autoplay's resting place does not count: it is where the story ends).
+ * Arrow keys on the scenario control only move the selection; running is a click, Enter or the Run button.
+ *
+ * Share links (data/urlState.ts): ?scenario&at, plus &repo (an org repo: the triage reruns at that minute, the row is
+ * selected, and &open names the drawer tab) or &guest (a pasted public repo: NOT fetched on load, since a widely shared link
+ * would spend the server's GitHub quota per visitor; a strip asks for one click, then analyses, triages, selects, opens).
+ * A dropped lockfile has nothing to reopen, so it says so instead of copying a link that would open the demo org.
+ *
+ * Screen readers: one polite status region (selections). Nothing is announced while the autoplay runs; what the feed says
+ * about the clock moving waits for the scrub to settle (useSettled, 600 ms).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { isMock } from './data/api.ts';
+import { DEFAULT_AT, hasClock } from './data/clock.ts';
 import { downloadReport } from './data/export.ts';
 import { fixFor } from './data/errors.ts';
 import { isHead, plural, utcLabel } from './data/format.ts';
@@ -25,9 +40,10 @@ import { useAnalyze } from './data/useAnalyze.ts';
 import { useBackClose } from './data/useBackClose.ts';
 import { usePlayback } from './data/usePlayback.ts';
 import { useRemediation } from './data/useRemediation.ts';
+import { useSettled } from './data/useSettled.ts';
 import { useExposureAt, useExposureQuery, useTimeline } from './data/useTimeline.ts';
 import { useTriage } from './data/useTriage.ts';
-import { readUrlState, shareUrl } from './data/urlState.ts';
+import { readUrlState, shareUrl, type OpenTab } from './data/urlState.ts';
 import { AskBox } from './components/AskBox.tsx';
 import { Button } from './components/Button.tsx';
 import { ContrastCard } from './components/ContrastCard.tsx';
@@ -36,6 +52,7 @@ import { EmptyState } from './components/EmptyState.tsx';
 import { ExecSummary } from './components/ExecSummary.tsx';
 import { ExposureTable } from './components/ExposureTable.tsx';
 import { FixDrawer, type DrawerTab } from './components/FixDrawer.tsx';
+import { GraphStatsSheet } from './components/GraphStatsSheet.tsx';
 import { Header } from './components/Header.tsx';
 import { InsightTabs } from './components/InsightTabs.tsx';
 import { OnboardingHint } from './components/OnboardingHint.tsx';
@@ -44,6 +61,7 @@ import { PathGraph } from './components/PathGraph.tsx';
 import { ReportClock } from './components/ReportClock.tsx';
 import { scrollPaneTo } from './components/scrollPane.ts';
 import { AlertBanner, AlertField, type ScenarioChoice } from './components/ScenarioControl.tsx';
+import { SharedPrompt } from './components/SharedPrompt.tsx';
 import { TimelineScrubber } from './components/TimelineScrubber.tsx';
 import { toast, Toasts } from './components/Toasts.tsx';
 import { ToolFeed } from './components/ToolFeed.tsx';
@@ -55,10 +73,15 @@ const MIN = 60_000;
 const sameMinute = (a: number, b: number) => Math.floor(a / MIN) === Math.floor(b / MIN);
 const HINT_KEY = 'pz.hint.dismissed';
 const PURPOSE = 'See which repos are one install away from a hijacked npm package — before the advisory exists.';
+// The demo org: real public repos and lockfiles (snapshots), made-up teams and channels. Said beside its name, never only in a tooltip.
+const DEMO_NOTE = 'Real public repos and lockfiles (snapshots); teams and channels are synthetic.';
+const DEMO_NOTE_SHORT = 'teams synthetic';
+const NO_SHARE_LOCKFILE = 'A dropped lockfile can’t be shared: it exists only in this tab, and a link would open the demo org instead. Share the repo’s URL, or send the file.';
 type Pane = 'feed' | 'graph' | 'table';
 interface Guest {
   graph: string;
   repo: string;
+  scenario: ScenarioId; // the incident the analysis was built for (the server refuses a triage of it for another)
 }
 
 const readHint = () => {
@@ -79,11 +102,11 @@ const grepNames = (i: IncidentMeta | null) => {
 };
 
 export function App() {
-  const urlInit = useRef(readUrlState(location.search)).current; // a share link: scenario, minute, selected repo
+  const urlInit = useRef(readUrlState(location.search)).current; // a share link: scenario, minute, repo or guest, drawer tab
   const [scenario, setScenario] = useState<ScenarioId>(urlInit.scenario ?? QIX);
   const [choice, setChoice] = useState<ScenarioChoice>(urlInit.scenario ?? QIX);
   const [startAt, setStartAt] = useState<number | null>(urlInit.at); // opens the track here, paused, instead of autoplaying
-  const [panel, setPanel] = useState<'none' | 'paste' | 'alert'>('none');
+  const [panel, setPanel] = useState<'none' | 'paste' | 'alert' | 'stats'>('none');
   const [pane, setPane] = useState<Pane>('feed'); // phones start on the Feed, the only pane with the Run triage action
   const [turnKey, setTurnKey] = useState(0);
   const [alertText, setAlertText] = useState<string | null>(null);
@@ -92,11 +115,13 @@ export function App() {
   const [drawer, setDrawer] = useState<{ repo: string | null; tab: DrawerTab }>({ repo: null, tab: 'fix' });
   const [userAt, setUserAt] = useState<number | null>(null);
   const [guest, setGuest] = useState<Guest | null>(null); // the pasted repo the current run is about
+  const [shared, setShared] = useState<string | null>(urlInit.guest); // a share link's pasted repo, waiting for its one click
   const [retry, setRetry] = useState(0);
   const [hintDismissed, setHintDismissed] = useState(readHint);
   const guestReq = useRef<PasteRequest | null>(null); // what was pasted, so another incident can re-analyze it
-  const restoreRepo = useRef(urlInit.repo); // the share link's selected repo, applied to the first report
-  const rerun = useRef(0);
+  const orgRepo = urlInit.guest ? null : urlInit.repo;
+  const restoreRepo = useRef(orgRepo); // the share link's repo, selected when its report lands...
+  const restoreOpen = useRef<OpenTab | null>(orgRepo ? urlInit.open : null); // ...with this drawer tab open
   const paneRef = useRef<Pane>('feed');
   const panesRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<HTMLDivElement>(null);
@@ -114,24 +139,38 @@ export function App() {
       : Math.min(last, Math.max(first + AUTOPLAY_MIN * MIN, Math.floor(timeline.incident.advisoryAt / MIN) * MIN + 3 * MIN));
   const playback = usePlayback(first, autoplayEnd, 12_000, startAt);
   const at = playback.at ?? first;
+  const settledAt = useSettled(at, 600, playback.playing); // what is announced about the clock follows this, not every step
   const rawSnapshot = at === null ? null : timeline.snapshot(at);
   const triage = useTriage();
+  const analyze = useAnalyze();
   const { report } = triage;
   const running = triage.status === 'running';
-  const compact = triage.status !== 'idle';
+  // The band collapses to one row from the click that starts a run, an analysis included (behind the sheet): a collapse when the
+  // analysis ends, seconds later, would be a layout shift nobody asked for. It expands again when the sheet is closed.
+  const compact = triage.status !== 'idle' || (analyze.status !== 'idle' && (panel === 'paste' || shared !== null));
   const landing = useExposureAt(scenario, report || stale ? null : rawSnapshot); // after a report the table has its own query
-  const analyze = useAnalyze();
 
   const remediation = useRemediation(
     triage.incident?.id ?? scenario,
     useCallback((repo: string, why: string) => toast({ message: `Could not save ${repo} as remediated: ${why} It was reverted.`, tone: 'error' }), []),
   );
 
+  // The one clock a run starts at, and the button that says so. The minute the person scrubbed to, else (a share link's
+  // minute, else) this incident's last run, else its default. After the autoplay the playhead rests at the end of the story
+  // (14:30): that is not a choice, so it does not move the run.
+  const lastRunAt = triage.incident?.id === scenario ? triage.at : null;
+  const clockFor = (scn: ScenarioId) => (scn === scenario ? (userAt ?? lastRunAt ?? (startAt !== null ? Math.floor(startAt / MIN) * MIN : null) ?? DEFAULT_AT[scn]) : DEFAULT_AT[scn]);
+  const runClock = clockFor(scenario);
+  const runLabel = `Run triage at ${utcLabel(runClock)}`;
+
   // After a report, scrubbing re-queries the org graph at the new clock. Not for a pasted repo (its graph is its
   // own) and not when the scrubber now shows a different incident than the report.
   const isGuest = guest !== null || report?.scope?.kind === 'guest';
   const other = report && report.incident.id !== scenario ? report.incident.id : null;
   const wantAt = report && at !== null && !sameMinute(at, report.at) ? at : null;
+  // The strip that says "showing exposure at X, run triage at X" is a live region whose button text carries X: it follows
+  // the settled clock, so a scrub or the autoplay changes it once, when it stops, not on every minute.
+  const settledWant = report && settledAt !== null && !sameMinute(settledAt, report.at) ? settledAt : null;
   const follow = !isGuest && !other && wantAt !== null;
   const live = useExposureQuery(scenario, follow ? wantAt : null, retry);
   const scrubbed = follow && live.data ? live.data : null;
@@ -144,6 +183,7 @@ export function App() {
   const liveError = live.error && live.error.at === wantAt ? { message: live.error.message, fix: fixFor(live.error, 'exposure'), requestId: live.error.requestId } : null;
 
   // The numbers in the band are the table's numbers (or, before a report, the scrubber's own sample): never a second source.
+  // A run that failed has none: the band says so instead of keeping the timeline's sample as if it were a result.
   const failed = triage.status === 'error' && !report;
   const bandPoint: TimelinePoint | null = isGuest
     ? report
@@ -155,12 +195,19 @@ export function App() {
   // The label and size come from the report's own scope: the demo org ("Acme demo org · 21 repos") or the pasted repo.
   const sc = report?.scope;
   const scope = isGuest ? `${sc?.label ?? guest?.repo ?? 'Pasted repo'}, pasted repo` : `${sc?.label ?? 'Acme demo org'}${sc ? ` · ${plural(sc.repos, 'repo')}` : ''}`;
-  const scopeLine = failed ? `${scope} · triage did not run` : scope;
 
   // Scenario change: the previous run no longer describes this incident.
   useEffect(() => {
     setUserAt(null);
   }, [scenario]);
+  // A free-text alert can name the other incident: the timeline follows it, opening at the run's clock (no autoplay over it).
+  useEffect(() => {
+    const id = triage.incident?.id;
+    if (alertText !== null && id && id !== scenario && triage.at !== null) {
+      setStartAt(triage.at);
+      setScenario(id);
+    }
+  }, [triage.incident?.id]);
   // A new run aligns the scrubber with the run's clock, so every number on screen is true at the same time (and says so).
   useEffect(() => {
     if (triage.at === null) return;
@@ -169,25 +216,36 @@ export function App() {
     }
     playback.seek(triage.at);
   }, [triage.at]);
-  // First exposure is selected when a report lands (or the share link's repo): the chain draws on straight away.
+  // First exposure is selected when a report lands (or the share link's repo, with its drawer tab): the chain draws on straight away.
   useEffect(() => {
     if (!report) return;
     const want = restoreRepo.current;
-    restoreRepo.current = null;
-    setSelected(want && report.exposures.some((e) => e.repo === want) ? want : (report.exposures[0]?.repo ?? null));
+    const tab = restoreOpen.current;
+    restoreRepo.current = restoreOpen.current = null;
+    const hit = want ? report.exposures.find((e) => e.repo === want || e.repo.startsWith(`${want}@`)) : undefined; // a pasted repo read at HEAD is "owner/name@HEAD"
+    setSelected(hit?.repo ?? report.exposures[0]?.repo ?? null);
+    if (hit && tab) setDrawer({ repo: hit.repo, tab });
   }, [report]);
-  // A share link that names a repo reopens its answer: the triage runs at the link's minute.
+  // A share link that names an org repo reopens its answer: the triage runs at the link's minute.
   const autoRan = useRef(false);
   useEffect(() => {
-    if (urlInit.repo && !autoRan.current) {
+    if (orgRepo && !autoRan.current) {
       autoRan.current = true;
       void runAt(urlInit.at ?? undefined, null);
     }
   }, []);
 
-  // Back closes the open drawer or paste panel (the default dismiss gesture on a phone) instead of leaving the app.
+  // Back closes the open drawer or sheet (the default dismiss gesture on a phone) instead of leaving the app.
+  const sheet = panel === 'paste' || panel === 'stats';
+  const closeSheet = () => {
+    if (panel === 'paste' && analyze.status === 'running') analyze.reset(); // closing the sheet abandons the analysis it started
+    setPanel('none');
+  };
   useBackClose(drawer.repo !== null, () => setDrawer((d) => ({ ...d, repo: null })));
-  useBackClose(panel === 'paste', () => setPanel('none'));
+  useBackClose(sheet, closeSheet);
+  useEffect(() => {
+    if (sheet) playback.pause(); // the autoplay would keep ticking behind a sheet nobody can see it through
+  }, [sheet]);
 
   /** Switch the visible pane (single-column layouts), bring it to the top of the screen, and (from a tab press) move focus into it. */
   const showPane = (p: Pane, focus = false) => {
@@ -222,11 +280,6 @@ export function App() {
     );
   };
 
-  const closePaste = () => {
-    setPanel('none');
-    document.querySelector<HTMLElement>('[aria-controls="paste-panel"]')?.focus(); // the panel's Close button is about to unmount
-  };
-
   const startRun = (fn: () => void) => {
     setDrawer((d) => ({ ...d, repo: null }));
     setSelected(null);
@@ -246,10 +299,9 @@ export function App() {
       guestReq.current = null;
     }
     await remediation.flush();
-    const when = clock !== undefined ? { at: clock } : {};
+    const when = { at: clock ?? clockFor(scn) };
     startRun(() => triage.run(g ? { guest: g.graph, scenario: scn, ...when } : { scenario: scn, ...when }));
   };
-  const run = () => (alertText !== null && !guest ? runAlert(alertText) : void runAt(userAt ?? undefined));
   const runAlert = async (text: string) => {
     setAlertText(text);
     setGuest(null);
@@ -263,31 +315,52 @@ export function App() {
     const g = await analyze.analyze({ ...req, scenario: scn });
     if (g) {
       guestReq.current = req;
-      setGuest(g);
+      setGuest({ ...g, scenario: scn });
       setPanel('none');
       setAlertText(null);
-      startRun(() => triage.run({ guest: g.graph, scenario: scn }));
+      setShared(null);
+      startRun(() => triage.run({ guest: g.graph, scenario: scn, at: clockFor(scn) }));
     }
   };
+  /** The one action behind every Run button, Enter on a scenario and "Re-run to update": what is on screen, run again at the run clock. */
+  const run = () => {
+    if (alertText !== null && !guest && choice === 'alert') return void runAlert(alertText);
+    if (guestReq.current && guest?.scenario !== scenario) return void onAnalyze(guestReq.current, scenario); // a pasted repo is built per incident
+    void runAt();
+  };
+  /** The share link's pasted repo: the one click that fetches it. Its result is then selected, with the link's drawer tab open. */
+  const recheck = () => {
+    if (!shared) return;
+    restoreRepo.current = shared;
+    restoreOpen.current = urlInit.open;
+    void onAnalyze({ url: `https://github.com/${shared}` });
+  };
 
-  /** Another incident: the timeline follows at once; whatever was on screen (a report, a pasted repo) is re-run for it, after a short pause so arrowing through the control does not start three runs. */
-  const switchTo = (v: ScenarioId, now = false) => {
-    window.clearTimeout(rerun.current);
-    setStartAt(null);
+  /** Another incident. `rerun`: whatever was on screen (a report, a pasted repo) is run again for it; the timeline follows either way. */
+  const switchTo = (v: ScenarioId, rerun: boolean) => {
+    setStartAt(rerun ? DEFAULT_AT[v] : null); // a run opens the new track at its own clock instead of autoplaying over it
     setScenario(v);
     setChoice(v);
     setAlertText(null);
     setPanel((p) => (p === 'alert' ? 'none' : p));
-    const go = () => (guestReq.current ? void onAnalyze(guestReq.current, v) : void runAt(undefined, null, v));
-    if (now) go();
-    else if (v !== scenario && (guestReq.current || triage.status !== 'idle')) rerun.current = window.setTimeout(go, 450);
+    if (rerun) void (guestReq.current ? onAnalyze(guestReq.current, v) : runAt(undefined, null, v));
   };
+  /** A click or Space on a segment: choose it, and (when there is a result on screen) run it for the new incident. */
   const onScenario = (v: ScenarioChoice) => {
     if (v === 'alert') {
-      window.clearTimeout(rerun.current);
       setChoice('alert');
       setPanel('alert');
-    } else if (v !== scenario || choice === 'alert') switchTo(v);
+    } else if (v !== scenario || choice === 'alert') switchTo(v, guestReq.current !== null || triage.status !== 'idle');
+  };
+  /** An arrow key: the selection moves (the timeline follows) and nothing runs, opens or takes focus. */
+  const onMove = (v: ScenarioChoice) => {
+    setChoice(v);
+    if (v === 'alert') return;
+    setPanel((p) => (p === 'alert' ? 'none' : p));
+    if (v !== scenario) {
+      setStartAt(null);
+      setScenario(v);
+    }
   };
 
   /** A claim chip or [E1] id was clicked: select the repo whose path it names. */
@@ -315,14 +388,19 @@ export function App() {
       }
     });
   };
-  /** "Built on FalkorDB": open the Graph stats tab under the table. */
+  /** "Built on FalkorDB": the Graph stats tab under the table after a triage; before one, the graph's own counts in a sheet. */
   const openStats = () => {
-    if (!report) return toast({ message: 'Graph stats appear once a triage has run. Press Run triage first.' });
+    if (!report) return setPanel('stats');
     flushSync(() => setPane('table'));
     const tab = [...document.querySelectorAll<HTMLElement>('#exposures [role="tab"]')].find((t) => /graph stats/i.test(t.textContent ?? ''));
     tab?.click();
     tab?.focus({ preventScroll: true });
     if (tab) scrollPaneTo(tab, 48);
+  };
+  const skipToTable = (e: { preventDefault: () => void }) => {
+    e.preventDefault();
+    flushSync(() => setPane('table'));
+    tableRef.current?.focus();
   };
 
   // Phones: when the verdict arrives, bring it into view once the layout has settled (the band collapsed, the cards streamed).
@@ -344,25 +422,44 @@ export function App() {
   const graphExposures = view ? view.exposures : landing.exposures;
   // marks the server already holds come from the run (a scrubbed /api/exposure answer carries none), plus this screen's own
   const remediated = { ...Object.fromEntries((report?.exposures ?? []).flatMap((e) => (e.remediated ? [[e.repo, e.remediated.at]] : []))), ...remediation.remediated };
+  const marked = view ? view.exposures.filter((e) => remediated[e.repo] !== undefined).length : 0;
   const inRun = new Set(report?.exposures.map((e) => e.repo));
   // exports describe the run, plus the marks made on this screen (some may still be inside the Undo window)
   const exported = report && { ...report, exposures: report.exposures.map((e) => (remediation.remediated[e.repo] ? { ...e, remediated: { at: remediation.remediated[e.repo]!, action: 'remediated' } } : e)) };
   const showHint = report !== null && !hintDismissed;
   const reveal = !stale && incident !== null && at !== null && at >= incident.advisoryAt; // the figure waits for the playhead to pass the OSV record
+  const alertNote =
+    alertText !== null && !hasClock(alertText) && triage.at !== null
+      ? `No time in the alert: using ${utcLabel(triage.at)}, the scenario default. Add one, like 13:16 UTC.`
+      : null;
 
-  /** Share = the state: scenario, the minute on screen, and the selected repo (a pasted repo has no org graph to reopen). */
-  const link = () => shareUrl(location.href, { scenario: report?.incident.id ?? scenario, at: view?.at ?? at, repo: isGuest ? null : selected });
-  const share = () => void copyText(link(), 'Link');
+  /**
+   * Share = the state: scenario, the minute on screen, the selected repo (and the drawer tab when one is open). A pasted
+   * public repo is shared as `guest` (the link re-checks it on one click); a dropped lockfile has nothing to reopen: null.
+   */
+  const guestRepo = guestReq.current && 'url' in guestReq.current ? guestReq.current.url.replace(/^https:\/\/github\.com\//i, '') : null;
+  const link = (repo: string | null = selected, open: OpenTab | null = null): string | null => {
+    const base = { scenario: report?.incident.id ?? scenario, at: view?.at ?? at, open };
+    const url = isGuest ? shareUrl(location.href, { ...base, guest: guestRepo }) : shareUrl(location.href, { ...base, repo });
+    return isGuest && !new URL(url).searchParams.has('guest') ? null : url;
+  };
+  const share = () => {
+    const url = link();
+    if (url) void copyText(url, 'Link');
+    else toast({ message: NO_SHARE_LOCKFILE });
+  };
   // The drawer is a modal dialog, so it reports and offers Undo itself; a toast would sit dimmed and inert under its scrim.
   const markRemediated = (repo: string) => remediation.mark(repo);
 
   const actions = (
     <div className="flex min-h-(--control-h) flex-wrap items-center gap-2">
-      <Button variant="primary" loading={running} onClick={run}>
-        {report ? 'Run again' : 'Run triage'}
+      <Button variant={shared ? 'secondary' : 'primary'} loading={running} onClick={run}>
+        {runLabel}
       </Button>
       <Button onClick={() => switchTo(scenario === QIX ? AXIOS : QIX, true)}>{scenario === QIX ? 'Try axios 2026' : 'Try qix 2025'}</Button>
-      <Button onClick={() => setPanel((p) => (p === 'paste' ? 'none' : 'paste'))}>Paste your repo</Button>
+      <Button aria-haspopup="dialog" onClick={() => setPanel('paste')}>
+        Paste your repo
+      </Button>
     </div>
   );
 
@@ -372,7 +469,18 @@ export function App() {
     'sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-(--z-modal) focus:rounded-sm focus:bg-bg-2 focus:px-3 focus:py-2';
   // The narrative dims a narration whose clock differs from the scrubber's and offers a re-run (ToolFeed hands both to
   // NarrativePanel). A spread, not named props, so this file compiles whichever side of the ToolFeed change it is built on.
-  const feedExtra = { clockAt: at, onRerun: run, onShowFlagged: showFlagged };
+  // `clockAt` is the settled clock: that line is a live region and must not speak on every step of a scrub or the autoplay.
+  const feedExtra = { clockAt: settledAt, onRerun: run, onShowFlagged: showFlagged };
+  const verdictLine =
+    triage.narration === null
+      ? ''
+      : triage.mode === 'live'
+        ? 'Verdict from the graph · analyst pick by the LLM'
+        : triage.mode === 'replay'
+          ? 'Verdict from the graph · analyst pick replayed'
+          : triage.mode === 'template'
+            ? 'Verdict from the graph · no analyst pick'
+            : 'Verdict from the graph · analyst pick pending';
 
   return (
     <div className="relative flex min-h-dvh flex-col pb-(--tabbar-h) lg:pb-0 xl:h-dvh xl:overflow-clip">
@@ -380,20 +488,6 @@ export function App() {
       <a href="#results" className={skipLink}>
         Skip to results
       </a>
-      {/* 17 tool cards sit between the header and the table: a keyboard user can jump straight to it. */}
-      {report && (
-        <a
-          href="#exposures"
-          onClick={(e) => {
-            e.preventDefault();
-            flushSync(() => setPane('table'));
-            tableRef.current?.focus();
-          }}
-          className={skipLink}
-        >
-          Skip to exposure table
-        </a>
-      )}
       {/* Always mounted: it flips its label instead of unmounting under the user's focus. */}
       <button type="button" disabled={first === null} onClick={playback.playing ? playback.pause : playback.play} className={skipLink}>
         {playback.playing ? 'Pause the autoplay' : 'Resume the autoplay'}
@@ -401,26 +495,30 @@ export function App() {
       <Header
         scenario={choice}
         onScenario={onScenario}
-        onRun={() => void runAt(userAt ?? undefined, null)}
+        onMove={onMove}
+        onRun={run}
         running={running}
         turnKey={turnKey}
-        clockAt={view ? view.at : at}
+        clockAt={failed ? null : view ? view.at : at}
         queryTotal={queryTotal}
         mode={triage.mode}
         guard={triage.guard}
         onShowFlagged={showFlagged}
         onOpenStats={openStats}
-        pasteOpen={panel === 'paste'}
-        onTogglePaste={() => setPanel((p) => (p === 'paste' ? 'none' : 'paste'))}
+        onOpenPaste={() => setPanel('paste')}
         mock={isMock}
       />
-      {panel === 'paste' && <PasteBox analyze={analyze} onAnalyze={(req) => void onAnalyze(req)} onClose={closePaste} />}
+      {/* The first stop after the header: the feed (17 tool cards) sits between the header and the table. */}
+      <a href="#exposures" onClick={skipToTable} className={skipLink}>
+        Skip to exposure table
+      </a>
+      {shared && <SharedPrompt repo={shared} scenario={scenario} analyze={analyze} onRecheck={recheck} onDismiss={() => setShared(null)} />}
       {panel === 'alert' && (
         <section aria-label="Describe an alert" className="border-b border-line-1 bg-bg-1 px-(--gutter) py-4">
           <AlertField onRun={runAlert} disabled={running} />
         </section>
       )}
-      {alertText && <AlertBanner text={alertText} pulseKey={turnKey} />}
+      {alertText && <AlertBanner text={alertText} pulseKey={turnKey} note={alertNote} />}
       <p role="status" className="sr-only">
         {announce}
       </p>
@@ -444,14 +542,18 @@ export function App() {
                   incident={timeline.incident}
                   points={timeline.points}
                   at={at ?? 0}
-                  snapshot={bandPoint}
+                  snapshot={failed ? null : bandPoint}
                   playing={playback.playing}
                   onPlay={playback.play}
                   onPause={playback.pause}
                   onSeek={(t) => (setUserAt(t), setStartAt(null), playback.seek(t))}
                   landingEnd={autoplayEnd}
                   compact={compact}
-                  scope={scopeLine}
+                  scope={scope}
+                  scopeNote={isGuest ? null : DEMO_NOTE}
+                  scopeNoteShort={isGuest ? null : DEMO_NOTE_SHORT}
+                  failed={failed}
+                  remediated={marked}
                   stale={stale}
                   trailing={
                     // the empty icon slot is where the radar goes while it runs: the button keeps its width
@@ -486,19 +588,18 @@ export function App() {
             tabIndex={-1}
             aria-label="Tool feed"
             onClickCapture={(e) => {
-              // Reading a query is "first use" too: retire the hint.
-              const b = (e.target as HTMLElement).closest('button');
-              if (b && /cypher/i.test(`${b.textContent} ${b.getAttribute('aria-label') ?? ''}`)) dismissHint();
+              // Opening a tool call (or its Cypher) is "first use" too: retire the hint.
+              if ((e.target as HTMLElement).closest('button[aria-expanded]')) dismissHint();
             }}
             // Below 1024px the Ask box is fixed above the tab bar: keep the last cards clear of it.
             className={`scroll-pane border-line-1 bg-bg-1 p-3 lg:row-span-2 lg:h-0 lg:min-h-full lg:border-r xl:row-span-1 xl:h-auto xl:min-h-0 ${report ? 'max-lg:pb-36' : ''} ${paneClass('feed')}`}
           >
-            {/* Reserved from the click on Run triage, so the mode line never pushes the cards down when it arrives. */}
+            {/* Two lines reserved from the click on Run triage (the verdict line, and the cached note on a narrow pane), so what arrives
+                later never pushes the cards down. */}
             {compact && (
-              <aside aria-label="Narration mode" className="mb-2 min-h-5 text-xs text-fg-1">
-                {triage.mode === 'replay' && 'Narration replayed · graph queries live'}
-                {triage.mode === 'template' && 'Narration from a template · graph queries live'}
-                {triage.mode === 'live' && 'Narration written live · graph queries live'}
+              <aside aria-label="Narration mode" className="mb-2 min-h-9 text-xs text-fg-1">
+                {verdictLine}
+                {results.some((r) => r.cached) && <> <span className="block text-fg-2">“cached” on a call: reused an earlier read-only query</span></>}
               </aside>
             )}
             <ToolFeed
@@ -527,7 +628,7 @@ export function App() {
           </section>
 
           <div ref={graphRef} tabIndex={-1} className={`md:min-h-[420px] lg:col-start-2 lg:row-start-1 xl:h-full xl:min-h-0 ${paneClass('graph')}`}>
-            <PathGraph exposures={graphExposures} paths={view?.paths ?? []} incident={incident} selectedRepo={selected} playing={playback.playing} onSelectRepo={pick} />
+            <PathGraph exposures={graphExposures} paths={view?.paths ?? []} incident={incident} selectedRepo={selected} playing={playback.playing} onSelectRepo={pick} ran={report !== null} subject={isGuest ? (report?.scope?.label ?? guest?.repo ?? null) : null} />
           </div>
 
           <section
@@ -540,11 +641,11 @@ export function App() {
             {!report && <h2 className="sr-only">Exposure results</h2>}
             {report && view ? (
               <>
-                {showHint && <OnboardingHint onDismiss={dismissHint} />}
+                {showHint && <OnboardingHint onDismiss={() => (dismissHint(), tableRef.current?.focus({ preventScroll: true }))} />}
                 <ReportClock
                   runAt={report.at}
                   viewAt={view.at}
-                  wantAt={wantAt}
+                  wantAt={settledWant}
                   loading={live.loadingAt !== null}
                   error={liveError}
                   guest={isGuest}
@@ -554,7 +655,7 @@ export function App() {
                   onRerun={(t) => void runAt(t)}
                   onRetry={() => (setRetry((n) => n + 1), tableRef.current?.focus({ preventScroll: true }))}
                 />
-                <ExecSummary report={view} onShare={share} />
+                <ExecSummary report={view} onShare={share} marked={marked} />
                 <ExposureTable
                   exposures={view.exposures}
                   paths={view.paths}
@@ -566,15 +667,16 @@ export function App() {
                   onSelect={pick}
                   onOpenFix={(repo) => (dismissHint(), setDrawer({ repo, tab: 'fix' }))}
                   onUndo={remediation.undo}
+                  onExport={(f) => downloadReport(exported ?? report, f)}
                 />
-                <InsightTabs report={report} cards={triage.toolCards} graph={triage.graph} totalMs={triage.ms} />
+                <InsightTabs report={report} cards={triage.toolCards} graph={triage.graph} totalMs={triage.ms} remediated={remediated} />
               </>
             ) : (
               <EmptyState
                 title="No exposures to show yet"
                 cause="The table lists every repo that reaches a malicious version, with its tier, path and owner."
                 fix="Run the triage to fill it."
-                action={{ label: 'Run triage', onClick: run }}
+                action={{ label: runLabel, onClick: run }}
               />
             )}
           </section>
@@ -601,6 +703,9 @@ export function App() {
         ))}
       </nav>
 
+      <PasteBox open={panel === 'paste'} analyze={analyze} onAnalyze={(req) => void onAnalyze(req)} onClose={closeSheet} />
+      <GraphStatsSheet open={panel === 'stats'} scenario={scenario} onClose={closeSheet} />
+
       {report && (
         <FixDrawer
           repo={drawer.repo}
@@ -615,7 +720,10 @@ export function App() {
           running={running}
           onCancelRun={triage.abort}
           onExport={(f) => downloadReport(exported ?? report, f)}
-          onShare={() => copyText(link(), 'Link', true)}
+          onShare={async () => {
+            const url = link(drawer.repo, drawer.tab);
+            return url ? copyText(url, 'Link', true) : NO_SHARE_LOCKFILE;
+          }}
         />
       )}
       <Toasts />

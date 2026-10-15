@@ -5,9 +5,11 @@
  *   index         position in the feed, for the enter stagger (first 6 only)
  *   open, onOpenChange   the card body is open (controlled by ToolFeed so "expand all" and a clicked claim can open it);
  *                 uncontrolled when omitted. A finished card is collapsed by default: one line (name, subject, the
- *                 server's summary, ms) and ONE tab stop. Everything else (table, Cypher, plan, copy) is inside.
- *   trace         { row, nonce }: a claim chip, [E#] tag or the claim map pointed here. The card opens, opens its Cypher,
+ *                 server's summary, ms) and ONE tab stop. Opening it shows the rows AND the Cypher at once (the Cypher
+ *                 block has a toggle to hide it, not one to reveal it); the plan and copy are inside too.
+ *   trace         { row, nonce }: a claim chip, [E#] tag or the claim map pointed here. The card opens, shows its Cypher,
  *                 scrolls into view, takes focus and flashes the row that holds the claim (row null: the card itself).
+ *   onSay         the feed's single live region: what a card wants announced (a plan loaded). No card has its own.
  * The stable DOM id is cardDomId(card) so anything can link to a card.
  * States: pending (radar + 3 skeleton rows; after 3 s "waiting for FalkorDB... 4 s"), done (collapsed line; open:
  * table, Cypher), error (neutral alert block: red means infected on this screen), cancelled. Radar only while pending.
@@ -94,7 +96,7 @@ function Cell({ k, v }: { k: string; v: unknown }) {
 
 const rowFlash = 'bg-bg-3 outline-2 -outline-offset-2 outline-fg-0';
 
-function RowsTable({ tool, rows, flash, showAll, onShowAll }: { tool: string; rows: Record<string, unknown>[]; flash: number | null; showAll: boolean; onShowAll: () => void }) {
+function RowsTable({ tool, rows, flash, showAll, onToggleAll }: { tool: string; rows: Record<string, unknown>[]; flash: number | null; showAll: boolean; onToggleAll: () => void }) {
   const shown = showAll ? rows : rows.slice(0, MAX_ROWS);
   const first = rows[0] ?? {};
   const cols = (COLS[tool] ?? Object.keys(first)).filter((k) => k in first && (first[k] === null || typeof first[k] !== 'object' || Array.isArray(first[k]))).slice(0, 3);
@@ -104,7 +106,7 @@ function RowsTable({ tool, rows, flash, showAll, onShowAll }: { tool: string; ro
       <thead>
         <tr>
           {cols.map((c, j) => (
-            <th key={c} scope="col" className={`label-caps border-b border-line-1 py-1 pr-2 font-medium ${j === 0 ? 'w-[46%]' : ''}`}>
+            <th key={c} scope="col" className={`label-caps text-xs border-b border-line-1 py-1 pr-2 font-medium ${j === 0 ? 'w-[46%]' : ''}`}>
               {c.replace(/([A-Z])/g, ' $1').toLowerCase()}
             </th>
           ))}
@@ -119,12 +121,13 @@ function RowsTable({ tool, rows, flash, showAll, onShowAll }: { tool: string; ro
           </tr>
         ))}
       </tbody>
-      {rows.length > shown.length && (
+      {rows.length > MAX_ROWS && (
         <tfoot>
           <tr>
             <td colSpan={cols.length} className="pt-1.5">
-              <button type="button" className="inline-flex min-h-6 items-center rounded-xs text-xs text-fg-1 underline underline-offset-2 pointer-coarse:min-h-11 hov:text-fg-0" onClick={onShowAll}>
-                Show all {rows.length} rows
+              {/* One button that flips its label, so it is never unmounted under the keyboard focus it is holding. */}
+              <button type="button" aria-expanded={showAll} className="inline-flex min-h-6 items-center rounded-xs text-xs text-fg-1 underline underline-offset-2 pointer-coarse:min-h-11 hov:text-fg-0" onClick={onToggleAll}>
+                {showAll ? `Show the first ${MAX_ROWS} rows` : `Show all ${rows.length} rows`}
               </button>
             </td>
           </tr>
@@ -204,13 +207,14 @@ export interface ToolCardProps {
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   trace?: Trace | null;
+  onSay?: (message: string) => void;
 }
 
-export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, trace }: ToolCardProps) {
+export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, trace, onSay }: ToolCardProps) {
   const [inner, setInner] = useState(false);
   const open = openProp ?? inner;
   const setOpen = (o: boolean) => (onOpenChange ? onOpenChange(o) : setInner(o));
-  const [cypherOpen, setCypherOpen] = useState(false);
+  const [cypherOpen, setCypherOpen] = useState(true); // the proof is the point of opening a card: no second click
   const [plan, setPlan] = useState<Plan | 'loading' | null>(null);
   const [planOpen, setPlanOpen] = useState<ReadonlySet<number>>(new Set());
   const [showAll, setShowAll] = useState(false);
@@ -258,10 +262,12 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
       const lines = (await getPlan(scenario, card.tool)).plan;
       const p: Plan = { lines, at: planFor(lines, r?.cypher ?? []) };
       setPlan(p);
+      onSay?.(`Query plan loaded for ${card.tool}.`);
       return p;
     } catch (err) {
       const p: Plan = { error: err instanceof ApiError ? plainError(err) : 'Could not load the plan.' };
       setPlan(p);
+      onSay?.(`${card.tool}: ${p.error}`);
       return p;
     }
   }
@@ -276,11 +282,16 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
     if (r && !(await copyText(r.cypher.join('\n\n'), 'Cypher'))) setCypherOpen(true); // show it selectable
   };
 
+  // One line: the tool name keeps its width, the subject (a repo, a maintainer) truncates and says the rest in its title.
   const title = (
-    <>
-      <span className="font-medium text-fg-0">{card.tool}</span>
-      {sub && <span className="font-mono text-xs text-fg-1"> · {sub}</span>}
-    </>
+    <span className="flex min-w-0 items-baseline">
+      <span className="shrink-0 font-medium text-fg-0">{card.tool}</span>
+      {sub && (
+        <span className="min-w-0 truncate pl-1 font-mono text-xs text-fg-1" title={sub}>
+          · {sub}
+        </span>
+      )}
+    </span>
   );
 
   return (
@@ -296,7 +307,8 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
       <div className={`flex flex-col gap-0.5 p-3 ${collapsible ? 'cursor-pointer' : ''}`} onClick={collapsible ? () => !getSelection()?.toString() && setOpen(!open) : undefined}>
         <h3 className="flex items-start gap-2 text-base">
           {collapsible ? (
-            <button ref={headRef} type="button" aria-expanded={open} aria-controls={bodyId} className="flex min-w-0 flex-1 items-start gap-1.5 rounded-xs text-left break-words [overflow-wrap:anywhere]">
+            // on touch the button grows into the card's own padding (negative margin) to a 44px target without moving anything
+            <button ref={headRef} type="button" aria-expanded={open} aria-controls={bodyId} className="flex min-w-0 flex-1 items-start gap-1.5 rounded-xs text-left break-words [overflow-wrap:anywhere] pointer-coarse:-my-3 pointer-coarse:min-h-11 pointer-coarse:py-3">
               <ChevronDown size={16} className={`mt-0.5 shrink-0 text-fg-1 transition-transform duration-(--dur-base) ease-out ${open ? '' : '-rotate-90'}`} />
               <span className="min-w-0">{title}</span>
             </button>
@@ -325,7 +337,7 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
         <div className="px-3 pb-3">
           <ul className="flex flex-wrap gap-1" aria-label="Arguments">
             {Object.entries(card.params).map(([k, v]) => (
-              <li key={k} className="rounded-xs bg-bg-3 px-1.5 font-mono text-2xs text-fg-1">
+              <li key={k} className="rounded-xs bg-bg-3 px-1.5 font-mono text-xs text-fg-1">
                 {k}={fmtParam(k, v)}
               </li>
             ))}
@@ -369,7 +381,7 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
             <div className="px-3 pb-3">
               <ul className="flex flex-wrap gap-1" aria-label="Arguments">
                 {Object.entries(card.params).map(([k, v]) => (
-                  <li key={k} className="rounded-xs bg-bg-3 px-1.5 font-mono text-2xs text-fg-1">
+                  <li key={k} className="rounded-xs bg-bg-3 px-1.5 font-mono text-xs text-fg-1">
                     {k}={fmtParam(k, v)}
                   </li>
                 ))}
@@ -380,7 +392,7 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
               ) : card.tool === 'draft_remediation' ? (
                 <PinRows rows={r.rows} flash={flash?.row ?? null} />
               ) : (
-                <RowsTable tool={card.tool} rows={r.rows} flash={flash?.row ?? null} showAll={showAll} onShowAll={() => setShowAll(true)} />
+                <RowsTable tool={card.tool} rows={r.rows} flash={flash?.row ?? null} showAll={showAll} onToggleAll={() => setShowAll((a) => !a)} />
               )}
               {r.truncated ? <p className="mt-1 text-xs text-fg-2">+{r.truncated} rows withheld from the summary</p> : null}
 
@@ -406,9 +418,9 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
                       const id = `${bodyId}-s${i}`;
                       const wanted = planOpen.has(i);
                       return (
-                        <section key={i} aria-label={stmts.length > 1 ? `Query ${s.n} of ${s.of}` : 'Query'}>
+                        <div key={i} role="group" aria-label={stmts.length > 1 ? `Query ${s.n} of ${s.of}` : 'Query'}>
                           <div className="mb-1 flex items-center justify-between gap-2">
-                            <p className="label-caps">{stmts.length > 1 ? `${s.n}/${s.of} · ${s.label}` : s.label}</p>
+                            <p className="label-caps text-xs">{stmts.length > 1 ? `${s.n}/${s.of} · ${s.label}` : s.label}</p>
                             {scenario && (
                               <button
                                 type="button"
@@ -423,12 +435,12 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
                             )}
                           </div>
                           <pre className="rounded-xs bg-bg-3 p-2 text-xs leading-[18px] whitespace-pre-wrap text-fg-0 [overflow-wrap:anywhere]">
-                            <code>{s.text}</code>
+                            <code className="text-xs">{s.text}</code>
                           </pre>
-                          <div id={id} aria-live="polite">
+                          <div id={id}>
                             {wanted && (
                               <div className="mt-2">
-                                <p className="label-caps mb-1">GRAPH.EXPLAIN{stmts.length > 1 ? ` · ${s.n}/${s.of}` : ''}</p>
+                                <p className="label-caps text-xs mb-1">GRAPH.EXPLAIN{stmts.length > 1 ? ` · ${s.n}/${s.of}` : ''}</p>
                                 {plan === 'loading' || plan === null ? (
                                   <p className="font-mono text-xs text-fg-1">Loading plan&hellip;</p>
                                 ) : 'error' in plan ? (
@@ -459,7 +471,7 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
                               </div>
                             )}
                           </div>
-                        </section>
+                        </div>
                       );
                     })}
                   </div>

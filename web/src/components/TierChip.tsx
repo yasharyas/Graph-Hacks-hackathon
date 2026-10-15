@@ -29,7 +29,7 @@ export function TierChip({ tier, dev = false, showSubtitle = false, tip = false 
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
       <span className={tip ? 'tip-host inline-flex' : 'inline-flex'}>
-        <span className={`inline-flex h-5 items-center gap-1.5 rounded-xs px-1.5 font-mono text-2xs font-medium ${STYLE[tier]}`}>
+        <span className={`inline-flex h-[18px] items-center gap-1.5 rounded-xs px-1.5 font-mono text-xs leading-none font-medium ${STYLE[tier]}`}>
           <span aria-hidden className="size-1.5 rounded-full bg-current" />
           {tier}
           <span className="sr-only">
@@ -43,7 +43,7 @@ export function TierChip({ tier, dev = false, showSubtitle = false, tip = false 
           </span>
         )}
       </span>
-      {dev && <span className="rounded-xs border border-line-3 px-1 font-mono text-2xs text-fg-1">dev</span>}
+      {dev && <span className="rounded-xs border border-line-3 px-1 font-mono text-xs text-fg-1">dev</span>}
       {showSubtitle && <span className="text-xs text-fg-1">{TIER_SUBTITLE[tier]}</span>}
     </span>
   );

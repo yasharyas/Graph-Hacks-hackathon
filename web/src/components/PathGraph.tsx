@@ -7,6 +7,8 @@
  *   selectedRepo                 the table drives selection; keyboard users select rows in the table
  *   playing                      landing autoplay (particles on)
  *   onSelectRepo(repo)
+ *   ran, subject                 optional: a triage has finished (so an empty graph is an ANSWER, not "run a triage": a
+ *                                clean pasted repo has no path to draw), and the name of the repo it was about
  * The canvas is role=img with an aria-label that summarises the selected chain.
  */
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
@@ -23,6 +25,8 @@ export interface PathGraphProps {
   selectedRepo: string | null;
   playing: boolean;
   onSelectRepo: (repo: string) => void;
+  ran?: boolean;
+  subject?: string | null;
 }
 
 // Left to right, the order the canvas lays them out; the shapes are the canvas shapes (radii scaled to 16px).
@@ -105,7 +109,7 @@ function CompactPath({ path, badVersions, team }: { path: ExposurePath; badVersi
 const versionsText = (versions: string[], shown = 3) =>
   versions.slice(0, shown).join(', ') + (versions.length > shown ? ` and ${versions.length - shown} more` : '');
 
-export function PathGraph({ exposures, paths, incident, selectedRepo, playing, onSelectRepo }: PathGraphProps) {
+export function PathGraph({ exposures, paths, incident, selectedRepo, playing, onSelectRepo, ran = false, subject = null }: PathGraphProps) {
   const [box, { width, height }] = useSize<HTMLDivElement>();
   const wide = useWide();
   const bad = new Set(incident?.versions.map((v) => v.id));
@@ -151,7 +155,15 @@ export function PathGraph({ exposures, paths, incident, selectedRepo, playing, o
       </div>
 
       {exposures.length === 0 ? (
-        <EmptyState title="No paths yet" cause="Run a triage, or scrub the timeline past the first publish, to see which repos reach a malicious version." />
+        ran ? (
+          <EmptyState
+            title="No path to a malicious version"
+            cause={`${subject ? `${subject.replace(/@HEAD$/, '')} does not reach` : 'No repo in this run reaches'} a malicious version of ${incident ? incident.title : 'this incident'} at this clock, so there is no chain to draw.`}
+            fix="Try the other incident, or paste another repo."
+          />
+        ) : (
+          <EmptyState title="No paths yet" cause="Run a triage, or scrub the timeline past the first publish, to see which repos reach a malicious version." />
+        )
       ) : wide ? (
         <div ref={box} className="relative min-h-0 flex-1 overflow-hidden" role="img" aria-label={label}>
           {width > 0 && height > 0 && (
@@ -171,7 +183,7 @@ export function PathGraph({ exposures, paths, incident, selectedRepo, playing, o
         </div>
       ) : (
         <div className="flex flex-col items-start gap-3 p-4">
-          <p className="label-caps">{selectedRepo ? 'Path for the selected repo' : 'Path'}</p>
+          <p className="label-caps text-xs">{selectedRepo ? 'Path for the selected repo' : 'Path'}</p>
           {shownPath ? (
             <CompactPath path={shownPath} badVersions={bad} team={(selected ?? exposures.find((e) => e.repo === shownPath.repo))?.team ?? null} />
           ) : selected ? (

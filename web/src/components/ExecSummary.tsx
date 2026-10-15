@@ -1,5 +1,6 @@
 /* ExecSummary: a one-line strip at the top of the results (docs/design.md section 5), so the table is what a laptop
- * sees first. Props: report (Report), onShare (copies a link; wiring lives in App).
+ * sees first. Props: report (Report), onShare (copies a link; wiring lives in App), marked (repos marked remediated: said
+ * beside the exposed count, with the one line that marks are kept for this browser session only).
  * Reads: a stacked tier bar, "N of M exposed", "+N min ahead of the advisory" (only when something is exposed) and an
  * icon Share button. The incident, scope and clock are the band above and the header chip (named here for screen
  * readers only); tier counts by name live in the band (one place, not three); the top maintainers are the
@@ -27,7 +28,7 @@ export function influenceShares(rows: Concentration[]) {
   });
 }
 
-export function ExecSummary({ report, onShare }: { report: Report; onShare: () => void }) {
+export function ExecSummary({ report, onShare, marked = 0 }: { report: Report; onShare: () => void; marked?: number }) {
   const exposed = report.counts.LOCKED + report.counts.WOULD_PULL;
   const total = report.scope?.repos ?? exposed + report.counts.MAINTAINER + report.counts.CLEAN; // repos analysed: the org's, or 1 for a pasted repo
   const ahead = exposed > 0 && report.minutesAhead > 0;
@@ -52,6 +53,14 @@ export function ExecSummary({ report, onShare }: { report: Report; onShare: () =
             </span>
           </dd>
         </div>
+        {marked > 0 && (
+          <div className="flex items-baseline">
+            <dt className="sr-only">Remediation marks</dt>
+            <dd className="text-sm text-fg-1">
+              <span className="text-tier-clean">{marked} marked remediated.</span> Marks are saved for this browser session only.
+            </dd>
+          </div>
+        )}
         {ahead && (
           <div className="flex items-baseline">
             <dt className="sr-only">Ahead of the advisory</dt>

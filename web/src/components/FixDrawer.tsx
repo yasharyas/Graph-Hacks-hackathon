@@ -10,18 +10,22 @@
  *   canUndo, onUndo(repo)   the mark is still inside its 10 s Undo window
  *   onRemediate(repo)
  *   running, onCancelRun   "Cancel run" appears only while a triage is running
- *   onExport('md' | 'json') -> the downloaded file name; onShare() -> whether the link was copied
- * Fix tab: what the lockfile pins ("your lockfile pins chalk@5.4.1: safe", from Exposure.locked), then the server's
- * overrides, steps and PR body verbatim (the server writes version-qualified keys and puts "npm ci from the committed
- * lockfile" first: nothing here reorders or rewrites them). Notice tab: one Slack message for THIS repo, complete on its
- * own (data/export.ts slackMessage). Every untrusted string renders as text.
+ *   onExport('md' | 'json') -> the downloaded file name; onShare() -> whether the link was copied, or why there is none
+ * Fix tab: what the lockfile pins ("your lockfile pins chalk@5.4.1: safe", from Exposure.locked; the first 3, malicious
+ * ones first, then "+N more"), then the package.json snippet: the overrides AND, when the repo declares the package
+ * itself, the direct pins (Remediation.direct), because npm rejects an override that conflicts with a direct dependency;
+ * the snippet works when pasted alone. Then the server's steps and PR body verbatim (the server writes version-qualified
+ * keys and puts "npm ci from the committed lockfile" first: nothing here reorders or rewrites them). Notice tab: one
+ * Slack message for THIS repo, complete on its own (data/export.ts slackMessage), whose Details link is a shareUrl
+ * (the repo, or the pasted repo; none for a dropped lockfile). Every untrusted string renders as text.
  * Footer, one row: Copy (the active tab), Mark remediated (+ Undo), and a "More actions" menu (whole-report .md / .json,
  * share link). The dialog is modal, so page toasts would sit dimmed and inert under its scrim: every outcome (copied,
  * exported, marked, undone) is reported by the polite status line inside it. Buttons are named by their visible text.
  */
 import { useEffect, useId, useRef, useState } from 'react';
-import { lockedOf, pinTargets, slackMessage } from '../data/export.ts';
-import { HEAD_NOTE, isHead, utc } from '../data/format.ts';
+import { detailsLink, DIRECT_NOTE, fixJson, hasDirect, lockedOf, pinTargets, slackMessage } from '../data/export.ts';
+import { localStamp } from '../data/clock.ts';
+import { HEAD_NOTE, isHead } from '../data/format.ts';
 import type { Report } from '../data/types.ts';
 import { Button, IconButton } from './Button.tsx';
 import { copyText } from './copy.ts';
@@ -45,7 +49,7 @@ export interface FixDrawerProps {
   running: boolean;
   onCancelRun: () => void;
   onExport: (format: 'md' | 'json') => string;
-  onShare: () => Promise<boolean>;
+  onShare: () => Promise<boolean | string>;
 }
 
 const Block = ({ text }: { text: string }) => (
@@ -64,16 +68,7 @@ const Dots = () => (
 
 const menuItem = 'flex min-h-(--control-h) w-full items-center gap-2 rounded-xs px-3 text-left text-base text-fg-0 hov:bg-bg-3';
 
-/** The link a Slack message carries: this screen's address, pointed at the repo. */
-const linkFor = (repo: string): string => {
-  try {
-    const u = new URL(location.href);
-    u.searchParams.set('repo', repo);
-    return u.toString();
-  } catch {
-    return location.href;
-  }
-};
+const PINS = 3; // lockfile pins shown before "+N more": a repo with 16 of them would push the fix below the fold
 
 export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, canUndo, onUndo, onRemediate, running, onCancelRun, onExport, onShare }: FixDrawerProps) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -82,6 +77,7 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
   const menuRef = useRef<HTMLDivElement>(null);
   const [note, setNote] = useState('');
   const [menu, setMenu] = useState(false);
+  const [allPins, setAllPins] = useState(false);
   const say = (text: string) => setNote(text);
   const shown = useRef<string | null>(repo);
   if (repo) shown.current = repo; // keep the content on screen while the exit transition runs
@@ -94,6 +90,7 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
     else if (!repo && d.open) d.close();
     setNote(''); // a new repo or a closed drawer starts with a clean status line
     setMenu(false);
+    setAllPins(false);
   }, [repo]);
   // "Mark remediated" unmounts the button that had focus: land on Undo, the next thing a person might want.
   useEffect(() => {
@@ -116,14 +113,16 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
   const fix = report.remediations.find((f) => f.repo === r);
   const notice = report.notices.find((n) => n.team === exposure?.team);
   const bad = new Set(report.incident.versions.map((v) => v.id));
-  const overrides = fix ? JSON.stringify({ overrides: fix.overrides }, null, 2) : '';
+  const snippet = fix ? fixJson(fix) : '';
+  const direct = fix ? hasDirect(fix) : false;
   const qualified = fix ? Object.keys(fix.overrides).some((k) => k.lastIndexOf('@') > 0) : false;
-  const fixText = fix ? `${overrides}\n\n${fix.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\n${fix.prBody}` : '';
-  const slack = exposure ? slackMessage({ exposure, paths, fix, incident: report.incident, link: linkFor(exposure.repo) }) : '';
+  const fixText = fix ? `${direct ? `${DIRECT_NOTE}\n` : ''}${snippet}\n\n${fix.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\n${fix.prBody}` : '';
+  const slack = exposure ? slackMessage({ exposure, paths, fix, incident: report.incident, link: detailsLink(location.href, report, exposure.repo, 'notice') }) : '';
   const copyLabel = tab === 'fix' ? 'Fix' : 'Slack message';
   const copyBody = tab === 'fix' ? fixText : slack;
   const copy = async () => say((await copyText(copyBody, copyLabel, true)) ? `${copyLabel} copied` : `Clipboard blocked. Select the ${copyLabel.toLowerCase()} text above and copy it manually.`);
-  const pinned = exposure ? lockedOf(exposure) : [];
+  // malicious pins first: they are what the reader must not miss, and what survives the cut
+  const pinned = exposure ? [...lockedOf(exposure)].sort((a, b) => Number(bad.has(b)) - Number(bad.has(a))) : [];
 
   return (
     <dialog
@@ -159,21 +158,21 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
             {exposure.tier === 'WOULD_PULL' && <p className="mb-3 text-sm text-fg-1">{HONEST_SEMANTICS}</p>}
             {isHead(r) && (
               <p className="mb-3 text-sm text-fg-1">
-                <span className="mr-2 rounded-xs bg-bg-3 px-1.5 py-0.5 font-mono text-2xs font-medium text-fg-0">COUNTERFACTUAL</span>
+                <span className="mr-2 rounded-xs bg-bg-3 px-1.5 py-0.5 font-mono text-xs font-medium text-fg-0">COUNTERFACTUAL</span>
                 {HEAD_NOTE}
               </p>
             )}
             {path && (
               <div className="mb-4">
-                <p className="label-caps mb-1.5">Path {path.id}</p>
+                <p className="label-caps text-xs mb-1.5">Path {path.id}</p>
                 <PathChain path={path} badVersions={bad} />
               </div>
             )}
             {pinned.length > 0 && (
               <div className="mb-4">
-                <p className="label-caps mb-1.5">Your lockfile pins</p>
+                <p className="label-caps text-xs mb-1.5">Your lockfile pins</p>
                 <ul className="flex flex-col gap-1.5 text-sm text-fg-0">
-                  {pinned.map((p) => (
+                  {(allPins ? pinned : pinned.slice(0, PINS)).map((p) => (
                     <li key={p} className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <PathChip item={p} bad={bad.has(p)} />
                       <span className="inline-flex items-center gap-1 text-fg-1">
@@ -188,6 +187,16 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
                     </li>
                   ))}
                 </ul>
+                {pinned.length > PINS && (
+                  <button
+                    type="button"
+                    aria-expanded={allPins}
+                    onClick={() => setAllPins((a) => !a)}
+                    className="mt-1.5 rounded-xs text-xs text-fg-1 underline underline-offset-2 pointer-coarse:min-h-11 hov:text-fg-0"
+                  >
+                    {allPins ? `Show the first ${PINS} pins` : `+${pinned.length - PINS} more`}
+                  </button>
+                )}
               </div>
             )}
 
@@ -203,13 +212,15 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
                   tabIndex={tab === t ? 0 : -1}
                   onClick={() => onTab(t)}
                   onKeyDown={(e) => {
-                    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-                      e.preventDefault();
-                      onTab(t === 'fix' ? 'notice' : 'fix');
-                      document.getElementById(`${id}-${t === 'fix' ? 'notice' : 'fix'}`)?.focus();
-                    }
+                    // two tabs: the arrows swap them, Home and End pick the first and the last
+                    const to = e.key === 'ArrowLeft' || e.key === 'ArrowRight' ? (t === 'fix' ? 'notice' : 'fix') : e.key === 'Home' ? 'fix' : e.key === 'End' ? 'notice' : null;
+                    if (!to) return;
+                    e.preventDefault();
+                    onTab(to);
+                    document.getElementById(`${id}-${to}`)?.focus();
                   }}
-                  className={`-mb-px border-b-2 px-3 py-2 text-base pointer-coarse:min-h-11 ${tab === t ? 'border-fg-0 text-fg-0' : 'border-transparent text-fg-1'}`}
+                  // forced colors: the selected tab gets a Highlight underline and bold text, the other has no underline at all
+                  className={`-mb-px border-b-2 px-3 py-2 text-base pointer-coarse:min-h-11 pointer-coarse:min-w-11 ${tab === t ? 'border-fg-0 text-fg-0 forced-colors:border-b-[Highlight] forced-colors:font-bold' : 'border-transparent text-fg-1 forced-colors:border-b-[Canvas]'}`}
                 >
                   {t === 'fix' ? 'Fix' : 'Notice'}
                 </button>
@@ -220,11 +231,12 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
               {tab === 'fix' &&
                 (fix ? (
                   <>
-                    <p className="label-caps">package.json overrides</p>
-                    <Block text={overrides} />
+                    <p className="label-caps text-xs">{direct ? 'package.json: dependencies and overrides' : 'package.json overrides'}</p>
+                    {direct && <p className="text-xs text-fg-1">{DIRECT_NOTE} npm rejects an override that conflicts with a direct dependency.</p>}
+                    <Block text={snippet} />
                     {qualified && <p className="text-xs text-fg-1">Each key names the exact bad version it replaces, so other versions of the same package in the tree are untouched.</p>}
                     {pinTargets(fix.overrides).length > 0 && <p className="text-xs text-fg-1">Pins: <span className="font-mono">{pinTargets(fix.overrides).join(', ')}</span></p>}
-                    <p className="label-caps">Steps</p>
+                    <p className="label-caps text-xs">Steps</p>
                     <ol className="list-decimal pl-5 text-fg-0">
                       {fix.steps.map((s, i) => (
                         <li key={i} className="mb-1">
@@ -232,7 +244,7 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
                         </li>
                       ))}
                     </ol>
-                    <p className="label-caps">Pull request body</p>
+                    <p className="label-caps text-xs">Pull request body</p>
                     <p className="text-fg-0">{fix.prBody}</p>
                   </>
                 ) : (
@@ -270,7 +282,7 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
               </Button>
               {remediatedAt !== null ? (
                 <span className="inline-flex items-center gap-1.5 text-sm text-tier-clean">
-                  <Check size={16} /> remediated {utc(remediatedAt)}
+                  <Check size={16} /> remediated {localStamp(remediatedAt)}
                   {canUndo && (
                     <button
                       ref={undoRef}
@@ -306,7 +318,11 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
                   <button
                     type="button"
                     className={menuItem}
-                    onClick={async () => (say((await onShare()) ? 'Link copied' : 'Clipboard blocked. Copy the address from the browser bar.'), setMenu(false))}
+                    onClick={async () => {
+                      const r = await onShare();
+                      say(typeof r === 'string' ? r : r ? 'Link copied' : 'Clipboard blocked. Copy the address from the browser bar.');
+                      setMenu(false);
+                    }}
                   >
                     <LinkIcon size={16} /> Copy share link
                   </button>

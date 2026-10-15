@@ -29,8 +29,9 @@ export interface ContrastCardProps {
 }
 
 const PEN = { '--pen-x': '62.5%', '--pen-y': '53%', '--pen-from': '282deg', animationDelay: '400ms' } as CSSProperties;
-// Columns from 420px: label 8.5rem · the arrow's 1.75rem lane · value. Below that the label stacks over the value.
-const ROW = 'grid items-baseline gap-x-3 gap-y-0.5 @min-[420px]:grid-cols-[8.5rem_1.75rem_1fr]';
+// Columns from 420px: label 9.5rem (12px caps: "ADVISORY SCANNER" fits) · the arrow's 1.75rem lane · value. Below that the label stacks over the value.
+const ROW = 'grid items-baseline gap-x-3 gap-y-0.5 @min-[420px]:grid-cols-[9.5rem_1.75rem_1fr]';
+const NOTE = 'basis-full text-xs text-fg-1'; // the one plain line under a row's figures
 const VAL = '@min-[420px]:col-start-3';
 // The loop art is drawn around "74 min" (about 150px wide at 56px) with ~34px of air each side: wider text stretches it.
 const RING_W = 216;
@@ -85,7 +86,7 @@ export function ContrastCard({ snapshot, grepCount, grepName, minutesAhead, reve
   const found = tiers.reduce((n, t) => n + (t.n ?? 0), 0);
   const arrow = snapshot !== null && snapshot.scanner === 0 && found > 0;
   return (
-    <section aria-label="Scanner versus graph" className="@container p-4">
+    <section aria-label="Scanner versus graph" className="@container p-3 sm:p-4">
       <div className="flex flex-col gap-3 @min-[600px]:flex-row @min-[600px]:items-center @min-[600px]:justify-between">
         <div className="flex min-w-0 flex-col gap-3">
           {/* On a phone the one primary action sits above the numbers: it is on screen without scrolling. */}
@@ -103,7 +104,7 @@ export function ContrastCard({ snapshot, grepCount, grepName, minutesAhead, reve
               <dd className={`flex flex-wrap items-baseline gap-x-2 text-sm text-fg-1 ${VAL}`}>
                 {grepName ? <span className="font-mono text-xs text-fg-0">{grepName}</span> : <span className="text-fg-0">a bad package name</span>} in
                 <Num n={grepCount} cls="text-fg-0" /> {grepCount === 1 ? 'repo' : 'repos'}
-                <span className="text-fg-2">(no path, no owner)</span>
+                <span className={NOTE}>A plain text search for the bad package names: no version, no path, no owner.</span>
               </dd>
             </div>
             <div className={ROW}>
@@ -116,6 +117,7 @@ export function ContrastCard({ snapshot, grepCount, grepName, minutesAhead, reve
                   </span>
                 ))}
                 <span className="text-sm text-fg-2">paths + owners</span>
+                <span className={NOTE}>Follows the dependency graph from the hijacked account to each repo, so every hit has a path, a tier and a team.</span>
               </dd>
             </div>
             {/* The lane runs from the top of row 1 to the bottom of the first tier count (CSS anchor positioning, so the
@@ -127,7 +129,7 @@ export function ContrastCard({ snapshot, grepCount, grepName, minutesAhead, reve
                 width={28}
                 height={100}
                 angle={180}
-                className="absolute top-0 left-[calc(8.5rem+0.75rem)] hidden h-[100px] [bottom:anchor(--pz1_bottom)] supports-[bottom:anchor(--a_bottom)]:h-auto @min-[420px]:block"
+                className="absolute top-0 left-[calc(9.5rem+0.75rem)] hidden h-[100px] [bottom:anchor(--pz1_bottom)] supports-[bottom:anchor(--a_bottom)]:h-auto @min-[420px]:block"
               />
             )}
           </dl>

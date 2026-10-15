@@ -43,7 +43,7 @@ export function AskBox({
     : asking
       ? `Follow-up ${Math.min(rounds, max)} of ${max}, answering`
       : disabled
-        ? 'Available once the triage has finished'
+        ? 'Available after the run' // short: the label and this share a 296px row, and a second line would make the pinned box jump when it flips
         : `Follow-up ${Math.min(rounds + 1, max)} of ${max}`;
   return (
     <form

@@ -153,6 +153,7 @@
   /* Density */
   --header-h: 48px;
   --tabbar-h: 56px;         /* bottom tab bar under 1024px */
+  --ask-h: 7rem;            /* the sticky Ask bar (desktop) / the one fixed above the tab bar (below 1024px): scrolling to a focused element stops short of it */
   --control-h: 36px;        /* 44px on coarse pointers (below) */
   --row-h: 36px;            /* dense table row; 44px on coarse pointers */
   --cell-x: 12px;
@@ -173,7 +174,7 @@
 @media (min-width: 768px) { :root { --gutter: 24px; } }
 @media (min-width: 1440px) { :root { --pane-left: 360px; } }
 /* Touch and phones: 44px controls (a phone emulated without a coarse pointer still gets them) and a 12px type floor. */
-@media (pointer: coarse), (max-width: 767px) { :root { --control-h: 44px; --row-h: 44px; --text-2xs: 0.75rem; } }
+@media (pointer: coarse), (max-width: 767px) { :root { --control-h: 44px; --row-h: 44px; } }
 
 /* ───────────────────────────── 3. Tailwind v4 theme ───────────────────────────────────────────── */
 
@@ -195,7 +196,7 @@
   --font-mono: 'Martian Mono', ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
 
   /* Type scale (dense). Live numbers use font-sans + tabular-nums: Cabinet Grotesk has no tnum. */
-  --text-2xs: 0.6875rem; --text-2xs--line-height: 1rem;        /* 11px uppercase labels, badges */
+  --text-2xs: 0.75rem;   --text-2xs--line-height: 1rem;        /* 12px uppercase labels, badges (the floor: nothing is set smaller) */
   --text-xs: 0.75rem;    --text-xs--line-height: 1.125rem;     /* 12px meta, Cypher, ms */
   --text-sm: 0.8125rem;  --text-sm--line-height: 1.25rem;      /* 13px table cells, chips */
   --text-base: 0.875rem; --text-base--line-height: 1.375rem;   /* 14px UI body, buttons */

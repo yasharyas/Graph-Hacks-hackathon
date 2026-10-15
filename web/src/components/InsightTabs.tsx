@@ -1,15 +1,20 @@
 /* InsightTabs: the tabs under the exposure table (docs/design.md section 5).
  * Props: report (Report), cards (all ToolCardState of the run), graph (graph name from the start event or null),
- *        totalMs (server-reported run time or null).
- * Tabs: Concentration (bars), All Cypher used (one <pre>, Copy all), Triage history (recall_triage rows; empty
- * until that tool has run), Graph stats (graph name, per-tool queries / rows / FalkorDB ms, and the schema this run's
- * Cypher touched; all read from this run's real tool results). The Concentration tab says where its scores come from
- * (algo.pageRank at ingest). role=tablist, arrow keys.
+ *        totalMs (server-reported run time or null), remediated (repo -> epoch ms of every mark, the server's and this
+ *        screen's, so a mark made a second ago is listed).
+ * Tabs: Concentration (bars), All Cypher used (one <pre>, Copy all), Triage history (two lists: "Marked remediated",
+ * each repo with the time in the person's own zone, first; and "Assessed in earlier runs": how many repos, the latest time
+ * and their tiers, both from recall_triage rows {repo, tier, action, at}, one row per repo), Graph stats (graph name and
+ * the graph's node / edge counts from /api/stats, per-tool queries / rows / FalkorDB ms, and the schema this run's Cypher
+ * touched; the per-run figures are read from this run's real tool results). The Concentration tab says where its scores
+ * come from (algo.pageRank at ingest). role=tablist, arrow keys.
  */
 import { useId, useRef, useState, type KeyboardEvent } from 'react';
+import { localStamp } from '../data/clock.ts';
 import { schemaOf } from '../data/cypher.ts';
-import { fmtMs, utc } from '../data/format.ts';
+import { fmtMs, plural } from '../data/format.ts';
 import type { Report } from '../data/types.ts';
+import { useStats } from '../data/useStats.ts';
 import type { ToolCardState } from '../data/useTriage.ts';
 import { Button } from './Button.tsx';
 import { copyText } from './copy.ts';
@@ -24,16 +29,28 @@ export interface InsightTabsProps {
   cards: ToolCardState[];
   graph: string | null;
   totalMs: number | null;
+  remediated: Record<string, number>;
 }
 
-export function InsightTabs({ report, cards, graph, totalMs }: InsightTabsProps) {
+const count = (n: number) => n.toLocaleString('en-US');
+
+export function InsightTabs({ report, cards, graph, totalMs, remediated }: InsightTabsProps) {
   const [tab, setTab] = useState(0);
   const base = useId();
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   const results = cards.flatMap((c) => (c.result ? [{ card: c, r: c.result }] : []));
   const cypher = results.flatMap(({ r }) => r.cypher.map((q) => `// ${r.tool}\n${q}`)).join('\n\n');
   const schema = schemaOf(results.flatMap(({ r }) => r.cypher));
-  const history = results.find(({ r }) => r.tool === 'recall_triage')?.r.rows ?? [];
+  const earlier = (results.find(({ r }) => r.tool === 'recall_triage')?.r.rows ?? []).flatMap((row) =>
+    typeof row.repo === 'string' ? [{ repo: row.repo, tier: String(row.tier ?? ''), action: typeof row.action === 'string' ? row.action : null, at: typeof row.at === 'number' ? row.at : 0 }] : [],
+  );
+  // marks: the earlier runs' (the server remembers them per session), overridden by this screen's, newest first
+  const marks = Object.entries({ ...Object.fromEntries(earlier.filter((r) => r.action === 'remediated').map((r) => [r.repo, r.at])), ...remediated }).sort((a, b) => b[1] - a[1]);
+  const tiers = ['LOCKED', 'WOULD_PULL', 'MAINTAINER', 'CLEAN'].map((t) => [t, earlier.filter((r) => r.tier === t).length] as const).filter(([, n]) => n > 0);
+  const latest = Math.max(0, ...earlier.map((r) => r.at));
+  const guest = report.scope?.kind === 'guest';
+  const [retry, setRetry] = useState(0);
+  const stats = useStats(report.incident.id, tab === 3 && !guest, retry);
   const shares = influenceShares(report.concentration);
   const repos = Object.values(report.counts).reduce((a, b) => a + b, 0);
 
@@ -119,15 +136,43 @@ export function InsightTabs({ report, cards, graph, totalMs }: InsightTabsProps)
           </div>
         )}
         {tab === 2 &&
-          (history.length ? (
-            <ul className="flex flex-col gap-1.5">
-              {history.map((row, i) => (
-                <li key={i} className="font-mono text-xs text-fg-0">
-                  {typeof row.at === 'number' ? `${utc(row.at)} UTC` : '–'} · {String(row.session ?? 'session')} ·{' '}
-                  {row.remediated ? 'remediated' : 'open'}
-                </li>
-              ))}
-            </ul>
+          (marks.length || earlier.length ? (
+            <div className="flex flex-col gap-4">
+              <section aria-labelledby={`${base}-marked`}>
+                <h4 id={`${base}-marked`} className="label-caps mb-1.5">
+                  Marked remediated
+                </h4>
+                {marks.length ? (
+                  <ul className="flex flex-col gap-1">
+                    {marks.map(([repo, at]) => (
+                      <li key={repo} className="flex flex-wrap items-baseline gap-x-2 text-xs">
+                        <span className="font-mono text-fg-0 [overflow-wrap:anywhere]">{repo}</span>
+                        <time dateTime={new Date(at).toISOString()} className="text-fg-1">
+                          {localStamp(at)}
+                        </time>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-fg-1">No repo marked remediated yet.</p>
+                )}
+                <p className="mt-1.5 text-xs text-fg-2">Marks are saved for this browser session only.</p>
+              </section>
+              <section aria-labelledby={`${base}-earlier`}>
+                <h4 id={`${base}-earlier`} className="label-caps mb-1.5">
+                  Assessed in earlier runs
+                </h4>
+                {earlier.length ? (
+                  <p className="text-fg-0">
+                    {plural(earlier.length, 'repo')} <span className="text-fg-1">· latest </span>
+                    <time dateTime={new Date(latest).toISOString()}>{localStamp(latest)}</time>
+                    <span className="mt-1 block font-mono text-xs text-fg-1">{tiers.map(([t, n]) => `${t} ${n}`).join(' · ')}</span>
+                  </p>
+                ) : (
+                  <p className="text-fg-1">No earlier run in this session.</p>
+                )}
+              </section>
+            </div>
           ) : (
             <EmptyState className="p-0" title="No saved triages yet" cause="The recall_triage tool has not returned any earlier runs in this session." />
           ))}
@@ -135,6 +180,26 @@ export function InsightTabs({ report, cards, graph, totalMs }: InsightTabsProps)
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5">
             <dt className="text-fg-1">FalkorDB graph</dt>
             <dd className="font-mono text-xs text-fg-0">{graph ?? '–'}</dd>
+            {stats.data && (
+              <>
+                <dt className="text-fg-1">Graph size</dt>
+                <dd className="font-mono text-xs text-fg-0 tabular-nums">
+                  {count(stats.data.nodes.reduce((n, x) => n + x.count, 0))} nodes · {count(stats.data.edges.reduce((n, x) => n + x.count, 0))} edges
+                  <span className="block text-fg-1">{stats.data.nodes.slice(0, 5).map((x) => `${x.label} ${count(x.count)}`).join(' · ')}</span>
+                </dd>
+              </>
+            )}
+            {stats.error && (
+              <>
+                <dt className="text-fg-1">Graph size</dt>
+                <dd className="text-xs text-fg-1">
+                  {stats.error}{' '}
+                  <button type="button" className="text-link underline underline-offset-2 pointer-coarse:min-h-11" onClick={() => setRetry((n) => n + 1)}>
+                    Retry
+                  </button>
+                </dd>
+              </>
+            )}
             <dt className="text-fg-1">Queries run</dt>
             <dd className="font-mono text-xs text-fg-0 tabular-nums">{results.reduce((n, { r }) => n + r.cypher.length, 0)}</dd>
             <dt className="text-fg-1">Time in FalkorDB</dt>

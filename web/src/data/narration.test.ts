@@ -1,7 +1,7 @@
 // Run: node --test web/src/data/narration.test.ts
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { claimMap, lines, proofFor, segments, splitCoverage, stripMarkdown, type ProofCard } from './narration.ts';
+import { answerLabel, claimMap, crowded, lines, LIST_MAX, proofFor, segments, splitCoverage, stripMarkdown, type ProofCard } from './narration.ts';
 
 const verdicts = (text: string, g: Parameters<typeof segments>[1]) =>
   segments(text, g).flatMap((s) => (s.kind === 'entity' ? [[s.text, s.verdict]] : s.kind === 'cite' ? [[s.id, s.verdict]] : s.kind === 'struck' ? [[s.text, 'struck']] : []));
@@ -59,6 +59,27 @@ test('Verdict / Notify / Do lines carry their label and share one first-mention 
   const firsts = ls.flatMap((l) => l.segs.flatMap((s) => (s.kind === 'entity' ? [[s.text, s.first]] : [])));
   assert.deepEqual(firsts, [['acme/web', true], ['Payments', true], ['Payments', false], ['acme/web', false]]);
   assert.equal(lines('just prose', null)[0]!.label, null);
+});
+
+test('a Why line is labelled like Verdict, Notify and Do', () => {
+  assert.deepEqual(lines('Verdict: a.\nWhy: `x/y` locks `debug@4.4.2`.\nDo: b.', null).map((l) => l.label), ['Verdict', 'Why', 'Do']);
+});
+
+test('a line with more verified names than LIST_MAX is a list (light treatment); repeats and unchecked names do not count', () => {
+  const names = Array.from({ length: LIST_MAX + 1 }, (_, i) => `org/repo-${i}`);
+  const g = { claims: names.map((text) => ({ text, ok: true })), flagged: [] };
+  const only = (text: string, gd: typeof g | null) => lines(text, gd)[0]!.segs;
+  assert.equal(crowded(only(names.map((n) => `\`${n}\``).join(', '), g)), true);
+  assert.equal(crowded(only(names.slice(0, LIST_MAX).map((n) => `\`${n}\``).join(', '), g)), false);
+  assert.equal(crowded(only(names.map((n) => `\`${n}\``).join(', '), null)), false, 'nothing verified, nothing to lighten');
+  assert.equal(crowded(only(`${names.map((n) => `\`${n}\``).join(', ')}, \`${names[0]}\``, g)), true);
+  assert.equal(crowded(only(`\`${names[0]}\` \`${names[0]}\` \`${names[0]}\` \`${names[0]}\` \`${names[0]}\` \`${names[0]}\``, g)), false, 'a repeat is not a new chip');
+});
+
+test('each Ask answer says how it was produced, with the provider when there is one', () => {
+  assert.equal(answerLabel({ mode: 'template', provider: null }), 'Answered from the graph');
+  assert.equal(answerLabel({ mode: 'live', provider: null }), 'LLM answer · names and numbers checked against the graph');
+  assert.equal(answerLabel({ mode: 'live', provider: 'groq' }), 'LLM answer · names and numbers checked against the graph · groq');
 });
 
 test('the coverage line is split off only when it is a separate last line that counts something', () => {

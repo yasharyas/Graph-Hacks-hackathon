@@ -13,15 +13,21 @@
  *
  * Proof: every claim chip, [E#] tag and claim-map entry calls trace(entity). The tool call that returned it (data/
  * narration.ts proofFor) opens, opens its Cypher, scrolls into view, takes focus and flashes the row; a polite status
- * line says what opened. Tool cards are collapsed by default (one line, one tab stop); "Expand all" opens them.
+ * line says what opened. Tool cards are collapsed by default (one line, one tab stop); opening one shows its Cypher at
+ * once. "Expand all" opens them all.
  * A run of one tool (21 explain_path calls) shows its first 3; the rest sit behind one toggle unless opened or traced.
+ * "Show N more" moves focus to the first card it revealed (the cards land above the toggle, which would strand focus).
  * (A phone held sideways has no height to spare: below 560px tall the Ask box scrolls with the feed instead.)
  * Keyboard: two skip links open the feed ("Skip to Ask", "Skip to exposure table").
- * The live region announces a throttled summary ("2 of 5 tools done"), never each card.
+ * ONE live region (role=status) serves the whole feed: a throttled summary ("2 of 5 tools done"), or the last thing a
+ * card or a claim asked it to say (what opened, a plan loaded). No card has a live region of its own.
+ * Each Ask answer is labelled with how it was made (the graph alone, or a model whose names and numbers were checked).
+ * `narration.draft` (when the state carries it) or, failing that, "still running, no guard yet" means the analyst pick may
+ * still arrive: its place is reserved.
  */
 import { Fragment, useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { fixFor, plainError } from '../data/errors.ts';
-import { proofFor } from '../data/narration.ts';
+import { answerLabel, proofFor } from '../data/narration.ts';
 import type { ScenarioId } from '../data/types.ts';
 import type { FollowUp, Guard, Narration, ToolCardState, TriageError, TriageState } from '../data/useTriage.ts';
 import { Button } from './Button.tsx';
@@ -29,7 +35,7 @@ import { EmptyState } from './EmptyState.tsx';
 import { CircleAlert } from './icons/Glyphs.tsx';
 import { NarrationBlock, NarrativePanel } from './NarrativePanel.tsx';
 import { scrollPaneTo } from './scrollPane.ts';
-import { subject, ToolCard, type Trace } from './ToolCard.tsx';
+import { cardDomId, subject, ToolCard, type Trace } from './ToolCard.tsx';
 
 export interface ToolFeedProps {
   cards: ToolCardState[];
@@ -66,9 +72,15 @@ export function ToolFeed({ cards, followUps, narration, guard, status, error, sc
   const [target, setTarget] = useState<(Trace & { id: string }) | null>(null);
   const [said, setSaid] = useState('');
   const [more, setMore] = useState<ReadonlySet<string>>(new Set()); // runs shown in full, keyed by their first card id
+  const reveal = useRef<string | null>(null); // the first card a "Show N more" just revealed: focus goes there
   useEffect(() => {
     if (followUps.length && lastRef.current) scrollPaneTo(lastRef.current);
   }, [followUps.length]);
+  useEffect(() => {
+    const id = reveal.current;
+    reveal.current = null;
+    if (id) document.getElementById(cardDomId({ id }))?.querySelector<HTMLElement>('h3 button')?.focus();
+  }, [more]);
   // A new run starts with no cards; card ids repeat from run to run, so what was open (or pointed at) must not carry over.
   const empty = cards.length === 0;
   useEffect(() => {
@@ -85,7 +97,9 @@ export function ToolFeed({ cards, followUps, narration, guard, status, error, sc
   const done = round(0).filter((c) => c.status === 'done').length;
   const summary =
     status === 'running'
-      ? `${done} of ${round(0).length} tools done`
+      ? round(0).length === 0
+        ? 'Starting the triage'
+        : `${done} of ${round(0).length} tools done`
       : last?.status === 'running'
         ? `Follow-up ${followUps.length}: ${round(followUps.length).filter((c) => c.status === 'done').length} of ${round(followUps.length).length} tools done`
         : last?.status === 'done'
@@ -99,6 +113,9 @@ export function ToolFeed({ cards, followUps, narration, guard, status, error, sc
                 : status === 'error'
                   ? 'Triage failed'
                   : '';
+  // A new summary replaces what a card or claim said, so progress still announces; until then the last message stands.
+  useEffect(() => setSaid(''), [summary]);
+  const drafting = (narration as { draft?: boolean } | null)?.draft ?? (status === 'running' && guard === null);
 
   /** A claim was clicked: open the tool call that returned it, and (desktop) highlight its path in the graph. */
   const trace = (entity: string, n: number) => {
@@ -108,7 +125,7 @@ export function ToolFeed({ cards, followUps, narration, guard, status, error, sc
     const sub = subject(hit.card.params);
     setOpen((s) => new Set(s).add(hit.card.id));
     setTarget({ id: hit.card.id, row: hit.row, nonce: ++nonce.current });
-    setSaid(`Opened ${hit.card.tool}${sub ? `, ${sub}` : ''}, the call that returned ${entity}. Its Cypher is open${hit.row !== null ? ' and the matching row is highlighted' : ''}.`);
+    setSaid(`Opened ${hit.card.tool}${sub ? `, ${sub}` : ''}, the call that returned ${entity}. Its Cypher is shown${hit.row !== null ? ' and the matching row is highlighted' : ''}.`);
   };
 
   const toAsk = (e: MouseEvent) => {
@@ -130,7 +147,7 @@ export function ToolFeed({ cards, followUps, narration, guard, status, error, sc
     return (
       <>
         <div className="flex items-baseline justify-between gap-2">
-          <h3 className="label-caps">{calls(cs)}</h3>
+          <h3 className="label-caps text-xs">{calls(cs)}</h3>
           {cs.some((c) => c.status === 'done') && (
             <button
               type="button"
@@ -155,6 +172,7 @@ export function ToolFeed({ cards, followUps, narration, guard, status, error, sc
                   open={open.has(c.id)}
                   onOpenChange={(o) => setOpen((s) => new Set(o ? [...s, c.id] : [...s].filter((id) => id !== c.id)))}
                   trace={target?.id === c.id ? target : null}
+                  onSay={setSaid}
                 />
               ))}
               {(full || hidden.length > 0) && (
@@ -162,7 +180,13 @@ export function ToolFeed({ cards, followUps, narration, guard, status, error, sc
                   type="button"
                   aria-expanded={full}
                   className="self-start rounded-xs text-xs text-fg-1 underline underline-offset-2 pointer-coarse:min-h-11 hov:text-fg-0"
-                  onClick={() => setMore((s) => (full ? new Set([...s].filter((id) => id !== run[0].id)) : new Set(s).add(run[0].id)))}
+                  onClick={() => {
+                    if (!full) {
+                      reveal.current = hidden[0]?.id ?? null;
+                      setSaid(`Showing ${hidden.length} more ${run[0].tool} ${hidden.length === 1 ? 'call' : 'calls'}. Focus is on the first of them.`);
+                    }
+                    setMore((s) => (full ? new Set([...s].filter((id) => id !== run[0].id)) : new Set(s).add(run[0].id)));
+                  }}
                 >
                   {full ? `Show fewer ${run[0].tool} calls` : `Show ${hidden.length} more ${run[0].tool} ${hidden.length === 1 ? 'call' : 'calls'}`}
                 </button>
@@ -206,10 +230,7 @@ export function ToolFeed({ cards, followUps, narration, guard, status, error, sc
     <div className="flex flex-col gap-3">
       <h2 className="sr-only">Tool feed</h2>
       <p role="status" className="sr-only">
-        {summary}
-      </p>
-      <p role="status" className="sr-only">
-        {said}
+        {said || summary}
       </p>
       <nav aria-label="Skip links" className="flex flex-wrap gap-2">
         {footer && (
@@ -222,7 +243,7 @@ export function ToolFeed({ cards, followUps, narration, guard, status, error, sc
         </a>
       </nav>
       {cards.length === 0 && <p className="p-1 text-sm text-fg-1">Connecting to the graph&hellip;</p>}
-      <NarrativePanel narration={narration} guard={guard} onTrace={(e) => trace(e, 0)} cards={pool(0)} clockAt={clockAt} onRerun={onRun} />
+      <NarrativePanel narration={narration} guard={guard} onTrace={(e) => trace(e, 0)} cards={pool(0)} clockAt={clockAt} onRerun={onRun} drafting={drafting} />
       {list(0)}
       {status === 'error' && error && cards.length > 0 && (
         <div role="alert" className="flex flex-col items-start gap-1.5 rounded-sm border border-line-3 p-3 text-sm">
@@ -243,10 +264,15 @@ export function ToolFeed({ cards, followUps, narration, guard, status, error, sc
           className="flex scroll-mt-3 flex-col gap-3 border-t border-line-1 pt-3"
         >
           <p className="text-sm text-fg-1">
-            <span className="label-caps mr-2">You asked</span>
+            <span className="label-caps text-xs mr-2">You asked</span>
             {f.question}
           </p>
-          {f.narration && <NarrationBlock narration={f.narration} guard={f.guard} onTrace={(e) => trace(e, i + 1)} cards={pool(i + 1)} idSuffix={`-${i}`} />}
+          {f.narration && (
+            <>
+              <p className="text-xs text-fg-1">{answerLabel(f.narration)}</p>
+              <NarrationBlock narration={f.narration} guard={f.guard} onTrace={(e) => trace(e, i + 1)} cards={pool(i + 1)} idSuffix={`-${i}`} />
+            </>
+          )}
           {list(i + 1)}
           {f.status === 'error' && !f.narration && <p className="text-sm text-fg-2">This follow-up got no answer. It does not count toward the limit.</p>}
         </section>

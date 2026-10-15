@@ -8,29 +8,32 @@
  *                      /api/exposure answer (or the report's) once a triage exists, the pasted repo's for a guest
  *   playing, onPlay, onPause, onSeek(at)
  *   landingEnd         where the first-load autoplay stops; a finished autoplay labels the button "Play the N minutes"
- *   compact            report mode: one row (play, headline, counts, track). Landing mode is the hero band
- *   scope              what the numbers are about ("Acme demo org", "remy/nodemon, pasted repo"), always printed
+ *   compact            report mode: one row (play, headline, counts, track). Landing mode is the hero band: its counts
+ *                      strip carries the tier "?" legend and a plain sublabel under each count (from 640px)
+ *   scope, scopeNote, scopeNoteShort   what the numbers are about ("Acme demo org · 21 repos") and what is real in it: the sentence
+ *                      in the landing band, a few words after the scope in the compact row
+ *   failed             the triage did not run: no counter, no counts (a stale number beside "did not run" reads as a result)
+ *   remediated         repos marked remediated: printed beside the exposed count ("· 2 marked remediated")
  *   trailing           compact row only: the action at its end ("Run again")
- *   stale             the previous incident, dimmed while the next one loads (no skeleton flash)
- * Marker labels never collide: each is measured and put on the first of up to three rows where it fits, flipping to
- * the left of its tick when it would run off the track; short words below 520px. Keyboard: left/right = 1 min,
- * Shift+arrows = 10 min, Space = play/pause. Scrubbing is instant. aria-valuetext reads "13:42 UTC, 5 repos exposed".
+ *   stale              the previous incident, dimmed while the next one loads (no skeleton flash)
+ * Marker labels never collide, from 320 to 1920px: each is measured and put on the first row where it fits, flipped left of
+ * its tick (and clamped) at the right edge (data/markers.ts placeLabels); short words below 520px. The layout is redone
+ * whenever the incident, the track's width or the fonts change, wherever the track sits (the landing and the compact row
+ * are different parents). The first marker is the first exposure, so its label to OSV's is the figure on screen. The scrub
+ * bubble is clamped inside the track. Keyboard: left/right = 1 min, Shift+arrows = 10 min, Space = play/pause. Scrubbing is
+ * instant. aria-valuetext reads "13:42 UTC, 5 repos exposed" (the timeline's own count at that minute).
  */
-import { useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { IncidentMeta, TimelinePoint } from '../data/types.ts';
-import { plural, utc, utcLabel } from '../data/format.ts';
-import { exposedCount } from '../data/snapshot.ts';
+import { plural, utc, utcLabel, utcSec } from '../data/format.ts';
+import { clampCentre, markersOf, placeLabels } from '../data/markers.ts';
+import { exposedCount, snapshotAt } from '../data/snapshot.ts';
 import { Button } from './Button.tsx';
 import { Pause, Play } from './icons/Glyphs.tsx';
+import { TierLegend } from './TierLegend.tsx';
 
 const MIN = 60_000;
 const ROW = 16; // px per label row
-const MARKERS = [
-  { key: 'publish', at: (i: IncidentMeta) => i.firstPublishAt, long: 'first publish', short: 'publish', bad: true },
-  { key: 'alert', at: (i: IncidentMeta) => i.alertAt, long: 'alert', short: 'alert', bad: false },
-  { key: 'osv', at: (i: IncidentMeta) => i.advisoryAt, long: 'OSV record', short: 'OSV', bad: false },
-  { key: 'removed', at: (i: IncidentMeta) => i.removedAt, long: 'removed', short: 'removed', bad: false },
-] as const;
 
 export interface TimelineScrubberProps {
   incident: IncidentMeta | null;
@@ -44,56 +47,59 @@ export interface TimelineScrubberProps {
   landingEnd: number | null;
   compact?: boolean;
   scope?: string | null;
+  scopeNote?: string | null;
+  scopeNoteShort?: string | null;
+  failed?: boolean;
+  remediated?: number;
   stale?: boolean;
   /** Compact row only: the action at its end ("Run again"). */
   trailing?: ReactNode;
 }
 
-export function TimelineScrubber({ incident, points, at, snapshot, playing, onPlay, onPause, onSeek, landingEnd, compact = false, scope = null, stale = false, trailing }: TimelineScrubberProps) {
+export function TimelineScrubber({ incident, points, at, snapshot, playing, onPlay, onPause, onSeek, landingEnd, compact = false, scope = null, scopeNote = null, scopeNoteShort = null, failed = false, remediated = 0, stale = false, trailing }: TimelineScrubberProps) {
   const ready = incident !== null && points.length > 0;
   const start = ready ? points[0]!.at : 0;
   const end = ready ? points.at(-1)!.at : 1;
   const pct = (t: number) => Math.min(100, Math.max(0, ((t - start) / (end - start)) * 100));
-  const exposed = snapshot ? exposedCount(snapshot.counts) : null;
+  const exposed = snapshot && !failed ? exposedCount(snapshot.counts) : null;
+  const sample = ready ? snapshotAt(points, at) : null; // the slider speaks for the timeline, whoever's numbers the band shows
 
-  const trackRef = useRef<HTMLDivElement>(null);
-  const labelRefs = useRef<(HTMLSpanElement | null)[]>([]);
+  const [trackEl, setTrackEl] = useState<HTMLDivElement | null>(null); // state, not a ref: the track is re-parented when the band collapses
   const [trackW, setTrackW] = useState(0);
-  const [layout, setLayout] = useState<{ row: number; flip: boolean }[]>(MARKERS.map((_, i) => ({ row: i % 2, flip: false })));
+  const [fonts, setFonts] = useState(0);
+  const labelRefs = useRef<(HTMLSpanElement | null)[]>([]);
+  const bubbleRef = useRef<HTMLSpanElement>(null);
+  const [bubbleW, setBubbleW] = useState(0);
+  const [placed, setPlaced] = useState<{ left: number; row: number }[]>([]);
   const wide = trackW >= 520;
-  const marks = incident ? MARKERS.map((m) => ({ ...m, t: m.at(incident), label: wide ? m.long : m.short })) : [];
-  const sig = marks.map((m) => `${m.t}${m.label}`).join();
+  const marks = incident ? markersOf(incident).map((m) => ({ ...m, label: wide ? m.long : m.short })) : [];
+  const sig = `${start}|${end}|${marks.map((m) => `${m.t}${m.label}`).join()}`;
 
-  // Measure the track, then place every label before the first paint (useLayoutEffect: no visible jump, no layout shift).
+  // Measure whichever track is mounted now, and again when it resizes.
   useLayoutEffect(() => {
-    const el = trackRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => setTrackW(Math.floor(el.clientWidth)));
-    ro.observe(el);
-    setTrackW(Math.floor(el.clientWidth));
+    if (!trackEl) return;
+    const ro = new ResizeObserver(() => setTrackW(Math.floor(trackEl.clientWidth)));
+    ro.observe(trackEl);
+    setTrackW(Math.floor(trackEl.clientWidth));
     return () => ro.disconnect();
+  }, [trackEl]);
+  // Label widths depend on the fonts: place them again when they arrive.
+  useEffect(() => {
+    void document.fonts?.ready.then(() => setFonts((n) => n + 1));
   }, []);
+  // Place every label before the first paint (no visible jump, no layout shift).
   useLayoutEffect(() => {
     if (!trackW || !marks.length) return;
-    const items = marks
-      .map((m, i) => {
-        const x = (pct(m.t) / 100) * trackW;
-        const w = labelRefs.current[i]?.offsetWidth ?? 0;
-        const flip = x + w > trackW;
-        return { i, flip, l: flip ? x - w : x, r: flip ? x : x + w };
-      })
-      .sort((a, b) => a.l - b.l);
-    const ends: number[] = []; // right edge of the last label on each row
-    const next = marks.map(() => ({ row: 0, flip: false }));
-    for (const it of items) {
-      let row = ends.findIndex((e) => it.l >= e + 8);
-      if (row < 0) row = ends.length;
-      ends[row] = it.r;
-      next[it.i] = { row, flip: it.flip };
-    }
-    setLayout((prev) => (prev.length === next.length && prev.every((p, i) => p.row === next[i]!.row && p.flip === next[i]!.flip) ? prev : next));
-  }, [trackW, sig, start, end]);
-  const rows = Math.max(2, ...layout.map((l) => l.row + 1));
+    const next = placeLabels(
+      marks.map((m, i) => ({ x: (pct(m.t) / 100) * trackW, w: labelRefs.current[i]?.offsetWidth ?? 0 })),
+      trackW,
+    );
+    setPlaced((prev) => (prev.length === next.length && prev.every((p, i) => p.left === next[i]!.left && p.row === next[i]!.row) ? prev : next));
+    setBubbleW(bubbleRef.current?.offsetWidth ?? 0);
+  }, [trackW, sig, fonts]);
+  const positioned = placed.length === marks.length && marks.length > 0;
+  const rows = Math.max(2, ...placed.map((p) => p.row + 1));
+  const bubbleX = clampCentre((pct(at) / 100) * trackW, bubbleW, trackW);
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === ' ') {
@@ -106,12 +112,12 @@ export function TimelineScrubber({ incident, points, at, snapshot, playing, onPl
     }
   };
 
-  const num = (n: number | undefined) => (n === undefined || !snapshot ? '–' : n);
-  const stats: { label: string; value: number | undefined; cls: string }[] = [
-    { label: 'LOCKED', value: snapshot?.counts.LOCKED, cls: 'text-tier-locked' },
-    { label: 'WOULD_PULL', value: snapshot?.counts.WOULD_PULL, cls: 'text-tier-would-pull' },
-    { label: 'MAINTAINER', value: snapshot?.counts.MAINTAINER, cls: 'text-tier-maintainer' },
-    { label: 'OSV advisories', value: snapshot?.scanner, cls: 'text-fg-1' },
+  const num = (n: number | undefined) => (n === undefined || !snapshot || failed ? '–' : n);
+  const stats: { label: string; value: number | undefined; cls: string; sub: string }[] = [
+    { label: 'LOCKED', value: snapshot?.counts.LOCKED, cls: 'text-tier-locked', sub: 'lockfile pins it' },
+    { label: 'WOULD_PULL', value: snapshot?.counts.WOULD_PULL, cls: 'text-tier-would-pull', sub: 'a fresh install fetches it' },
+    { label: 'MAINTAINER', value: snapshot?.counts.MAINTAINER, cls: 'text-tier-maintainer', sub: 'uses the account’s packages, nothing malicious yet' },
+    { label: 'OSV advisories', value: snapshot?.scanner, cls: 'text-fg-1', sub: 'OSV records published' },
   ];
   const minutes = landingEnd !== null && ready ? Math.round((landingEnd - start) / MIN) : 90;
   const playLabel = playing ? 'Pause' : ready && landingEnd !== null && at >= landingEnd ? `Play the ${minutes} minutes` : 'Play';
@@ -131,49 +137,75 @@ export function TimelineScrubber({ incident, points, at, snapshot, playing, onPl
 
   const headline = (
     <div className="flex min-w-0 flex-col">
-      <p className="flex items-baseline gap-2">
+      <p className="flex flex-wrap items-baseline gap-x-2">
         <span className={`inline-block min-w-[2ch] text-right font-bold text-fg-0 tabular-nums ${compact ? 'text-2xl' : 'text-3xl'}`}>{exposed ?? '–'}</span>
-        <span className="text-sm text-fg-1">{exposed === 1 ? 'repo' : 'repos'} one install from malware</span>
+        <span className="text-sm text-fg-1">{failed ? 'no result: the triage did not run' : `${exposed === 1 ? 'repo' : 'repos'} one install from malware`}</span>
+        {remediated > 0 && !failed && <span className="text-sm whitespace-nowrap text-tier-clean">· {remediated} marked remediated</span>}
       </p>
-      {scope && <p className="text-xs text-fg-1">{scope}</p>}
+      {scope && (
+        <p className="text-xs text-fg-1">
+          {scope}
+          {scopeNote && !compact && <span className="text-fg-2"> · {scopeNote}</span>}
+          {scopeNoteShort && compact && <span className="max-sm:hidden"> · {scopeNoteShort}</span>}
+        </p>
+      )}
     </div>
   );
 
-  const counts = (
-    <dl className={`flex flex-wrap gap-x-5 gap-y-1 ${compact ? '' : 'border-y border-line-1 py-1.5'}`}>
+  // Compact: one run of numbers. Landing: a strip with a plain sublabel under each count (from 640px) and the "?" legend.
+  const counts = compact ? (
+    <dl className="flex flex-wrap gap-x-5 gap-y-1">
       {stats.map((s) => (
         <div key={s.label} className="flex items-baseline gap-1.5">
           <dt className="font-mono text-2xs text-fg-1">{s.label}</dt>
-          <dd className={`min-w-[1.5ch] text-right text-md font-bold tabular-nums ${s.value ? s.cls : 'text-fg-2'}`}>{num(s.value)}</dd>
+          <dd className={`min-w-[1.5ch] text-right text-md font-bold tabular-nums ${s.value && !failed ? s.cls : 'text-fg-2'}`}>{num(s.value)}</dd>
         </div>
       ))}
     </dl>
+  ) : (
+    <div className="flex items-start gap-2 border-y border-line-1 py-1.5">
+      <dl className="flex min-w-0 flex-1 flex-wrap gap-x-5 gap-y-1 sm:grid sm:grid-cols-4 xl:grid-cols-2">
+        {stats.map((s) => (
+          <div key={s.label} className="grid min-w-0 grid-cols-[auto_1fr] items-baseline gap-x-1.5">
+            <dt className="font-mono text-2xs text-fg-1">{s.label}</dt>
+            <dd className={`text-md font-bold tabular-nums ${s.value && !failed ? s.cls : 'text-fg-2'}`}>{num(s.value)}</dd>
+            <dd className="col-span-2 text-xs text-fg-1 max-sm:hidden">{s.sub}</dd>
+          </div>
+        ))}
+      </dl>
+      <span className="max-sm:hidden">
+        <TierLegend />
+      </span>
+    </div>
   );
 
   const track = (
     <div className="relative pt-5" style={{ paddingBottom: rows * ROW + 4 }}>
-      <div ref={trackRef} className="pointer-events-none absolute inset-x-2 top-5 h-6">
+      <div ref={setTrackEl} className="pointer-events-none absolute inset-x-2 top-5 h-6">
         <div className="absolute inset-x-0 top-1/2 h-0.5 -translate-y-1/2 rounded-full bg-line-3" />
         {ready && <div className="absolute top-1/2 left-0 h-0.5 -translate-y-1/2 rounded-full bg-fg-1" style={{ width: `${pct(at)}%` }} />}
         <span
+          ref={bubbleRef}
           className="absolute -top-5 -translate-x-1/2 rounded-xs bg-bg-2 px-1.5 font-mono text-2xs text-fg-0 tabular-nums"
-          style={{ left: `${ready ? pct(at) : 0}%` }}
+          style={{ left: ready ? bubbleX : 0 }}
           aria-hidden
         >
           {ready ? utc(at) : '--:--'}
         </span>
+        {marks.map((m) => (
+          <span key={m.key} className={`absolute top-1/2 h-3 w-0.5 -translate-x-1/2 -translate-y-1/2 ${m.bad ? 'bg-infect-400' : 'bg-fg-2'}`} style={{ left: `${pct(m.t)}%` }} />
+        ))}
         {marks.map((m, i) => (
-          <div key={m.key} className="absolute top-0 h-full" style={{ left: `${pct(m.t)}%` }} title={`${utc(m.t)} UTC ${m.long}`}>
-            <span className={`absolute top-1/2 h-3 w-0.5 -translate-x-1/2 -translate-y-1/2 ${m.bad ? 'bg-infect-400' : 'bg-fg-2'}`} />
-            <span
-              ref={(el) => void (labelRefs.current[i] = el)}
-              className={`absolute top-full whitespace-nowrap font-mono text-2xs ${m.bad ? 'text-infect-400' : 'text-fg-1'}`}
-              style={{ marginTop: (layout[i]?.row ?? 0) * ROW + 2, transform: layout[i]?.flip ? 'translateX(0)' : 'translateX(-2px)', right: layout[i]?.flip ? '-1px' : undefined }}
-            >
-              {utc(m.t)}
-              <span className="font-sans"> {m.label}</span>
-            </span>
-          </div>
+          <span
+            key={m.key}
+            ref={(el) => void (labelRefs.current[i] = el)}
+            title={`${utcSec(m.t)} UTC ${m.key === 'exposed' ? 'first repo exposed' : m.long}`}
+            className={`absolute top-full h-4 font-mono text-2xs whitespace-nowrap ${m.bad ? 'text-infect-400' : 'text-fg-1'}`}
+            style={{ left: positioned ? placed[i]!.left : (pct(m.t) / 100) * trackW, marginTop: (positioned ? placed[i]!.row : 0) * ROW + 2, visibility: positioned ? undefined : 'hidden' }}
+          >
+            {utc(m.shown)}
+            <span className="font-sans"> {m.label}</span>
+          </span>
         ))}
       </div>
       <input
@@ -185,7 +217,7 @@ export function TimelineScrubber({ incident, points, at, snapshot, playing, onPl
         step={MIN}
         value={ready ? at : start}
         disabled={!ready}
-        aria-valuetext={ready ? `${utcLabel(at)}, ${plural(exposed ?? 0, 'repo')} exposed` : 'Loading'}
+        aria-valuetext={ready ? `${utcLabel(at)}, ${plural(sample ? exposedCount(sample.counts) : 0, 'repo')} exposed` : 'Loading'}
         onChange={(e) => onSeek(Number(e.target.value))}
         onKeyDown={onKeyDown}
       />
@@ -193,7 +225,7 @@ export function TimelineScrubber({ incident, points, at, snapshot, playing, onPl
   );
 
   return (
-    <section aria-label="Incident timeline" aria-busy={stale || !ready || undefined} className={`flex flex-col gap-2 transition-opacity duration-(--dur-fast) ease-out ${compact ? 'px-(--gutter) py-1' : 'p-4'} ${stale ? 'pointer-events-none opacity-50' : ''}`}>
+    <section aria-label="Incident timeline" aria-busy={stale || !ready || undefined} className={`flex flex-col gap-2 transition-opacity duration-(--dur-fast) ease-out ${compact ? 'px-(--gutter) py-1' : 'p-3 sm:p-4'} ${stale ? 'pointer-events-none opacity-50' : ''}`}>
       {compact ? (
         <div className="flex flex-wrap items-center gap-x-6 gap-y-1 xl:flex-nowrap">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 xl:shrink-0 xl:flex-nowrap">
@@ -208,8 +240,13 @@ export function TimelineScrubber({ incident, points, at, snapshot, playing, onPl
         <>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             {playButton}
+            {/* a phone's legend "?" sits beside Play, where there is room (the counts strip below is full there) */}
+            <span className="ml-auto sm:hidden">
+              <TierLegend />
+            </span>
             {headline}
-            <p className="ml-auto rounded-xs bg-bg-2 px-2 py-0.5 font-mono text-xs text-fg-0 tabular-nums">
+            {/* a phone shows the time on the track's bubble (and in the header): the band's own chip would only push the actions down */}
+            <p className="ml-auto rounded-xs bg-bg-2 px-2 py-0.5 font-mono text-xs text-fg-0 tabular-nums max-sm:hidden">
               {ready ? <time dateTime={new Date(at).toISOString()}>{utcLabel(at)}</time> : '--:-- UTC'}
             </p>
           </div>

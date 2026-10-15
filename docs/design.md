@@ -104,7 +104,7 @@ Banned, including as fallbacks that render: Inter, Roboto, Poppins, Helvetica/Ar
 
 | Token | Size / line | Family + weight | Where |
 |---|---|---|---|
-| `text-2xs` | 11 / 16 | Satoshi 500 uppercase tracking .08em on `fg-1` · Martian Mono 500 for tier constants | table headers, badges, tick labels |
+| `text-2xs` | 12 / 16 | Satoshi 500 uppercase tracking .08em on `fg-1` · Martian Mono 500 for tier constants | table headers, badges, tick labels |
 | `text-xs` | 12 / 18 | Satoshi 400 · Martian Mono 400 | meta, Cypher in cards, ms badge, path chips |
 | `text-sm` | 13 / 20 | Satoshi 400/500 | table cells, tool-card rows |
 | `text-base` | 14 / 22 | Satoshi 400 | UI body, buttons, drawers |

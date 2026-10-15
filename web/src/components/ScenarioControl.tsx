@@ -1,14 +1,19 @@
 /* ScenarioControl: segmented radiogroup (radius sm): qix, axios, "Describe an alert...".
- * Props: value (ScenarioChoice), onChange, onRun (Enter on a scenario segment runs the triage), running,
- * turnKey (bump it per run: the biohazard turns ONCE when a run starts, never while merely selected).
- * Arrow keys move the selection (roving tabindex), the group is role=radiogroup.
+ * Props: value (ScenarioChoice), onChange (a click or Space: choose it, and re-run what is on screen for it), onMove
+ * (an arrow key: the selection moves and nothing else happens: no run, no panel, focus stays in the group), onRun (Enter
+ * on a scenario segment runs the triage), running, turnKey (bump it per run: the biohazard turns ONCE when a run starts,
+ * never while merely selected).
+ * Arrow keys move the selection (roving tabindex), the group is role=radiogroup. Nothing runs on an arrow (WCAG 3.2.2):
+ * running is an explicit activation (Enter, a click, the Run button), and "Describe an alert…" is reachable without opening
+ * anything until it is activated.
  *
  * Also exported here:
- *   AlertField props: onRun(text), disabled. Free text, 500 chars max with a counter, label always visible.
- *   AlertBanner props: text, pulseKey. Shown while a free-text alert run is on screen; the shield pulses twice.
- *     `text` is untrusted and rendered as text only.
+ *   scenarioLabel(id)  "qix Sept 2025" / "axios Mar 2026", for sentences
+ *   AlertField props: onRun(text), disabled. Free text, 500 chars max with a counter, label always visible. Takes focus when it opens.
+ *   AlertBanner props: text, pulseKey, note. Shown while a free-text alert run is on screen; the shield pulses twice.
+ *     `text` is untrusted and rendered as text only. `note` says which clock a run without a time in its text used.
  */
-import { useId, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import type { ScenarioId } from '../data/types.ts';
 import { Button } from './Button.tsx';
 import { BiohazardIcon } from './icons/BiohazardIcon.tsx';
@@ -23,15 +28,22 @@ const OPTIONS: { id: ScenarioChoice; label: string; tail?: string }[] = [
   { id: 'alert', label: 'Describe an alert…' },
 ];
 
+export const scenarioLabel = (id: ScenarioId): string => {
+  const o = OPTIONS.find((x) => x.id === id)!;
+  return `${o.label}${o.tail?.replace(' · ', ' ') ?? ''}`;
+};
+
 export function ScenarioControl({
   value,
   onChange,
+  onMove,
   onRun,
   running,
   turnKey,
 }: {
   value: ScenarioChoice;
   onChange: (v: ScenarioChoice) => void;
+  onMove: (v: ScenarioChoice) => void;
   onRun: () => void;
   running: boolean;
   turnKey: number;
@@ -43,9 +55,10 @@ export function ScenarioControl({
     if (step) {
       e.preventDefault();
       const next = (i + step + OPTIONS.length) % OPTIONS.length;
-      onChange(OPTIONS[next]!.id);
+      onMove(OPTIONS[next]!.id);
       refs.current[next]?.focus();
     } else if (e.key === 'Enter' && OPTIONS[i]!.id !== 'alert') {
+      e.preventDefault(); // the run, not the click a button would also make
       onRun();
     }
   };
@@ -90,7 +103,9 @@ const MAX = 500;
 export function AlertField({ onRun, disabled }: { onRun: (text: string) => void; disabled?: boolean }) {
   const [text, setText] = useState('');
   const id = useId();
+  const field = useRef<HTMLTextAreaElement>(null);
   const ok = text.trim().length > 0 && !disabled;
+  useEffect(() => field.current?.focus({ preventScroll: true }), []); // it opens only when activated: the person is about to type
   return (
     <form
       className="flex flex-col gap-2 sm:flex-row sm:items-end"
@@ -104,6 +119,7 @@ export function AlertField({ onRun, disabled }: { onRun: (text: string) => void;
           Describe the alert
         </label>
         <textarea
+          ref={field}
           id={id}
           className="field"
           rows={2}
@@ -124,16 +140,19 @@ export function AlertField({ onRun, disabled }: { onRun: (text: string) => void;
   );
 }
 
-export function AlertBanner({ text, pulseKey }: { text: string; pulseKey: number }) {
+export function AlertBanner({ text, pulseKey, note }: { text: string; pulseKey: number; note?: string | null }) {
   return (
     <aside aria-label="Alert" className="flex items-start gap-3 bg-accent-soft px-(--gutter) py-2 text-sm text-fg-0">
       <span className="mt-0.5 shrink-0 text-infect-400">
         <ShieldPulseIcon alert pulseKey={pulseKey} size={20} />
       </span>
-      <p className="min-w-0 break-words">
-        <span className="font-medium text-infect-400">Alert </span>
-        {text}
-      </p>
+      <div className="min-w-0">
+        <p className="break-words">
+          <span className="font-medium text-infect-400">Alert </span>
+          {text}
+        </p>
+        {note && <p className="mt-0.5 text-fg-1">{note}</p>}
+      </div>
     </aside>
   );
 }

@@ -3,6 +3,7 @@
 // Markdown (S5).
 import { utc, utcLabel } from './format.ts';
 import type { Exposure, ExposurePath, IncidentMeta, Remediation, Report, Tier } from './types.ts';
+import { readUrlState, shareUrl, type OpenTab } from './urlState.ts';
 
 const code = (s: string) => `\`${s.replaceAll('`', "'").replace(/\s+/g, ' ')}\``;
 const fence = (s: string) => `\`\`\`\n${s.replaceAll('```', "'''")}\n\`\`\``;
@@ -21,6 +22,17 @@ export const publishedBy = (incident: IncidentMeta, at: number) => incident.vers
 const pinName = (key: string) => (key.lastIndexOf('@') > 0 ? key.slice(0, key.lastIndexOf('@')) : key);
 /** "debug@4.4.1, chalk@5.6.0": what an overrides block pins. */
 export const pinTargets = (overrides: Record<string, string>) => Object.entries(overrides).map(([k, v]) => `${pinName(k)}@${v}`);
+
+/** Root dependencies to pin next to the overrides: npm rejects an override that conflicts with a direct dependency (EOVERRIDE). */
+export const directOf = (f: Pick<Remediation, 'direct'>): Record<string, string> => f.direct ?? {};
+export const hasDirect = (f: Pick<Remediation, 'direct'>): boolean => Object.keys(directOf(f)).length > 0;
+
+/** The package.json edits that work when pasted on their own: the direct pins (when the repo declares the package) and the overrides. */
+export const fixJson = (f: Pick<Remediation, 'overrides' | 'direct'>): string =>
+  JSON.stringify(hasDirect(f) ? { dependencies: directOf(f), overrides: f.overrides } : { overrides: f.overrides }, null, 2);
+
+/** Said wherever the two-block snippet is shown or copied. */
+export const DIRECT_NOTE = 'Set these in package.json. Put each dependency under dependencies or devDependencies, wherever the package is declared.';
 
 export function reportToMarkdown(r: Report): string {
   const live = publishedBy(r.incident, r.at);
@@ -43,7 +55,7 @@ export function reportToMarkdown(r: Report): string {
     '',
     '## Fixes',
     '',
-    ...r.remediations.flatMap((f) => [`### ${code(f.repo)}`, '', fence(JSON.stringify({ overrides: f.overrides }, null, 2)), '', ...f.steps.map((s, i) => `${i + 1}. ${s.replace(/[\r\n]+/g, ' ')}`), '']),
+    ...r.remediations.flatMap((f) => [`### ${code(f.repo)}`, '', ...(hasDirect(f) ? [DIRECT_NOTE, ''] : []), fence(fixJson(f)), '',...f.steps.map((s, i) => `${i + 1}. ${s.replace(/[\r\n]+/g, ' ')}`), '']),
     '## Notices',
     '',
     ...r.notices.flatMap((n) => [`${code(n.team)} (${code(n.channel)})`, '', fence(n.text), '']),
@@ -65,8 +77,25 @@ const ACTION: Record<Tier, string> = {
   CLEAN: 'Nothing to do.',
 };
 
-/** One repo's Slack message, complete on its own: repo, tier in words, prod/dev, path, pin target, window start and a link. */
-export function slackMessage(i: { exposure: Exposure; paths: ExposurePath[]; fix?: Remediation; incident: IncidentMeta; link: string }): string {
+/**
+ * The link a notice carries: this screen's address pointed at the repo and the tab, built by shareUrl. A pasted public repo is
+ * re-analysed on load (guest); a dropped lockfile has nothing to reopen, so it has no link (null).
+ */
+export function detailsLink(base: string, report: Pick<Report, 'incident' | 'at' | 'scope'>, repo: string, open: OpenTab): string | null {
+  const guest = report.scope?.kind === 'guest';
+  const name = repo.replace(/@HEAD$/, '');
+  if (guest && name.startsWith('pasted/')) return null;
+  try {
+    const url = shareUrl(base, { scenario: report.incident.id, at: report.at, ...(guest ? { guest: name } : { repo: name }), open });
+    const s = readUrlState(new URL(url).search);
+    return (guest ? s.guest : s.repo) === name ? url : null; // a name shareUrl refuses would open the wrong thing
+  } catch {
+    return null;
+  }
+}
+
+/** One repo's Slack message, complete on its own: repo, tier in words, prod/dev, path, pin target (and the direct pins), window start and a link (none for a dropped lockfile). */
+export function slackMessage(i: { exposure: Exposure; paths: ExposurePath[]; fix?: Remediation; incident: IncidentMeta; link: string | null }): string {
   const { exposure: e } = i;
   const bad = new Set(i.incident.versions.map((v) => v.id));
   const pins = i.fix ? pinTargets(i.fix.overrides) : [];
@@ -77,9 +106,10 @@ export function slackMessage(i: { exposure: Exposure; paths: ExposurePath[]; fix
     ...i.paths.slice(0, 2).map((p) => `Path: ${p.chain.map(code).join(' > ')}${p.chain.at(-1) === p.version ? '' : ` > ${code(p.version)}`}${p.range ? ` (range ${code(p.range)})` : ''}`),
     ...(locked.length ? [`Your lockfile pins: ${locked.join(', ')}`] : []),
     ...(pins.length ? [`Pin to: ${pins.map(code).join(', ')}`] : []),
+    ...(i.fix && hasDirect(i.fix) ? [`Also set in package.json, under dependencies or devDependencies (wherever it is declared): ${pinTargets(directOf(i.fix)).map(code).join(', ')}. npm rejects an override that conflicts with a direct dependency.`] : []),
     `Window: malicious versions have been live since ${utcLabel(i.incident.firstPublishAt)}.`,
     `Do: ${ACTION[e.tier]}`,
-    `Details: ${i.link}`,
+    ...(i.link ? [`Details: ${i.link}`] : []),
   ].join('\n');
 }
 
