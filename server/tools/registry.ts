@@ -1,7 +1,7 @@
 // Tool registry shared by the triage playbook, the Ask loop and MCP. Each tool = Cypher from cypher.ts (GRAPH.RO_QUERY
 // via Graph.ro) + a one-line summary for the card and the LLM. recordTriage is the only write and is never a tool.
 import { randomUUID } from 'node:crypto';
-import type { Exposure, ExposurePath, Remediation, ScannerHit, Tier, ToolName, ToolResult } from '../../shared/events.ts';
+import type { Exposure, ExposurePath, IncidentMeta, Remediation, ScannerHit, Tier, ToolName, ToolResult } from '../../shared/events.ts';
 import { write } from '../graph/client.ts';
 import { safeVersion } from '../ingest/admits.ts';
 import * as Q from './cypher.ts';
@@ -22,8 +22,26 @@ function time(x: unknown): number {
 }
 export const utc = (t: number) => new Date(t).toISOString().slice(0, 16).replace('T', ' ') + 'Z';
 const few = (xs: unknown[], n = 3) => xs.slice(0, n).join(', ') + (xs.length > n ? ` +${xs.length - n} more` : '');
-const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
+export const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
 const nameOf = (nv: string) => nv.slice(0, nv.lastIndexOf('@'));
+const uniq = <T>(xs: T[]) => [...new Set(xs)];
+
+// Incident header for a run or the API (not a tool): IncidentMeta with firstExposureAt, the lockfile snapshot time and
+// the org id ('guest' for a pasted repo's graph). Guest graphs get their own firstExposureAt from the same query.
+export async function incidentHeader(g: Graph, incident: string) {
+  const [h] = (await g.ro(Q.INCIDENT, { incident })).rows as Row[];
+  if (!h) return undefined;
+  const starts = (await g.ro(Q.FIRST_EXPOSURE, { incident })).rows as Row[];
+  const locked = new Map(starts.filter((r) => r.locked).map((r) => [r.repo, r.since as number]));
+  const first = Math.min(...starts.map((r) => locked.get(r.repo) ?? r.since)); // a locked repo starts at its LOCKED since
+  const meta: IncidentMeta = {
+    id: h.id, title: h.title, maintainer: h.maintainer ?? null, firstPublishAt: h.firstPublishAt, firstExposureAt: Number.isFinite(first) ? first : null,
+    alertAt: h.alertAt, advisoryAt: h.advisoryAt, removedAt: h.removedAt, versions: [...h.versions].sort((a, b) => a.publishedAt - b.publishedAt), sources: h.sources ?? [],
+  };
+  return { incident: meta, snapshotAt: (h.snapshotAt ?? null) as number | null, org: (h.org ?? null) as string | null };
+}
+// The one definition of "minutes ahead of the advisory": landing, report and narration all read it.
+export const minutesAhead = (i: IncidentMeta) => (i.firstExposureAt == null ? 0 : Math.floor((i.advisoryAt - i.firstExposureAt) / 60_000));
 
 // One tool call: runs queries, records each distinct Cypher verbatim, sums FalkorDB's internal time.
 function call(g: Graph) {
@@ -69,9 +87,13 @@ export async function incidentExposure(g: Graph, p: { incident: unknown; at: unk
   const params = { incident: str(p.incident), at: time(p.at) };
   const c = call(g);
   const repos = await c.q(Q.REPOS, {});
+  const locks = await c.q(Q.EXPOSURE_LOCKED, params);
+  // A repo whose lockfile locks a bad version can't be exposed before that lockfile could exist (its LOCKED since).
+  const lockedSince = new Map(locks.map((h) => [h.repo as string, h.since as number]));
+  const live = (h: Row) => (lockedSince.get(h.repo) ?? -Infinity) <= params.at;
   const hits: Row[] = [
-    ...(await c.q(Q.EXPOSURE_LOCKED, params)).map((h) => ({ ...h, tier: 'LOCKED' as const })),
-    ...(await c.q(Q.EXPOSURE_ADMITS, params)).map((h) => ({ ...h, tier: 'WOULD_PULL' as const })),
+    ...locks.filter(live).map((h) => ({ ...h, tier: 'LOCKED' as const, locked: [h.version] })),
+    ...(await c.q(Q.EXPOSURE_ADMITS, params)).filter(live).map((h) => ({ ...h, tier: 'WOULD_PULL' as const })),
   ];
   // Same tiers as the triage report: a repo holding the compromised account's packages is MAINTAINER, not CLEAN.
   const maintainer = (await c.q(Q.INCIDENT, { incident: params.incident }))[0]?.maintainer as string | null | undefined;
@@ -84,14 +106,16 @@ export async function incidentExposure(g: Graph, p: { incident: unknown; at: unk
     const order = [...own].sort((a, b) => +(b.tier === 'LOCKED') - +(a.tier === 'LOCKED') || a.depth - b.depth || a.since - b.since);
     // A lockfile can't predate any version it locks; otherwise exposure starts at the first bad publish a range admits.
     const since = locked.length ? Math.max(...locked.map((h) => h.since)) : Math.min(...admits.map((h) => h.since));
+    const b = !own.length ? blast.get(r.repo) : undefined; // MAINTAINER: depth and dev badge come from the blast radius
     return {
       repo: r.repo, synthetic: !!r.synthetic, team: r.team ?? null,
-      tier: locked.length ? 'LOCKED' : admits.length ? 'WOULD_PULL' : blast.has(r.repo) ? 'MAINTAINER' : 'CLEAN',
-      versions: [...new Set(order.map((h) => h.version as string))],
-      depth: own.length ? Math.min(...own.map((h) => h.depth)) : 0,
-      dev: own.length > 0 && own.every((h) => h.devFlags.every(Boolean)),
-      ranges: [...new Set(admits.flatMap((h) => h.ranges as string[]))],
-      packages: !locked.length && !admits.length ? ((blast.get(r.repo)?.sample as string[] | undefined) ?? []) : [],
+      tier: locked.length ? 'LOCKED' : admits.length ? 'WOULD_PULL' : b ? 'MAINTAINER' : 'CLEAN',
+      versions: uniq(order.map((h) => h.version as string)),
+      locked: uniq(own.flatMap((h) => h.locked as string[])).sort(), // what the lockfile pins for each affected package
+      depth: own.length ? Math.min(...own.map((h) => h.depth)) : (b?.shallowest ?? 0),
+      dev: own.length ? own.every((h) => h.devFlags.every(Boolean)) : !!b && b.devFlags.every(Boolean),
+      ranges: uniq(admits.flatMap((h) => h.ranges as string[])),
+      packages: (b?.sample as string[] | undefined) ?? [],
       remediated: null, since: Number.isFinite(since) ? since : null,
     };
   }).sort((a, b) => RANK[a.tier] - RANK[b.tier] || a.depth - b.depth || a.repo.localeCompare(b.repo));
@@ -99,29 +123,57 @@ export async function incidentExposure(g: Graph, p: { incident: unknown; at: unk
   const exposed = rows.filter((r) => r.tier !== 'CLEAN');
   const summary = `at ${utc(params.at)}: ${n('LOCKED')} LOCKED, ${n('WOULD_PULL')} WOULD_PULL, ${n('MAINTAINER')} MAINTAINER, ${n('CLEAN')} CLEAN of ${plural(rows.length, 'repo')}`
     + (exposed.length ? `; e.g. ${few(exposed.map((r) => r.repo))}` : '');
-  return c.result('incident_exposure', params, summary, rows, exposed.flatMap((r) => [r.repo, r.team, ...r.versions, ...r.ranges, ...r.packages]));
+  return c.result('incident_exposure', params, summary, rows, exposed.flatMap((r) => [r.repo, r.team, ...r.versions, ...(r.locked ?? []), ...r.ranges, ...r.packages]));
+}
+
+// filter_exposures: the complete list behind the exposure table (incident_exposure's non-CLEAN rows, same queries),
+// filtered, with counts per team. Ask answers list, count and owner questions from it, so no match goes unnamed.
+const FILTER_TIERS = new Set(['LOCKED', 'WOULD_PULL', 'MAINTAINER']);
+export async function filterExposures(g: Graph, p: { incident: unknown; at: unknown; tier?: unknown; prod_only?: unknown; team?: unknown; repo?: unknown }) {
+  const all = await incidentExposure(g, { incident: p.incident, at: p.at });
+  const tier = p.tier == null ? '' : str(p.tier, 20).toUpperCase();
+  const f = { tier: FILTER_TIERS.has(tier) ? tier : '', prodOnly: p.prod_only === true || p.prod_only === 'true', team: str(p.team ?? '', 60).toLowerCase(), repo: str(p.repo ?? '', 140).toLowerCase() };
+  const exposed = rowsOf<ExposureRow>(all).filter((e) => e.tier !== 'CLEAN');
+  const rows = exposed
+    .filter((e) => (!f.tier || e.tier === f.tier) && (!f.prodOnly || !e.dev) && (!f.team || (e.team ?? '').toLowerCase() === f.team)
+      && (!f.repo || e.repo.toLowerCase() === f.repo || e.repo.toLowerCase().split('/')[1] === f.repo))
+    .map((e) => ({ repo: e.repo, tier: e.tier, team: e.team, dev: e.dev, versions: e.versions, locked: e.locked ?? [] }));
+  const teams = new Map<string, number>();
+  for (const r of rows) teams.set(r.team ?? 'no owner', (teams.get(r.team ?? 'no owner') ?? 0) + 1);
+  const label = [f.tier && `tier ${f.tier}`, f.prodOnly && 'prod only', f.team && `team ${str(p.team, 60)}`, f.repo && `repo ${str(p.repo, 140)}`].filter(Boolean).join(', ') || 'no filter';
+  const params = { incident: all.params.incident, at: all.params.at, ...(f.tier && { tier: f.tier }), ...(f.prodOnly && { prod_only: true }), ...(f.team && { team: str(p.team, 60) }), ...(f.repo && { repo: str(p.repo, 140) }) };
+  const summary = `${rows.length} of ${plural(exposed.length, 'exposed repo')} ${rows.length === 1 ? 'matches' : 'match'} (${label})`
+    + (rows.length ? ` across ${plural(teams.size, 'team')}: ${[...teams].map(([t, n]) => `${t} ${n}`).join(', ')}` : '');
+  return { ...all, tool: 'filter_exposures' as const, params, summary, rows, evidence: uniq(rows.flatMap((r) => [r.repo, r.team ?? '', ...r.versions, ...r.locked]).filter(Boolean)) };
 }
 
 export async function maintainerBlastRadius(g: Graph, p: { maintainer: unknown }) {
   const params = { maintainer: str(p.maintainer) };
   const c = call(g);
   const rows = (await c.q(Q.MAINTAINER_BLAST_RADIUS, params)).map((r) => ({ repo: r.repo, packages: r.packages, sample: r.sample, shallowest: r.shallowest, dev: r.devFlags.every(Boolean) }));
-  const summary = `${params.maintainer}'s packages are in ${plural(rows.length, 'repo')}' lockfiles` + (rows.length ? `; most: ${rows[0].repo} (${plural(rows[0].packages, 'package')})` : '');
+  const summary = `${params.maintainer}'s packages are in the lockfiles of ${plural(rows.length, 'repo')}` + (rows.length ? `; most: ${rows[0].repo} (${plural(rows[0].packages, 'package')})` : '');
   return c.result('maintainer_blast_radius', params, summary, rows, [params.maintainer, ...rows.flatMap((r) => [r.repo, ...r.sample])]);
 }
 
 export async function explainPath(g: Graph, p: { repo: unknown; version: unknown; at: unknown }) {
   const params = { repo: str(p.repo), version: str(p.version), at: time(p.at) };
   const c = call(g);
+  const seen = new Set<string>();
+  // Chain, range and hops first (the card shows the leading columns); identical paths through different lockfile
+  // locations collapse to one row.
   const rows = (await c.q(Q.EXPLAIN_PATH, params)).map((r): PathRow => ({
-    repo: params.repo, version: params.version, kind: r.kind, range: r.range ?? null, hops: r.hops, depth: r.depth,
-    chain: [params.repo, ...r.chain.slice(1)], lockPaths: r.lockPaths,
-  }));
+    chain: [params.repo, ...r.chain.slice(1)], range: r.range ?? null, hops: r.hops, kind: r.kind,
+    repo: params.repo, version: params.version, depth: r.depth, lockPaths: r.lockPaths,
+  })).filter((r) => {
+    const k = `${r.kind} ${r.range} ${r.chain.join(' > ')}`;
+    return !seen.has(k) && !!seen.add(k);
+  });
   const b = rows[0];
   const summary = !b ? `no path from ${params.repo} to ${params.version} at ${utc(params.at)}`
     : b.kind === 'RESOLVES_TO'
-      ? `${params.repo} locks ${params.version}${b.hops > 1 ? `, ${b.hops} hops deep via ${b.chain.slice(1, -1).join(' > ')}` : ' as a direct dependency'}`
-      : `${params.repo} declares ${b.range}, admitting ${params.version}${b.hops ? ` at ${b.chain.at(-1)}, ${plural(b.hops, 'hop')} deep` : ' at the root'}`;
+      ? `${params.repo} locks ${params.version}${b.hops > 1 ? `, ${plural(b.hops, 'hop')} deep via ${b.chain.slice(1, -1).join(' > ')}` : ' as a direct dependency'}`
+      : b.hops ? `${params.repo}: its dependency ${b.chain.at(-1)} declares ${b.range}, admitting ${params.version} (${plural(b.hops, 'hop')} deep)`
+        : `${params.repo} declares ${b.range} at the root, admitting ${params.version}`;
   return c.result('explain_path', params, summary, rows, rows.flatMap((r) => [r.repo, r.version, r.range, ...r.chain]));
 }
 
@@ -137,7 +189,7 @@ export async function concentrationRisk(g: Graph, p: { top?: unknown }) {
   const params = { top: Math.min(10, Math.max(1, Math.trunc(Number(p.top) || 3))) };
   const c = call(g);
   const rows = await c.q(Q.CONCENTRATION_RISK, params);
-  const summary = `top ${rows.length} maintainers by PageRank influence: ${rows.map((r) => `${r.maintainer} (${r.packages} packages, ${r.reposReached} repos)`).join(', ')}`;
+  const summary = `top ${plural(rows.length, 'maintainer')} by PageRank influence: ${rows.map((r) => `${r.maintainer} (${plural(r.packages, 'package')}, ${plural(r.reposReached, 'repo')})`).join(', ')}`;
   return c.result('concentration_risk', params, summary, rows, rows.map((r) => r.maintainer));
 }
 
@@ -146,34 +198,49 @@ export async function draftRemediation(g: Graph, p: { repo: unknown; versions: u
   const c = call(g);
   const versions = await c.q(Q.REMEDIATION_VERSIONS, params);
   const ranges = await c.q(Q.REMEDIATION_RANGES, params);
+  // Override keys are version-qualified ("debug@4.4.2": "4.4.1"): npm then replaces only the malicious version, so a
+  // dependent on another major (log-symbols on chalk ^4) is never forced onto an incompatible one.
   const overrides: Record<string, string> = {};
   const notes: string[] = [];
   for (const bad of params.versions) {
     const name = nameOf(bad);
     const vs = versions.filter((v) => v.bad === bad).map((v) => ({ version: v.version, publishedAt: v.publishedAt, malicious: v.malicious }));
     const mine = ranges.filter((r) => r.bad === bad);
-    const pin = safeVersion([...new Set(mine.map((r) => r.range as string))], vs, params.at) ?? safeVersion([], vs, params.at); // no version fits every range: latest clean
+    const pin = safeVersion(uniq(mine.map((r) => r.range as string)), vs, params.at) ?? safeVersion([], vs, params.at); // no version fits every range: latest clean
     if (!pin) notes.push(`${name} had no clean release at ${utc(params.at)}: remove it, or pin the package that pulls it in`);
-    else if (overrides[name] && overrides[name] !== pin) notes.push(`${bad} also appears: replace it with ${name}@${pin}, scoping that override under the dependency that pulls it in`);
     else {
-      overrides[name] = pin;
-      if (mine.some((r) => r.direct)) notes.push(`Set the root dependency on ${name} to ${pin} too: npm rejects an override that conflicts with a direct dependency`);
+      overrides[bad] = pin;
+      if (mine.some((r) => r.direct)) notes.push(`If you add the ${name} override, set the root dependency on ${name} to ${pin} too: npm rejects an override that conflicts with a direct dependency`);
     }
   }
-  const locked = ranges.some((r) => r.kind === 'RESOLVES_TO');
-  const pins = Object.entries(overrides).map(([n, v]) => `${n}@${v}`);
-  const missing = params.versions.map(nameOf).filter((n, i, a) => !overrides[n] && a.indexOf(n) === i);
-  const steps = [
-    pins.length ? `Add "overrides" pinning ${pins.join(', ')} to package.json and regenerate the lockfile` : '',
-    ...new Set(notes),
-    locked ? 'Rotate secrets that builds and CI could read since the first malicious publish' : '',
-    locked ? 'Rebuild and redeploy anything built from this lockfile during the window' : 'Until the overrides land, install with npm ci from the committed lockfile, which never resolved the bad version',
-  ].filter(Boolean);
-  const prBody = `${locked ? 'The lockfile resolves' : 'Declared ranges admit'} ${params.versions.join(', ')}. `
-    + (pins.length ? `This pins ${pins.join(', ')} via overrides.` : 'No clean version to pin yet.');
-  const row: Remediation = { repo: params.repo, overrides, steps, prBody };
-  const summary = `${params.repo}: ${pins.length ? `pin ${pins.join(', ')}` : 'nothing safe to pin'}${missing.length ? `; no clean ${missing.join(', ')}` : ''}${locked ? '; rotate secrets and rebuild' : ''}`;
-  return c.result('draft_remediation', params, summary, [row], [params.repo, ...pins, ...Object.keys(overrides)]);
+  const isLocked = ranges.some((r) => r.kind === 'RESOLVES_TO');
+  const badLocked = uniq(ranges.filter((r) => r.kind === 'RESOLVES_TO').map((r) => r.bad as string));
+  const safeLocked = uniq(ranges.filter((r) => r.kind === 'ADMITS' && r.locked && !params.versions.includes(r.locked)).map((r) => r.locked as string)).sort();
+  const until = Math.max(...ranges.filter((r) => r.until != null).map((r) => r.until as number));
+  const pairs = Object.entries(overrides).map(([k, v]) => `"${k}": "${v}"`).join(', ');
+  const pins = Object.entries(overrides).map(([k, v]) => `${nameOf(k)}@${v}`);
+  const missing = uniq(params.versions.filter((v) => !overrides[v]).map(nameOf));
+  // Order: what keeps you safe today, then the conditional override, then LOCKED's rotate-and-rebuild.
+  const steps = (isLocked
+    ? [
+      `Your lockfile pins ${badLocked.join(', ')}, which ${badLocked.length === 1 ? 'is' : 'are'} malicious: ${pairs ? `add the overrides ${pairs} to package.json, run npm install to regenerate the lockfile and commit it` : 'remove them and regenerate the lockfile'}`,
+      ...notes,
+      'Rotate secrets that builds and CI could read since the first malicious publish',
+      'Rebuild and redeploy anything built from this lockfile during the window',
+    ]
+    : [
+      `Keep installing from your committed lockfile (npm ci): ${safeLocked.length ? `it pins ${safeLocked.join(', ')} (safe)` : 'it never resolved the malicious version'}`,
+      !pairs ? ''
+        : Number.isFinite(until) && until <= params.at ? `The malicious versions stopped resolving at ${utc(until)}, so a fresh resolve now gets a clean one; to be sure anyway, add the overrides ${pairs} to package.json`
+          : `Only if you must re-resolve dependencies${Number.isFinite(until) ? ` before ${utc(until)}` : ' while the malicious versions are live'}, add the overrides ${pairs} to package.json; each replaces only the malicious version`,
+      ...notes,
+    ]).filter(Boolean);
+  const prBody = `${isLocked ? 'The lockfile resolves' : 'Declared ranges admit'} ${params.versions.join(', ')}. `
+    + (pairs ? `This adds version-qualified overrides (${pairs}) that replace only the malicious versions.` : 'No clean version to pin yet.');
+  const row: Remediation = { repo: params.repo, overrides, steps: uniq(steps), prBody };
+  const summary = `${params.repo}: lockfile pins ${isLocked ? `${badLocked.join(', ')} (malicious)` : safeLocked.length ? `${safeLocked.join(', ')} (safe)` : 'no malicious version'}; `
+    + `${pins.length ? `override to ${pins.join(', ')}` : 'nothing safe to pin'}${missing.length ? `; no clean ${missing.join(', ')}` : ''}${isLocked ? '; rotate secrets and rebuild' : ''}`;
+  return c.result('draft_remediation', params, summary, [row], [params.repo, ...pins, ...Object.keys(overrides), ...badLocked, ...safeLocked]);
 }
 
 // scanner_view also returns grepCount (the other "graph off" baseline) for the report.
@@ -191,7 +258,8 @@ export async function recallTriage(g: Graph, p: { session: unknown; incident: un
   if (!params.session) throw new Error('recall_triage needs the server-side session');
   const c = call(g);
   const seen = new Set<string>();
-  const rows = (await c.q(Q.RECALL_TRIAGE, params)).filter((r) => !seen.has(r.repo) && seen.add(r.repo)); // latest per repo
+  // Latest row per repo, but a remediation mark outlives the plain per-run records (action null) written after it.
+  const rows = (await c.q(Q.RECALL_TRIAGE, params)).sort((a, b) => +!a.action - +!b.action).filter((r) => !seen.has(r.repo) && seen.add(r.repo));
   const done = rows.filter((r) => r.action === 'remediated');
   const summary = rows.length ? `${plural(rows.length, 'repo')} assessed earlier in this session; ${done.length} marked remediated${done.length ? `: ${few(done.map((r) => r.repo))}` : ''}` : 'no earlier assessments in this session';
   return c.result('recall_triage', { incident: params.incident }, summary, rows, rows.map((r) => r.repo)); // the session id stays server-side
@@ -217,13 +285,24 @@ export async function recordTriage(graphName: string, t: { session: string; inci
 export const TOOLS: Record<ToolName, ToolDef<any>> = {
   find_target: { name: 'find_target', description: 'Find known maintainers, packages, name@version ids and incidents mentioned in free text (e.g. an alert).', parameters: obj({ q: S('Free text, e.g. "debug@4.4.2 and chalk hijacked"') }, ['q']), run: findTarget },
   suspect_versions: { name: 'suspect_versions', description: "Versions of a maintainer's packages published in a time window: catches hijacked releases before any advisory exists.", parameters: obj({ maintainer: S('npm username'), since: AT, until: AT }, ['maintainer', 'since', 'until']), run: suspectVersions },
-  incident_exposure: { name: 'incident_exposure', description: 'Tier every repo at a moment: LOCKED (lockfile resolves a malicious version), WOULD_PULL (a declared range resolved to one while it was live), CLEAN.', parameters: obj({ incident: S('Incident id, e.g. qix-2025-09-08'), at: AT }, ['incident', 'at']), run: incidentExposure },
+  incident_exposure: { name: 'incident_exposure', description: 'Tier every repo at a moment: LOCKED (lockfile resolves a malicious version), WOULD_PULL (a declared range resolved to one while it was live), MAINTAINER (holds packages of the compromised account), CLEAN.', parameters: obj({ incident: S('Incident id, e.g. qix-2025-09-08'), at: AT }, ['incident', 'at']), run: incidentExposure },
   maintainer_blast_radius: { name: 'maintainer_blast_radius', description: "Repos whose lockfiles contain any package the maintainer publishes (MAINTAINER tier), with the shallowest depth.", parameters: obj({ maintainer: S('npm username') }, ['maintainer']), run: maintainerBlastRadius },
   explain_path: { name: 'explain_path', description: 'Exact lockfile chain from a repo root to the entry that locks a version or declares a range admitting it.', parameters: obj({ repo: S('owner/name'), version: S('name@version'), at: AT }, ['repo', 'version', 'at']), run: explainPath },
   route_owners: { name: 'route_owners', description: 'Owning team and channel for each repo, grouped by team.', parameters: obj({ repos: LIST('owner/name ids') }, ['repos']), run: routeOwners },
   concentration_risk: { name: 'concentration_risk', description: 'Maintainers whose packages carry the most PageRank across the org dependency graph: who could be the next compromised account.', parameters: obj({ top: { type: 'integer', minimum: 1, maximum: 10, description: 'How many maintainers' } }, []), run: concentrationRisk },
   draft_remediation: { name: 'draft_remediation', description: 'Safe "overrides" pins (highest clean version live at the time that every affected range accepts) and steps for one repo.', parameters: obj({ repo: S('owner/name'), versions: LIST('malicious name@version ids in this repo'), at: AT }, ['repo', 'versions', 'at']), run: draftRemediation },
   scanner_view: { name: 'scanner_view', description: 'What an advisory-based scanner reports at a moment (lockfile x published OSV records), plus a plain name grep.', parameters: obj({ incident: S('Incident id'), at: AT }, ['incident', 'at']), run: async (g, p) => (await scannerView(g, p)).result },
+  filter_exposures: {
+    name: 'filter_exposures',
+    description: 'The complete list of exposed repos at a moment (the exposure table), optionally filtered by tier, prod-only, owning team or repo, with team, dev flag, malicious versions and what each lockfile pins, plus counts per team. Use it for every list, count or owner question: it never omits a match.',
+    parameters: obj({
+      incident: S('Incident id'), at: AT,
+      tier: { type: 'string', enum: ['LOCKED', 'WOULD_PULL', 'MAINTAINER'], description: 'Only this tier' },
+      prod_only: { type: 'boolean', description: 'Only repos with a production (not dev-only) hit' },
+      team: S('Owning team name, e.g. QA'), repo: S('owner/name, or just the name'),
+    }, ['incident', 'at']),
+    run: filterExposures,
+  },
   // The session is never an LLM argument (S10): the dispatcher must overwrite p.session with the caller's cookie session.
   recall_triage: { name: 'recall_triage', description: 'Earlier assessments and remediation marks for this incident in the current session.', parameters: obj({ incident: S('Incident id') }, ['incident']), run: recallTriage },
 };

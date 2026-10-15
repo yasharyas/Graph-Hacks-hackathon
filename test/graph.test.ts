@@ -74,14 +74,51 @@ describe('graph', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, ()
     assert.deepEqual([p.kind, p.range, p.hops], ['ADMITS', '~0.30.3', 0]);
   });
 
-  test('synthetic acme/checkout-web is LOCKED on debug@4.4.2 and chalk@5.6.1; the fix pins debug 4.4.1', async () => {
+  test('synthetic acme/checkout-web is LOCKED on debug@4.4.2 and chalk@5.6.1; the fix overrides exactly those versions', async () => {
     const web = (await exposure(QIX, 'qix-2025-09-08', QAT)).find((e) => e.repo === 'acme/checkout-web')!;
     assert.equal(web.tier, 'LOCKED');
     assert.deepEqual([...web.versions].sort(), ['chalk@5.6.1', 'debug@4.4.2']);
+    assert.deepEqual(web.locked, ['chalk@5.6.1', 'debug@4.4.2']);
     const [fix] = T.rowsOf<{ overrides: Record<string, string>; steps: string[] }>(await T.draftRemediation(QIX, { repo: 'acme/checkout-web', versions: web.versions, at: QAT }));
-    assert.equal(fix.overrides.debug, '4.4.1');
-    assert.equal(fix.overrides.chalk, '5.6.0');
-    assert.ok(fix.steps.some((s) => /rotate secrets/i.test(s)));
+    // version-qualified keys: a blanket "chalk": "5.6.0" forced ESM chalk 5 onto log-symbols' ^4 and crashed mocha
+    assert.deepEqual(fix.overrides, { 'debug@4.4.2': '4.4.1', 'chalk@5.6.1': '5.6.0' });
+    assert.match(fix.steps[0], /^Your lockfile pins (debug@4\.4\.2, chalk@5\.6\.1|chalk@5\.6\.1, debug@4\.4\.2), which are malicious: add the overrides/);
+    assert.deepEqual(fix.steps.slice(-2).map((s) => s.split(' ')[0]), ['Rotate', 'Rebuild']);
+  });
+
+  test('a WOULD_PULL fix starts from what the lockfile pins: npm ci first, overrides only to re-resolve', async () => {
+    const cli = (await exposure(QIX, 'qix-2025-09-08', QAT)).find((e) => e.repo === 'npm/cli')!;
+    assert.equal(cli.tier, 'WOULD_PULL');
+    assert.ok(cli.locked!.includes('chalk@5.4.1') && cli.locked!.includes('supports-color@10.0.0'), cli.locked!.join());
+    assert.ok(!cli.locked!.some((v) => cli.versions.includes(v)), 'a WOULD_PULL lockfile pins no malicious version');
+    const [fix] = T.rowsOf<{ overrides: Record<string, string>; steps: string[] }>(await T.draftRemediation(QIX, { repo: 'npm/cli', versions: cli.versions, at: QAT }));
+    assert.match(fix.steps[0], /^Keep installing from your committed lockfile \(npm ci\): it pins .*chalk@5\.4\.1.* \(safe\)$/);
+    assert.match(fix.steps[1], /^Only if you must re-resolve dependencies before 2025-09-08 15:15Z, add the overrides "chalk@5\.6\.1": "5\.6\.0"/);
+    assert.ok(Object.keys(fix.overrides).every((k) => cli.versions.includes(k)));
+    assert.ok(!fix.steps.some((s) => /rotate/i.test(s)));
+  });
+
+  test('firstExposureAt per graph: qix 13:12:10 (74 min ahead), axios 00:21:58 (105 min); a locked repo is not exposed before its lockfile could exist', async () => {
+    const q = (await T.incidentHeader(QIX, 'qix-2025-09-08'))!;
+    const a = (await T.incidentHeader(AX, 'axios-2026-03-31'))!;
+    assert.deepEqual([q.incident.firstExposureAt, T.minutesAhead(q.incident), q.org], [Date.parse('2025-09-08T13:12:10.343Z'), 74, 'acme']);
+    assert.deepEqual([a.incident.firstExposureAt, T.minutesAhead(a.incident)], [Date.parse('2026-03-31T00:21:58.168Z'), 105]);
+    // acme/billing-api locks axios@1.14.1 (00:21:58) and plain-crypto-js@4.2.1 (23:59:12): it can't be exposed at 00:00
+    const billing = async (at: number) => (await exposure(AX, 'axios-2026-03-31', at)).find((e) => e.repo === 'acme/billing-api')!.tier;
+    assert.notEqual(await billing(Date.parse('2026-03-31T00:00:00Z')), 'LOCKED');
+    assert.notEqual(await billing(Date.parse('2026-03-31T00:00:00Z')), 'WOULD_PULL');
+    assert.equal(await billing(Date.parse('2026-03-31T00:22:00Z')), 'LOCKED');
+    assert.equal((await exposure(AX, 'axios-2026-03-31', a.incident.firstExposureAt! - 1)).filter((e) => e.tier === 'LOCKED' || e.tier === 'WOULD_PULL').length, 0);
+  });
+
+  test('filter_exposures returns the complete matching list: prod-only at 13:30 is 14 repos across 6 teams', async () => {
+    const r = await T.filterExposures(QIX, { incident: 'qix-2025-09-08', at: QAT, prod_only: true });
+    assert.equal(r.rows.length, 14);
+    assert.equal(new Set(r.rows.map((x) => x.team)).size, 6);
+    assert.match(r.summary, /^14 of 21 exposed repos match \(prod only\) across 6 teams: /);
+    assert.deepEqual((await T.filterExposures(QIX, { incident: 'qix-2025-09-08', at: QAT, team: 'qa' })).rows.map((x) => x.repo).sort(), ['mochajs/mocha', 'nightwatchjs/nightwatch', 'puppeteer/puppeteer', 'remy/nodemon']);
+    assert.deepEqual((await T.filterExposures(QIX, { incident: 'qix-2025-09-08', at: QAT, repo: 'insomnia' })).rows.map((x) => x.repo), ['Kong/insomnia']);
+    assert.deepEqual((await T.filterExposures(QIX, { incident: 'qix-2025-09-08', at: QAT, tier: 'locked' })).rows.map((x) => x.repo), ['acme/checkout-web']);
   });
 
   test('scanner_view sees nothing before MAL-2025-46974 is published at 14:26:51Z', async () => {
@@ -152,7 +189,10 @@ describe('graph', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, ()
     const r = ev('report').report;
     assert.deepEqual([r.counts.LOCKED, r.counts.WOULD_PULL, r.minutesAhead], [1, 20, 74]);
     assert.deepEqual([r.paths[0].id, r.paths[0].repo, r.paths[0].kind], ['E1', 'acme/checkout-web', 'RESOLVES_TO']);
+    assert.deepEqual([r.paths.length, r.remediations.length, r.paths.at(-1)!.id], [21, 21, 'E21']); // every exposed repo, not a top 5
     assert.equal(r.scanner.length, 0);
+    assert.equal(ev('narration').note, null);
+    assert.equal(ev('narration').at, QAT);
 
     const ax: TriageEvent[] = [];
     for await (const e of triage({ graph: AX, scenario: 'axios-2026-03-31', at: AAT })) ax.push(e);

@@ -1,5 +1,5 @@
 // HTTP API (docs/contracts.md "HTTP API"). Every number is a live graph query: exposure re-runs its Cypher per call;
-// only the timeline (static org graphs, ~80 points) and incident headers are computed once and kept in memory.
+// only the timeline (static org graphs, one point a minute) and incident headers are computed once and kept in memory.
 import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { Hono, type Context } from 'hono';
@@ -7,6 +7,7 @@ import { serve } from '@hono/node-server';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { bodyLimit } from 'hono/body-limit';
+import { compress } from 'hono/compress';
 import { getCookie, setCookie } from 'hono/cookie';
 import { requestId, type RequestIdVariables } from 'hono/request-id';
 import { secureHeaders } from 'hono/secure-headers';
@@ -58,6 +59,16 @@ app.use(
     permissionsPolicy: { camera: [], microphone: [], geolocation: [] },
   }),
 );
+// gzip for JSON, HTML, JS and CSS over 1 KB. Hono's filter never matches text/event-stream, so SSE streams untouched.
+// ponytail: gzip only (Hono's compress has no brotli); precompress web/dist at build time if the last ~15% matters.
+app.use(compress());
+// Vite's hashed /assets/* never change under the same name; the HTML shell is revalidated so a deploy shows at once.
+app.use('*', async (c, next) => {
+  await next();
+  if (c.req.path.startsWith('/api/') || c.res.status !== 200) return;
+  if (c.req.path.startsWith('/assets/')) c.res.headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+  else if (c.res.headers.get('content-type')?.startsWith('text/html')) c.res.headers.set('Cache-Control', 'no-cache');
+});
 // S7: 8 KB everywhere, except a 5 MB lockfile once JSON-escaped (quotes and newlines grow it by up to ~25%).
 app.use('/api/*', (c, next) =>
   bodyLimit({
@@ -178,25 +189,16 @@ function memo<T>(cache: Map<string, Promise<T>>, key: string, fn: () => Promise<
 
 const incidents = new Map<string, Promise<IncidentMeta>>();
 const incident = (g: Graph, s: ScenarioId) => memo(incidents, g.name, async () => {
-  const [h] = (await g.ro(Q.INCIDENT, { incident: s })).rows as Record<string, any>[];
+  const h = await T.incidentHeader(g, s);
   if (!h) throw new Error(`Incident ${s} is not in graph ${g.name}`);
-  return {
-    id: h.id, title: h.title, maintainer: h.maintainer ?? null, firstPublishAt: h.firstPublishAt, alertAt: h.alertAt, advisoryAt: h.advisoryAt,
-    removedAt: h.removedAt, versions: [...h.versions].sort((a, b) => a.publishedAt - b.publishedAt), sources: h.sources ?? [],
-  };
+  return h.incident;
 });
 
-type Blast = { repo: string; sample: string[]; shallowest: number; dev: boolean };
-const blastOf = async (g: Graph, inc: IncidentMeta) => (inc.maintainer ? T.rowsOf<Blast>(await T.maintainerBlastRadius(g, { maintainer: inc.maintainer })) : []);
 const rank = (e: Exposure) => ({ LOCKED: 0, WOULD_PULL: e.dev ? 2 : 1, MAINTAINER: 3, CLEAN: 4 })[e.tier];
 
-// The tiering triage() reports: incident_exposure, then CLEAN repos holding the account's packages become MAINTAINER.
-async function exposureAt(g: Graph, s: ScenarioId, at: number, blast?: Blast[]) {
+// The tiering triage() reports: incident_exposure (MAINTAINER included) plus the scanner baselines.
+async function exposureAt(g: Graph, s: ScenarioId, at: number) {
   const rows = T.rowsOf<T.ExposureRow>(await T.incidentExposure(g, { incident: s, at }));
-  for (const b of blast ?? (await blastOf(g, await incident(g, s)))) {
-    const e = rows.find((r) => r.repo === b.repo);
-    if (e?.tier === 'CLEAN') Object.assign(e, { tier: 'MAINTAINER', packages: b.sample, depth: b.shallowest, dev: b.dev });
-  }
   const scan = await T.scannerView(g, { incident: s, at });
   return {
     at,
@@ -208,16 +210,21 @@ async function exposureAt(g: Graph, s: ScenarioId, at: number, blast?: Blast[]) 
   };
 }
 
-// Every 2 min from the lockfile snapshot to 30 min after removal, same queries as /api/exposure.
+// Every minute from the lockfile snapshot to 30 min after removal, from the same exposureAt as /api/exposure. Answers
+// only change at CHANGE_TIMES, so exposureAt runs once per segment between them (once per change, not once per
+// minute) and its result is exact for every minute in that segment.
 const timelines = new Map<string, Promise<{ incident: IncidentMeta; points: TimelinePoint[] }>>();
 const timeline = (s: ScenarioId) => {
   const g = org(s);
   return memo(timelines, g.name, async () => {
     const inc = await incident(g, s);
-    const blast = await blastOf(g, inc);
+    const changes = (await g.ro(Q.CHANGE_TIMES, { incident: s })).rows.map((r) => Number(r.t)).filter(Number.isFinite);
     const points: TimelinePoint[] = [];
-    for (let at = Date.parse(SNAPSHOT[s]); at <= inc.removedAt + 30 * MIN; at += 2 * MIN) {
-      const x = await exposureAt(g, s, at, blast);
+    let segment = -1;
+    let x: Awaited<ReturnType<typeof exposureAt>> | undefined;
+    for (let at = Date.parse(SNAPSHOT[s]); at <= inc.removedAt + 30 * MIN; at += MIN) {
+      const seg = changes.filter((t) => t <= at).length; // same count of changes behind = same answer
+      if (seg !== segment || !x) [segment, x] = [seg, await exposureAt(g, s, at)];
       points.push({ at, counts: x.counts, scanner: x.scanner.length });
     }
     return { incident: inc, points };
@@ -254,7 +261,7 @@ async function* remembering(events: AsyncIterable<TriageEvent>, ctx: Omit<Run, '
 const PLAN: Record<ToolName, string> = {
   find_target: Q.FIND_TARGET, suspect_versions: Q.SUSPECT_VERSIONS, incident_exposure: Q.EXPOSURE_ADMITS, maintainer_blast_radius: Q.MAINTAINER_BLAST_RADIUS,
   explain_path: Q.EXPLAIN_PATH, route_owners: Q.ROUTE_OWNERS, concentration_risk: Q.CONCENTRATION_RISK, draft_remediation: Q.REMEDIATION_RANGES,
-  scanner_view: Q.SCANNER_VIEW, recall_triage: Q.RECALL_TRIAGE,
+  scanner_view: Q.SCANNER_VIEW, filter_exposures: Q.EXPOSURE_ADMITS, recall_triage: Q.RECALL_TRIAGE,
 };
 const SAMPLE = { terms: ['qix'], maintainer: 'qix', since: 0, until: 0, incident: 'qix-2025-09-08', at: 0, repo: 'mochajs/mocha', version: 'debug@4.4.2', repos: ['mochajs/mocha'], top: 3, versions: ['debug@4.4.2'], session: 'sample' };
 

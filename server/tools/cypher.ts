@@ -13,29 +13,43 @@ WHERE v.publishedAt >= $since AND v.publishedAt < $until
 RETURN v.id AS version, p.name AS package, v.publishedAt AS publishedAt, v.removed AS removed
 ORDER BY publishedAt LIMIT 40`;
 
-// Incident header for a run (not a tool): times, versions, the compromised account and the lockfile snapshot time.
+// Incident header for a run (not a tool): times, versions, the compromised account, the lockfile snapshot time and
+// the org ('guest' for a pasted repo's graph).
 export const INCIDENT = `MATCH (i:Incident {id: $incident})-[:INVOLVES]->(v:Version)
 OPTIONAL MATCH (i)-[:COMPROMISED]->(m:Maintainer)
 OPTIONAL MATCH (o:Org)
 RETURN i.id AS id, i.title AS title, m.name AS maintainer, i.firstPublishAt AS firstPublishAt, i.alertAt AS alertAt,
-  i.advisoryAt AS advisoryAt, i.removedAt AS removedAt, i.sources AS sources, o.snapshotAt AS snapshotAt,
+  i.advisoryAt AS advisoryAt, i.removedAt AS removedAt, i.sources AS sources, o.snapshotAt AS snapshotAt, o.id AS org,
   collect({id: v.id, publishedAt: v.publishedAt}) AS versions`;
+
+// Incident header (not a tool): the first moment this graph shows any repo exposed, under incident_exposure's rule (a
+// repo that locks a bad version starts at its LOCKED since, any other at its earliest ADMITS window). It anchors
+// "minutes ahead of the advisory" everywhere.
+export const FIRST_EXPOSURE = `MATCH (:Incident {id: $incident})-[:INVOLVES]->(bad:Version)<-[:RESOLVES_TO]-(d:Dep)
+RETURN d.repo AS repo, max(bad.publishedAt) AS since, true AS locked
+UNION ALL
+MATCH (:Incident {id: $incident})-[:INVOLVES]->(bad:Version)<-[a:ADMITS]-(p:Dep)-[r:REQUIRES]->(l:Dep)
+WHERE a.fromT < a.toT AND l.name = bad.name AND r.range = a.range
+RETURN p.repo AS repo, min(a.fromT) AS since, false AS locked`;
 
 // incident_exposure (1/3): every repo and its owning team, so CLEAN is counted too.
 export const REPOS = `MATCH (r:Repo) OPTIONAL MATCH (r)-[:OWNED_BY]->(t:Team)
 RETURN r.id AS repo, r.synthetic AS synthetic, t.name AS team ORDER BY repo`;
 
-// incident_exposure (2/3) LOCKED: a lockfile entry resolves to a malicious version that exists at $at.
+// incident_exposure (2/3) LOCKED: lockfile entries that resolve to a malicious version. A lockfile can't predate the
+// newest bad version it locks, so that publish time is the repo's `since`: before it, none of the repo's hits count.
 export const EXPOSURE_LOCKED = `MATCH (:Incident {id: $incident})-[:INVOLVES]->(bad:Version)<-[:RESOLVES_TO]-(d:Dep)
-WHERE bad.publishedAt <= $at
-RETURN d.repo AS repo, bad.id AS version, min(d.depth) AS depth, collect(DISTINCT d.dev) AS devFlags, bad.publishedAt AS since`;
+WITH d.repo AS repo, bad, min(d.depth) AS depth, collect(DISTINCT d.dev) AS devFlags
+WITH repo, max(bad.publishedAt) AS since, collect({version: bad.id, depth: depth, devFlags: devFlags}) AS hits
+UNWIND hits AS h
+RETURN repo, h.version AS version, h.depth AS depth, h.devFlags AS devFlags, since`;
 
 // incident_exposure (3/3) WOULD_PULL: a declared range resolved to a malicious version while it was live at $at.
-// The REQUIRES hop to the locked entry gives the dev/prod badge.
+// The REQUIRES hop to the locked entry gives the dev/prod badge and what the lockfile pins for that range instead.
 export const EXPOSURE_ADMITS = `MATCH (:Incident {id: $incident})-[:INVOLVES]->(bad:Version)<-[a:ADMITS]-(p:Dep)-[r:REQUIRES]->(l:Dep)
 WHERE a.fromT <= $at AND $at < a.toT AND l.name = bad.name AND r.range = a.range
 RETURN p.repo AS repo, bad.id AS version, min(p.depth) AS depth, collect(DISTINCT l.dev) AS devFlags,
-  collect(DISTINCT a.range)[0..3] AS ranges, min(a.fromT) AS since`;
+  collect(DISTINCT a.range)[0..3] AS ranges, min(a.fromT) AS since, collect(DISTINCT l.name + '@' + l.version) AS locked`;
 
 // maintainer_blast_radius: MAINTAINER tier. Repos whose lockfile contains any package the account maintains.
 export const MAINTAINER_BLAST_RADIUS = `MATCH (:Maintainer {name: $maintainer})-[:MAINTAINS]->(pkg:Package)<-[:OF]-(:Version)<-[:RESOLVES_TO]-(d:Dep)
@@ -69,14 +83,15 @@ WHERE bad.id IN $versions AND v.publishedAt <= $at AND coalesce(v.removed, false
 RETURN bad.id AS bad, bad.name AS package, v.version AS version, v.publishedAt AS publishedAt, coalesce(v.malicious, false) AS malicious`;
 
 // draft_remediation (2/2): the repo's ranges that lock or admit each bad version (the pin must satisfy all of them),
-// and whether the repo root declares it (npm rejects an override that conflicts with a direct dependency).
+// whether the repo root declares it (npm rejects an override that conflicts with a direct dependency), what the
+// lockfile pins for that range, and when the range stopped admitting the bad version.
 export const REMEDIATION_RANGES = `MATCH (bad:Version)<-[:RESOLVES_TO]-(d:Dep)<-[r:REQUIRES]-(p:Dep)
 WHERE bad.id IN $versions AND d.repo = $repo
-RETURN bad.id AS bad, r.range AS range, 'RESOLVES_TO' AS kind, p.path = '' AS direct
+RETURN bad.id AS bad, r.range AS range, 'RESOLVES_TO' AS kind, p.path = '' AS direct, bad.id AS locked, null AS until
 UNION
-MATCH (bad:Version)<-[a:ADMITS]-(p:Dep)
-WHERE bad.id IN $versions AND p.repo = $repo
-RETURN bad.id AS bad, a.range AS range, 'ADMITS' AS kind, p.path = '' AS direct`;
+MATCH (bad:Version)<-[a:ADMITS]-(p:Dep)-[r:REQUIRES]->(l:Dep)
+WHERE bad.id IN $versions AND p.repo = $repo AND l.name = bad.name AND r.range = a.range
+RETURN bad.id AS bad, a.range AS range, 'ADMITS' AS kind, p.path = '' AS direct, l.name + '@' + l.version AS locked, a.toT AS until`;
 
 // scanner_view (1/2): the "graph off" baseline. What an advisory-based scanner reports at $at (lockfile vs. OSV, one hop).
 export const SCANNER_VIEW = `MATCH (a:Advisory)-[:FLAGS]->(v:Version)<-[:RESOLVES_TO]-(d:Dep)
@@ -87,6 +102,13 @@ RETURN DISTINCT d.repo AS repo, v.id AS version, a.id AS advisory ORDER BY repo,
 export const NAME_GREP = `MATCH (:Incident {id: $incident})-[:INVOLVES]->(bad:Version)
 MATCH (d:Dep) WHERE d.name = bad.name
 RETURN count(DISTINCT d.repo) AS repos`;
+
+// Timeline (server only): every moment an exposure tier or scanner count can change. Between two of them every
+// incident_exposure / scanner_view answer is the same, so the 1-minute timeline runs those once per segment.
+export const CHANGE_TIMES = `MATCH (:Incident {id: $incident})-[:INVOLVES]->(v:Version) RETURN v.publishedAt AS t
+UNION MATCH (:Incident {id: $incident})-[:INVOLVES]->(:Version)<-[a:ADMITS]-(:Dep) RETURN a.fromT AS t
+UNION MATCH (:Incident {id: $incident})-[:INVOLVES]->(:Version)<-[a:ADMITS]-(:Dep) RETURN a.toT AS t
+UNION MATCH (a:Advisory) RETURN a.publishedAt AS t`;
 
 // recall_triage: this session's earlier assessments and remediation marks for the incident (S10: scoped by session).
 export const RECALL_TRIAGE = `MATCH (t:Triage {session: $session})-[:FOR]->(:Incident {id: $incident})

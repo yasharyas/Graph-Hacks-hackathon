@@ -13,7 +13,7 @@ for (const k of ['log', 'info', 'debug'] as const) console[k] = console.error; /
 
 const SCENARIOS = Object.keys(JSON.parse(readFileSync(new URL('../data/org/acme.json', import.meta.url), 'utf8')).scenarios) as ScenarioId[];
 const TIMES = new Set(['at', 'since', 'until']);
-const CAP = 4000; // chars of summary + rows per result; the Cypher that ran comes on top, verbatim
+const CAP = 6000; // chars of summary + rows per result (all 21 incident_exposure rows, lockfile pins included); the Cypher that ran comes on top, verbatim
 
 // Fit rows into the cap: keep everything if it fits, else shorten long lists, else drop trailing rows (worst tiers sort first).
 const slim = (v: unknown, n: number): unknown =>

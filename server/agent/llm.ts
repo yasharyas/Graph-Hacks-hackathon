@@ -8,7 +8,8 @@ export type ToolSpec = { name: string; description: string; parameters: Record<s
 export type ToolCall = { id: string; name: string; args: Record<string, unknown> };
 // `chain` overrides LLM_CHAIN for this call only (e.g. pin the provider a tool loop started on).
 export type ChatReq = { messages: Msg[]; tools?: ToolSpec[]; maxTokens?: number; signal?: AbortSignal; chain?: string };
-export type ChatRes = { text: string; toolCalls: ToolCall[]; provider: string; raw: unknown };
+// finish: the provider's finish_reason ('length' = cut by max_tokens, so the text is truncated).
+export type ChatRes = { text: string; toolCalls: ToolCall[]; provider: string; raw: unknown; finish?: string | null };
 export type Failure = { provider: string; reason: string };
 
 const DEFAULT_CHAIN = 'groq:qwen/qwen3.8-27b,groq:openai/gpt-oss-120b,gemini:gemini-3.5-flash-lite';
@@ -63,7 +64,9 @@ async function call(base: string, key: string, model: string, req: ChatReq, fetc
     signal,
   });
   if (!res.ok) return (await res.text()).includes('tool_use_failed') ? 'tool_use_failed' : `HTTP ${res.status}`;
-  const msg = ((await res.json()) as { choices?: { message?: Record<string, any> }[] })?.choices?.[0]?.message;
+  const choice = ((await res.json()) as { choices?: { message?: Record<string, any>; finish_reason?: unknown }[] })?.choices?.[0];
+  const msg = choice?.message;
+  const finish = typeof choice?.finish_reason === 'string' ? choice.finish_reason : null;
   if (!msg || typeof msg !== 'object') return 'bad response';
   try {
     const toolCalls = ((msg.tool_calls ?? []) as any[]).map((tc) => {
@@ -71,7 +74,7 @@ async function call(base: string, key: string, model: string, req: ChatReq, fetc
       if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error();
       return { id: String(tc.id ?? ''), name: String(tc.function.name), args };
     });
-    return { text: stripThink(typeof msg.content === 'string' ? msg.content : ''), toolCalls, provider: '', raw: msg };
+    return { text: stripThink(typeof msg.content === 'string' ? msg.content : ''), toolCalls, provider: '', raw: msg, finish };
   } catch {
     return 'bad tool call'; // malformed tool-call arguments behave like tool_use_failed: try the next provider
   }

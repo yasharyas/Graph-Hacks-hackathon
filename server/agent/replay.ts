@@ -1,12 +1,12 @@
-// Recorded narration (data/replays/<scenario>.json, keyed by the scenario clock rounded to the minute). The tools
-// always re-run live: a recording replaces the template only when the guard passes it against the fresh evidence.
-// RECORD=1 saves every live narration. Fallback chain: live -> replay -> template.
+// Recorded analyst notes (data/replays/<scenario>.json, keyed by the scenario clock rounded to the minute). The tools
+// and the deterministic narration text always re-run live: a recorded note is shown only when no live note exists and
+// it passes the guard in full against the fresh evidence. RECORD=1 saves every live note. Note chain: live -> replay -> none.
 import { readFileSync, writeFileSync } from 'node:fs';
 import type { ScenarioId, TriageEvent } from '../../shared/events.ts';
 import { guard, type Evidence } from './guard.ts';
-import { evidenceSet } from './narrate.ts';
+import { acceptNote, evidenceSet } from './narrate.ts';
 
-type Recording = { text: string; provider: string | null };
+type Recording = { note: string; provider: string | null };
 const file = (s: ScenarioId) => new URL(`../../data/replays/${s}.json`, import.meta.url); // s is a validated enum value
 const minute = (at: number) => new Date(Math.round(at / 60_000) * 60_000).toISOString().slice(0, 16) + 'Z';
 
@@ -26,27 +26,24 @@ export function guardEvent(text: string, ev: Evidence) {
   return { type: 'guard' as const, verified: g.verified, total: g.total, flagged: g.flagged, claims: g.claims.map((c) => ({ text: c.text, ok: c.ok })) };
 }
 
-// Wraps a triage stream: records or replays the narration (`replay` false for guest graphs, whose evidence no recording
-// describes) and re-emits the guard event with claims for whichever text was shown.
+// Wraps a triage stream: records or replays the note (`replay` false for guest graphs, whose evidence no recording
+// describes) and re-emits the guard event over the text plus whichever note was shown.
 export async function* narrated(events: AsyncIterable<TriageEvent>, s: ScenarioId, at: number, replay: boolean): AsyncGenerator<TriageEvent> {
   let ev: Evidence | undefined;
-  let text = '';
+  let checked = '';
   for await (const e of events) {
     if (e.type === 'report') ev = evidenceSet(e.report);
     if (e.type === 'narration') {
-      if (e.mode === 'live' && process.env.RECORD === '1') record(s, at, { text: e.text, provider: e.provider });
+      if (e.mode === 'live' && e.note && process.env.RECORD === '1') record(s, at, { note: e.note, provider: e.provider });
       const r = e.mode === 'template' && replay && ev ? recorded(s, at) : undefined;
-      // Same bar as a live narration in triage.ts: no unverified entity or citation (an unverified number is struck in the UI).
-      if (r && ev && !guard(r.text, ev).claims.some((c) => !c.ok && c.kind !== 'number')) {
-        text = r.text;
-        yield { type: 'narration', mode: 'replay', provider: r.provider, text };
-        continue;
-      }
-      text = e.text;
+      const note = r && ev ? acceptNote(r.note, ev) : null;
+      const shown = note ? { ...e, mode: 'replay' as const, provider: r!.provider, note } : e;
+      checked = shown.note ? `${shown.text}\n${shown.note}` : shown.text;
+      yield shown;
+      continue;
     }
     if (e.type === 'guard' && ev) {
-      const g = guardEvent(text, ev); // a variable, not a literal: `claims` is not in the contract type yet
-      yield g;
+      yield guardEvent(checked, ev);
       continue;
     }
     yield e;

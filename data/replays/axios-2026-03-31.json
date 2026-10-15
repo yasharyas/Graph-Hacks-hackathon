@@ -1,6 +1,6 @@
 {
-  "2026-03-31T01:30Z": {
-    "text": "Verdict: `axios@1.14.1` and `plain-crypto-js@4.2.1` are malicious; `acme/billing-api` is LOCKED [E1].\nNotify: `Payments`, `Platform`, `Docs`, `API Clients`, `QA`, `Web`.\nDo: Rotate secrets and rebuild `acme/billing-api` [E1]. Fresh resolves would fetch `axios@1.14.1` for `github/docs` [E3], `appium/appium` [E4], `swagger-api/swagger-ui` [E5], `Kong/insomnia`, `nightwatchjs/nightwatch`, and `nestjs/nest`. `louislam/uptime-kuma` would fetch `axios@0.30.4` and `axios@1.14.1` [E2]. `twbs/bootstrap` would fetch `axios@0.30.4`.",
-    "provider": "groq:qwen/qwen3.8-27b"
-  }
+ "2026-03-31T01:30Z": {
+  "note": "Only `acme/billing-api` has the malicious `axios@1.14.1` and `plain-crypto-js@4.2.1` installed [E1], while 9 other repos would fetch malicious versions on a fresh resolve.",
+  "provider": "gemini:gemini-3.5-flash-lite"
+ }
 }

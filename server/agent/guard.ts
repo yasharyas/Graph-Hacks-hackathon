@@ -2,7 +2,8 @@
 // Contract: test/guard.test.ts. One left-to-right tokenizer pass (every alternative starts on a different character,
 // no nested quantifiers), then each token is classified by an anchored regex. Tokens are disjoint, so claims never
 // overlap and nothing backtracks quadratically, whatever the model emits.
-export type Evidence = { entities: Set<string>; numbers: Set<number>; pathIds: Set<string> };
+// reach: exposed repos per malicious version, for the note's count-to-version pairing check (narrate.ts).
+export type Evidence = { entities: Set<string>; numbers: Set<number>; pathIds: Set<string>; reach?: Map<string, number> };
 export type Claim = { text: string; start: number; end: number; kind: 'entity' | 'number' | 'cite'; ok: boolean };
 
 // `one-line backtick span` (no space just inside the ticks, so a stray tick can't pair across prose) | [E<n>] or

@@ -50,8 +50,8 @@ Why one `Dep` node per lockfile location instead of shared `Version -> Version` 
 
 ## The agent
 
-- **Triage** (default): a deterministic, graph-driven playbook (suspect versions -> exposure -> blast radius -> paths -> owners -> remediation -> concentration -> scanner view), then **one** LLM call narrates the evidence. A guard checks every claim (repos, `name@version`, counts, `[E#]` citations) against the tool results; anything not returned by a graph query is struck through. Free tiers: Groq `qwen/qwen3.8-27b` -> Groq `gpt-oss-120b` -> Gemini `3.5-flash-lite` -> recorded replay -> template narrator.
-- **Ask**: a bounded tool loop (4 LLM calls, 6 tool calls) where the model picks graph tools itself.
+- **Triage** (default): a deterministic, graph-driven playbook (suspect versions -> exposure -> blast radius -> paths -> owners -> remediation -> concentration -> scanner view). The verdict, notify list and fix steps are built straight from those results, so they are complete with no LLM at all. **One** LLM call then adds a short analyst note. A guard checks every claim (repos, `name@version`, counts, `[E#]` citations) against the tool results, and a note with any unverified claim is dropped. Free tiers: Groq `qwen/qwen3.8-27b` -> Groq `gpt-oss-120b` -> Gemini `3.5-flash-lite` -> recorded replay -> no note.
+- **Ask**: a bounded tool loop (4 LLM calls, 6 tool calls) where the model picks graph tools itself. For list questions ("which exposures are prod-only?") the server runs `filter_exposures` first and replaces any answer that silently drops matches.
 - **MCP**: the same read-only tools over stdio for Claude Code / Claude Desktop (`docs/mcp.md`).
 
 ## Every Cypher query
@@ -84,15 +84,28 @@ ORDER BY publishedAt LIMIT 40
 
 #### `INCIDENT`
 
-Incident header for a run (not a tool): times, versions, the compromised account and the lockfile snapshot time.
+Incident header for a run (not a tool): times, versions, the compromised account, the lockfile snapshot time and the org ('guest' for a pasted repo's graph).
 
 ```cypher
 MATCH (i:Incident {id: $incident})-[:INVOLVES]->(v:Version)
 OPTIONAL MATCH (i)-[:COMPROMISED]->(m:Maintainer)
 OPTIONAL MATCH (o:Org)
 RETURN i.id AS id, i.title AS title, m.name AS maintainer, i.firstPublishAt AS firstPublishAt, i.alertAt AS alertAt,
-  i.advisoryAt AS advisoryAt, i.removedAt AS removedAt, i.sources AS sources, o.snapshotAt AS snapshotAt,
+  i.advisoryAt AS advisoryAt, i.removedAt AS removedAt, i.sources AS sources, o.snapshotAt AS snapshotAt, o.id AS org,
   collect({id: v.id, publishedAt: v.publishedAt}) AS versions
+```
+
+#### `FIRST_EXPOSURE`
+
+Incident header (not a tool): the first moment this graph shows any repo exposed, under incident_exposure's rule (a repo that locks a bad version starts at its LOCKED since, any other at its earliest ADMITS window). It anchors "minutes ahead of the advisory" everywhere.
+
+```cypher
+MATCH (:Incident {id: $incident})-[:INVOLVES]->(bad:Version)<-[:RESOLVES_TO]-(d:Dep)
+RETURN d.repo AS repo, max(bad.publishedAt) AS since, true AS locked
+UNION ALL
+MATCH (:Incident {id: $incident})-[:INVOLVES]->(bad:Version)<-[a:ADMITS]-(p:Dep)-[r:REQUIRES]->(l:Dep)
+WHERE a.fromT < a.toT AND l.name = bad.name AND r.range = a.range
+RETURN p.repo AS repo, min(a.fromT) AS since, false AS locked
 ```
 
 #### `REPOS`
@@ -106,23 +119,25 @@ RETURN r.id AS repo, r.synthetic AS synthetic, t.name AS team ORDER BY repo
 
 #### `EXPOSURE_LOCKED`
 
-incident_exposure (2/3) LOCKED: a lockfile entry resolves to a malicious version that exists at $at.
+incident_exposure (2/3) LOCKED: lockfile entries that resolve to a malicious version. A lockfile can't predate the newest bad version it locks, so that publish time is the repo's `since`: before it, none of the repo's hits count.
 
 ```cypher
 MATCH (:Incident {id: $incident})-[:INVOLVES]->(bad:Version)<-[:RESOLVES_TO]-(d:Dep)
-WHERE bad.publishedAt <= $at
-RETURN d.repo AS repo, bad.id AS version, min(d.depth) AS depth, collect(DISTINCT d.dev) AS devFlags, bad.publishedAt AS since
+WITH d.repo AS repo, bad, min(d.depth) AS depth, collect(DISTINCT d.dev) AS devFlags
+WITH repo, max(bad.publishedAt) AS since, collect({version: bad.id, depth: depth, devFlags: devFlags}) AS hits
+UNWIND hits AS h
+RETURN repo, h.version AS version, h.depth AS depth, h.devFlags AS devFlags, since
 ```
 
 #### `EXPOSURE_ADMITS`
 
-incident_exposure (3/3) WOULD_PULL: a declared range resolved to a malicious version while it was live at $at. The REQUIRES hop to the locked entry gives the dev/prod badge.
+incident_exposure (3/3) WOULD_PULL: a declared range resolved to a malicious version while it was live at $at. The REQUIRES hop to the locked entry gives the dev/prod badge and what the lockfile pins for that range instead.
 
 ```cypher
 MATCH (:Incident {id: $incident})-[:INVOLVES]->(bad:Version)<-[a:ADMITS]-(p:Dep)-[r:REQUIRES]->(l:Dep)
 WHERE a.fromT <= $at AND $at < a.toT AND l.name = bad.name AND r.range = a.range
 RETURN p.repo AS repo, bad.id AS version, min(p.depth) AS depth, collect(DISTINCT l.dev) AS devFlags,
-  collect(DISTINCT a.range)[0..3] AS ranges, min(a.fromT) AS since
+  collect(DISTINCT a.range)[0..3] AS ranges, min(a.fromT) AS since, collect(DISTINCT l.name + '@' + l.version) AS locked
 ```
 
 #### `MAINTAINER_BLAST_RADIUS`
@@ -182,16 +197,16 @@ RETURN bad.id AS bad, bad.name AS package, v.version AS version, v.publishedAt A
 
 #### `REMEDIATION_RANGES`
 
-draft_remediation (2/2): the repo's ranges that lock or admit each bad version (the pin must satisfy all of them), and whether the repo root declares it (npm rejects an override that conflicts with a direct dependency).
+draft_remediation (2/2): the repo's ranges that lock or admit each bad version (the pin must satisfy all of them), whether the repo root declares it (npm rejects an override that conflicts with a direct dependency), what the lockfile pins for that range, and when the range stopped admitting the bad version.
 
 ```cypher
 MATCH (bad:Version)<-[:RESOLVES_TO]-(d:Dep)<-[r:REQUIRES]-(p:Dep)
 WHERE bad.id IN $versions AND d.repo = $repo
-RETURN bad.id AS bad, r.range AS range, 'RESOLVES_TO' AS kind, p.path = '' AS direct
+RETURN bad.id AS bad, r.range AS range, 'RESOLVES_TO' AS kind, p.path = '' AS direct, bad.id AS locked, null AS until
 UNION
-MATCH (bad:Version)<-[a:ADMITS]-(p:Dep)
-WHERE bad.id IN $versions AND p.repo = $repo
-RETURN bad.id AS bad, a.range AS range, 'ADMITS' AS kind, p.path = '' AS direct
+MATCH (bad:Version)<-[a:ADMITS]-(p:Dep)-[r:REQUIRES]->(l:Dep)
+WHERE bad.id IN $versions AND p.repo = $repo AND l.name = bad.name AND r.range = a.range
+RETURN bad.id AS bad, a.range AS range, 'ADMITS' AS kind, p.path = '' AS direct, l.name + '@' + l.version AS locked, a.toT AS until
 ```
 
 #### `SCANNER_VIEW`
@@ -212,6 +227,17 @@ scanner_view (2/2): name grep. Repos where a bad package's name appears at all, 
 MATCH (:Incident {id: $incident})-[:INVOLVES]->(bad:Version)
 MATCH (d:Dep) WHERE d.name = bad.name
 RETURN count(DISTINCT d.repo) AS repos
+```
+
+#### `CHANGE_TIMES`
+
+Timeline (server only): every moment an exposure tier or scanner count can change. Between two of them every incident_exposure / scanner_view answer is the same, so the 1-minute timeline runs those once per segment.
+
+```cypher
+MATCH (:Incident {id: $incident})-[:INVOLVES]->(v:Version) RETURN v.publishedAt AS t
+UNION MATCH (:Incident {id: $incident})-[:INVOLVES]->(:Version)<-[a:ADMITS]-(:Dep) RETURN a.fromT AS t
+UNION MATCH (:Incident {id: $incident})-[:INVOLVES]->(:Version)<-[a:ADMITS]-(:Dep) RETURN a.toT AS t
+UNION MATCH (a:Advisory) RETURN a.publishedAt AS t
 ```
 
 #### `RECALL_TRIAGE`

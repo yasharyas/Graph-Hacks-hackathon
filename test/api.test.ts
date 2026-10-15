@@ -3,9 +3,11 @@
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
+import { guard } from '../server/agent/guard.ts';
 import type { ChatReq, ChatRes, Msg } from '../server/agent/llm.ts';
+import { evidenceSet } from '../server/agent/narrate.ts';
 import { close, db } from '../server/graph/client.ts';
 import { build } from '../server/ingest/build.ts';
 import * as guests from '../server/ingest/guest.ts';
@@ -69,7 +71,11 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
 
   test('health, scenarios, JSON 404 for unknown /api routes, server-side request ids (S12)', async () => {
     assert.deepEqual(await (await get('/api/health')).json(), { ok: true });
-    assert.deepEqual((await (await get('/api/scenarios')).json()).map((s: { id: string }) => s.id), [QIX, 'axios-2026-03-31']);
+    const scenarios = await (await get('/api/scenarios')).json();
+    assert.deepEqual(scenarios.map((s: { id: string }) => s.id), [QIX, 'axios-2026-03-31']);
+    // One "minutes ahead" everywhere: advisoryAt - firstExposureAt, computed per graph (axios: 00:21:58, not 23:59).
+    assert.deepEqual(scenarios.map((s: { advisoryAt: number; firstExposureAt: number }) => Math.floor((s.advisoryAt - s.firstExposureAt) / 60_000)), [74, 105]);
+    assert.deepEqual(scenarios.map((s: { firstExposureAt: number }) => new Date(s.firstExposureAt).toISOString()), ['2025-09-08T13:12:10.343Z', '2026-03-31T00:21:58.168Z']);
     const nf = await get('/api/nope', { 'x-request-id': 'attacker-chosen' });
     assert.equal(nf.status, 404);
     const body = await nf.json();
@@ -78,20 +84,36 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
     assert.equal(nf.headers.get('x-request-id'), null);
   });
 
-  test('timeline is a 2-minute grid and its 13:30Z point equals /api/exposure at 13:30Z', async () => {
+  test('timeline is a 1-minute grid; every point checked equals /api/exposure at that minute (both scenarios)', async () => {
+    const t0 = performance.now();
     const t = await (await get(`/api/timeline?scenario=${QIX}`)).json();
+    const ms = performance.now() - t0;
+    assert.ok(ms < 5000, `timeline took ${Math.round(ms)} ms`);
     assert.equal(t.points[0].at, Date.parse('2025-09-08T13:00:00Z'));
-    assert.ok(t.points.every((p: { at: number }, i: number) => i === 0 || p.at - t.points[i - 1].at === 120_000));
-    assert.ok(t.points.at(-1).at > t.incident.removedAt + 28 * 60_000);
-    const p = t.points.find((x: { at: number }) => x.at === QAT);
-    const x = await (await get(`/api/exposure?scenario=${QIX}&at=${QAT}`)).json();
-    assert.deepEqual(p.counts, x.counts);
-    assert.equal(p.scanner, x.scanner.length);
-    assert.ok(x.counts.WOULD_PULL > 0);
+    assert.ok(t.points.every((p: { at: number }, i: number) => i === 0 || p.at - t.points[i - 1].at === 60_000));
+    assert.ok(t.points.at(-1).at >= t.incident.removedAt + 29 * 60_000);
+    const point = (tl: typeof t, at: number) => tl.points.find((x: { at: number }) => x.at === at);
+    const same = async (tl: typeof t, scenario: string, at: number) => {
+      const x = await (await get(`/api/exposure?scenario=${scenario}&at=${at}`)).json();
+      assert.deepEqual(point(tl, at).counts, x.counts, new Date(at).toISOString());
+      assert.equal(point(tl, at).scanner, x.scanner.length, new Date(at).toISOString());
+      return x;
+    };
+    // the minutes QA saw disagree (13:13, 15:15), the advisory minute, and every 7th minute across the window
+    for (const hhmm of ['13:12', '13:13', '13:14', '13:30', '14:26', '14:27', '15:14', '15:15', '15:30']) await same(t, QIX, Date.parse(`2025-09-08T${hhmm}:00Z`));
+    for (let i = 0; i < t.points.length; i += 7) await same(t, QIX, t.points[i].at);
+    assert.ok((await same(t, QIX, QAT)).counts.WOULD_PULL > 0);
+    // The first exposed minute is the first one at or after firstExposureAt, in both scenarios.
+    for (const scenario of [QIX, 'axios-2026-03-31']) {
+      const tl = scenario === QIX ? t : await (await get(`/api/timeline?scenario=${scenario}`)).json();
+      const exposed = (p: { counts: Record<string, number> }) => p.counts.LOCKED + p.counts.WOULD_PULL > 0;
+      assert.equal(tl.points.find(exposed).at, Math.ceil(tl.incident.firstExposureAt / 60_000) * 60_000, scenario);
+      await same(tl, scenario, tl.points.find(exposed).at - 60_000);
+    }
   });
 
   for (const [scenario, at, key] of [[QIX, QAT, '2025-09-08T13:30Z'], ['axios-2026-03-31', undefined, '2026-03-31T01:30Z']] as const) {
-    test(`triage SSE ${scenario}: start, tools, report, replayed narration, guard with claims, done; counts equal /api/exposure`, async () => {
+    test(`triage SSE ${scenario}: start, tools, report, deterministic text + replayed note, guard over both, done; counts equal /api/exposure`, async () => {
       const { evs, report } = await triageRun({ scenario, ...(at && { at }) });
       assert.equal(evs[0].type, 'start');
       assert.deepEqual(evs.slice(-4).map((e) => e.type), ['report', 'narration', 'guard', 'done']);
@@ -99,10 +121,25 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
       assert.ok(tools.length > 0 && tools.every((e, i) => e.type === (i % 2 ? 'tool_result' : 'tool_start')), tools.map((e) => e.type).join());
       const narration = of(evs, 'narration');
       assert.equal(narration.mode, 'replay');
-      assert.equal(narration.text, JSON.parse(readFileSync(`data/replays/${scenario}.json`, 'utf8'))[key].text);
+      assert.equal(narration.note, JSON.parse(readFileSync(`data/replays/${scenario}.json`, 'utf8'))[key].note);
+      assert.ok(narration.note!.split(/\s+/).length <= 40);
+      assert.match(narration.text, /^Verdict: .*\nWhy: .*\nNotify: .*\nDo: 1\) /s);
+      assert.doesNotMatch(narration.text + narration.note, /\*\*/);
+      assert.equal(narration.at, report.at);
       const g = of(evs, 'guard') as Extract<TriageEvent, { type: 'guard' }> & { claims: { text: string; ok: boolean }[] };
       assert.deepEqual(g.flagged, []);
       assert.equal(g.claims.length, g.total);
+      assert.equal(g.total, guard(`${narration.text}\n${narration.note}`, evidenceSet(report)).total, 'claims cover the text and the note');
+      // one "minutes ahead", stamped on start and report alike; scope; a path and a fix for every exposed repo
+      const start = of(evs, 'start');
+      assert.equal(start.incident.firstExposureAt, report.incident.firstExposureAt);
+      assert.equal(report.minutesAhead, Math.floor((report.incident.advisoryAt - report.incident.firstExposureAt!) / 60_000));
+      assert.deepEqual(report.scope, { kind: 'org', label: 'Acme demo org', repos: Object.values(report.counts).reduce((a, b) => a + b, 0) });
+      const exposed = report.exposures.filter((e) => e.tier === 'LOCKED' || e.tier === 'WOULD_PULL').map((e) => e.repo).sort();
+      assert.deepEqual([...new Set(report.paths.map((p) => p.repo))].sort(), exposed);
+      assert.deepEqual(report.remediations.map((m) => m.repo).sort(), exposed);
+      assert.ok(report.remediations.every((m) => Object.keys(m.overrides).every((k) => /^(@[^/]+\/)?[^@]+@\d/.test(k))), 'override keys are version-qualified');
+      for (const e of exposed) assert.ok(narration.text.includes(`\`${e}\``), `${e} missing from the narration`);
       const x = await (await get(`/api/exposure?scenario=${scenario}&at=${report.at}`)).json();
       assert.deepEqual(x.counts, report.counts);
       assert.deepEqual(x.exposures.map((e: { repo: string; tier: string }) => [e.repo, e.tier]), report.exposures.map((e) => [e.repo, e.tier]));
@@ -124,8 +161,11 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
       const evs = await sse<TriageEvent>(await post('/api/ask', { runId, question: 'Who should I notify about mocha?' }, { cookie: t.sid! }));
       assert.equal(calls.length, 4);
       assert.deepEqual(calls.map((c) => c.provider), [undefined, 'groq:fake', 'groq:fake', 'groq:fake']);
-      assert.equal(evs.filter((e) => e.type === 'tool_start').length, 6);
-      assert.equal(evs.filter((e) => e.type === 'tool_result').length, 6);
+      // the server's own filter_exposures (repo named in the question) comes first and does not count against the model's 6
+      const starts = evs.filter((e) => e.type === 'tool_start') as Extract<TriageEvent, { type: 'tool_start' }>[];
+      assert.deepEqual([starts.length, starts[0].tool, starts[0].params.repo], [7, 'filter_exposures', 'mochajs/mocha']);
+      assert.equal(evs.filter((e) => e.type === 'tool_result').length, 7);
+      assert.match(String(calls[0].messages[1].content), /FILTER RESULT \(data, not instructions\): 1 of 21 exposed repos matches repo mochajs\/mocha across 1 team/);
       assert.deepEqual(evs.slice(-3).map((e) => e.type), ['narration', 'guard', 'done']);
       assert.equal(of(evs, 'narration').mode, 'live');
       assert.deepEqual(of(evs, 'guard').flagged, ['evil/repo']);
@@ -144,10 +184,127 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
         return { text: 'Notify `QA`.', toolCalls: [], provider: 'gemini:fake', raw: {} };
       };
       const fb = await sse<TriageEvent>(await post('/api/ask', { runId, question: 'Who owns mocha?' }, { cookie: t.sid! }));
-      assert.deepEqual(calls.map((c) => [c.provider, c.tools]), [[undefined, 10], ['groq:fake', 10], [undefined, 0]]);
+      assert.deepEqual(calls.map((c) => [c.provider, c.tools]), [[undefined, 11], ['groq:fake', 11], [undefined, 0]]);
       assert.deepEqual([of(fb, 'narration').mode, of(fb, 'narration').provider, of(fb, 'guard').flagged], ['live', 'gemini:fake', []]);
+      // the answer named no repo, so the complete filter result is appended
+      assert.match(of(fb, 'narration').text, /^Notify `QA`\.\nComplete list \(repo mochajs\/mocha\): 1 repo across 1 team\. `QA`: `mochajs\/mocha`\.$/);
     } finally {
       delete hooks.chat;
+    }
+  });
+
+  test('ask truthfulness: "which exposures are prod-only and who owns them?" names all 14 repos across 6 teams, even when the model answers wrongly', async () => {
+    const t = await triageRun({ scenario: QIX, at: QAT });
+    const runId = of(t.evs, 'start').runId;
+    const prod = t.report.exposures.filter((e) => e.tier !== 'CLEAN' && !e.dev);
+    assert.deepEqual([prod.length, new Set(prod.map((e) => e.team)).size], [14, 6]); // what the table's Prod-only filter shows
+    hooks.chat = async (): Promise<ChatRes> => ({ text: '**`acme/checkout-web`** is the only prod-only exposure; owned by `Payments`.', toolCalls: [], provider: 'groq:fake', raw: {} });
+    try {
+      const evs = await sse<TriageEvent>(await post('/api/ask', { runId, question: 'which exposures are prod-only and who owns them?' }, { cookie: t.sid! }));
+      const filter = of(evs, 'tool_result').result;
+      assert.deepEqual([filter.tool, filter.params.prod_only, filter.rows.length], ['filter_exposures', true, 14]);
+      assert.ok(filter.rows.every((r) => typeof r.team === 'string' && Array.isArray(r.locked) && /^E\d+$/.test(String(r.path))), 'team, locked versions and path id on every row');
+      const n = of(evs, 'narration');
+      assert.equal(n.mode, 'template'); // the incomplete answer was replaced by the deterministic list
+      assert.match(n.text, /^Complete list \(prod only\): 14 repos across 6 teams\. /);
+      for (const e of prod) assert.ok(n.text.includes(`\`${e.repo}\``), `${e.repo} missing`);
+      for (const team of new Set(prod.map((e) => e.team!))) assert.ok(n.text.includes(`\`${team}\``), `${team} missing`);
+      assert.doesNotMatch(n.text, /\*\*|only prod-only/);
+      assert.deepEqual(of(evs, 'guard').flagged, []);
+
+      // a model that says "N of M" is trusted to be partial on purpose
+      hooks.chat = async (): Promise<ChatRes> => ({ text: '3 of 14 prod-only repos: `acme/checkout-web`, `github/docs`, `mochajs/mocha` (+11 more).', toolCalls: [], provider: 'groq:fake', raw: {} });
+      const partial = of(await sse<TriageEvent>(await post('/api/ask', { runId, question: 'which exposures are prod-only?' }, { cookie: t.sid! })), 'narration');
+      assert.equal(partial.mode, 'live');
+      assert.doesNotMatch(partial.text, /Complete list/);
+
+      // an unfiltered list question: every one of the 21 rows reaches the model inside the tool budget
+      let seen = '';
+      hooks.chat = async (req: ChatReq): Promise<ChatRes> => ((seen = String(req.messages[1].content)), { text: '21 repos.', toolCalls: [], provider: 'groq:fake', raw: {} });
+      await sse<TriageEvent>(await post('/api/ask', { runId, question: 'list all exposed repos with their owners' }, { cookie: t.sid! }));
+      const all = t.report.exposures.filter((e) => e.tier !== 'CLEAN');
+      assert.equal(all.length, 21);
+      for (const e of all) assert.ok(seen.includes(`["${e.repo}","${e.tier}"`), `${e.repo} did not reach the model`);
+      assert.ok(seen.length < 1800 + 4000 + 200, `${seen.length} chars`);
+    } finally {
+      delete hooks.chat;
+    }
+  });
+
+  test('ask: explain_path and draft_remediation work for any exposed repo, whatever casing or version the model sends', async () => {
+    const t = await triageRun({ scenario: QIX, at: QAT });
+    const runId = of(t.evs, 'start').runId;
+    let k = 0;
+    hooks.chat = async (): Promise<ChatRes> => {
+      if (++k > 1) return { text: 'Path and fix for `Kong/insomnia` are above.', toolCalls: [], provider: 'groq:fake', raw: {} };
+      const toolCalls = [
+        { id: 'a', name: 'explain_path', args: { repo: 'kong/insomnia', version: 'lodash@4.17.21' } },
+        { id: 'b', name: 'draft_remediation', args: { repo: 'KONG/insomnia', versions: [] } },
+      ];
+      return { text: '', toolCalls, provider: 'groq:fake', raw: { role: 'assistant', content: null, tool_calls: toolCalls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: JSON.stringify(c.args) } })) } };
+    };
+    try {
+      const evs = await sse<TriageEvent>(await post('/api/ask', { runId, question: 'show the path and fix for Kong/insomnia' }, { cookie: t.sid! }));
+      const results = evs.filter((e) => e.type === 'tool_result').map((e) => (e as Extract<TriageEvent, { type: 'tool_result' }>).result);
+      const kong = t.report.exposures.find((e) => e.repo === 'Kong/insomnia')!;
+      const path = results.find((r) => r.tool === 'explain_path')!;
+      assert.deepEqual([path.params.repo, path.params.version], ['Kong/insomnia', kong.versions[0]]);
+      assert.ok(path.rows.length >= 1 && path.rows.every((r) => Array.isArray(r.chain) && 'range' in r && 'hops' in r));
+      assert.equal(new Set(path.rows.map((r) => JSON.stringify([r.kind, r.range, r.chain]))).size, path.rows.length, 'explain_path rows are deduplicated');
+      const fix = results.find((r) => r.tool === 'draft_remediation')!;
+      assert.deepEqual(fix.params.versions, kong.versions);
+      assert.ok(Object.keys(fix.rows[0].overrides as object).length > 0);
+      assert.deepEqual(of(evs, 'guard').flagged, []);
+    } finally {
+      delete hooks.chat;
+    }
+  });
+
+  test('triage history: each run in a session is remembered (tiers, no action) without hiding a later remediation mark', async () => {
+    const a = await triageRun({ scenario: QIX, at: QAT });
+    const recall = (evs: TriageEvent[]) => evs.filter((e) => e.type === 'tool_result').map((e) => (e as Extract<TriageEvent, { type: 'tool_result' }>).result).find((r) => r.tool === 'recall_triage')!;
+    assert.equal(recall(a.evs).summary, 'no earlier assessments in this session');
+    const b = await triageRun({ scenario: QIX, at: QAT }, { cookie: a.sid! });
+    assert.equal(recall(b.evs).rows.length, 21);
+    assert.match(recall(b.evs).summary, /^21 repos assessed earlier in this session; 0 marked remediated$/);
+    assert.ok(recall(b.evs).rows.every((r) => r.action === null && typeof r.tier === 'string'));
+    await post('/api/remediate', { scenario: QIX, repo: 'remy/nodemon', action: 'remediated' }, { cookie: a.sid! });
+    await triageRun({ scenario: QIX, at: QAT }, { cookie: a.sid! }); // writes a newer plain record for nodemon
+    const d = await triageRun({ scenario: QIX, at: QAT }, { cookie: a.sid! });
+    assert.match(recall(d.evs).summary, /1 marked remediated: remy\/nodemon/);
+    assert.equal(d.report.exposures.find((e) => e.repo === 'remy/nodemon')!.remediated?.action, 'remediated');
+    assert.match(of(d.evs, 'narration').text, /Marked remediated: `remy\/nodemon`\./);
+  });
+
+  test('responses: gzip for JSON and static files, never for SSE; immutable cache for hashed assets, no-cache for index.html', async () => {
+    const created = !existsSync('web/dist');
+    if (created) {
+      mkdirSync('web/dist/assets', { recursive: true });
+      writeFileSync('web/dist/index.html', `<!doctype html><title>t</title>${' '.repeat(2048)}`);
+      writeFileSync('web/dist/assets/app-0a1b2c3d.js', `console.log(1);${' '.repeat(4096)}`);
+    }
+    try {
+      const gz = { 'accept-encoding': 'gzip, deflate, br' };
+      const tl = await get(`/api/timeline?scenario=${QIX}`, gz);
+      assert.equal(tl.headers.get('content-encoding'), 'gzip');
+      const body = await new Response(tl.body!.pipeThrough(new DecompressionStream('gzip'))).json(); // app.request() returns the encoded bytes
+      assert.ok(body.points.length > 100);
+      const sseRes = await post('/api/triage', { scenario: QIX, at: QAT }, gz);
+      assert.equal(sseRes.headers.get('content-type'), 'text/event-stream');
+      assert.equal(sseRes.headers.get('content-encoding'), null);
+      await sse<TriageEvent>(sseRes);
+      const asset = readdirSync('web/dist/assets').find((f) => /\.js$/.test(f))!;
+      const js = await get(`/assets/${asset}`, gz);
+      assert.equal(js.status, 200);
+      assert.equal(js.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+      assert.equal(js.headers.get('content-encoding'), 'gzip');
+      for (const path of ['/', '/index.html', '/some/client/route']) {
+        const html = await get(path, gz);
+        assert.equal(html.status, 200, path);
+        assert.equal(html.headers.get('cache-control'), 'no-cache', path);
+      }
+    } finally {
+      if (created) rmSync('web/dist', { recursive: true, force: true });
     }
   });
 
@@ -167,7 +324,14 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
     assert.ok(e.ranges.includes('^4.3.5') && e.versions.includes('debug@4.4.2'));
     const p = t.report.paths.find((x) => x.repo === 'pasted/mocha' && x.version === 'debug@4.4.2')!;
     assert.deepEqual([p.kind, p.range, p.hops], ['ADMITS', '^4.3.5', 0]);
-    assert.equal(of(t.evs, 'narration').mode, 'template'); // no recording describes a guest graph
+    const n = of(t.evs, 'narration');
+    assert.deepEqual([n.mode, n.note], ['template', null]); // no recording describes a guest graph
+    assert.deepEqual(t.report.scope, { kind: 'guest', label: 'pasted/mocha', repos: 1 });
+    assert.deepEqual(t.report.notices, []);
+    assert.match(n.text, /^Verdict: `pasted\/mocha` is exposed only on a fresh install since \d\d:\d\d UTC \(still open at 13:30 UTC\); installing from your committed lockfile was safe: it pins .*`debug@4\.3\.5`/);
+    assert.doesNotMatch(n.text, /Notify|#your-team/);
+    assert.ok(e.locked!.length > 0 && e.locked!.every((v) => !e.versions.includes(v)), 'a WOULD_PULL lockfile pins only safe versions');
+    assert.equal(t.report.minutesAhead, Math.floor((t.report.incident.advisoryAt - t.report.incident.firstExposureAt!) / 60_000)); // its own first exposure
 
     const again = await sse<AnalyzeEvent>(await post('/api/analyze', { lockfile: MOCHA, scenario: QIX })); // reused, not rebuilt
     assert.deepEqual(again.map((x) => x.type), ['ready']);

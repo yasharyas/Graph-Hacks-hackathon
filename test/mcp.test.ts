@@ -66,7 +66,7 @@ describe('mcp stdio server', { skip: !up && `FalkorDB unreachable at ${host}:${p
     const m = await call('incident_exposure', { scenario: 'qix-2025-09-08', incident: 'qix-2025-09-08', at: AT });
     assert.ok(!m.result.isError, text(m));
     const [head] = m.result.content as { text: string }[];
-    assert.ok(head.text.length <= 4000, `summary + rows is ${head.text.length} chars`);
+    assert.ok(head.text.length <= 6000, `summary + rows is ${head.text.length} chars`);
     const body = JSON.parse(head.text);
     assert.ok(body.rows.length >= 20, `${body.rows.length} rows`);
     assert.equal(body.rows.length, body.rowCount);

@@ -47,6 +47,12 @@ test('first provider wins; request is OpenAI-compatible, temperature 0, 600 toke
   assert.equal((calls[0].init.headers as Record<string, string>).authorization, `Bearer ${GROQ_KEY}`);
 });
 
+test('finish_reason is surfaced, so a note cut by max_tokens can be dropped', async () => {
+  const cut = () => new Response(JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'Notify `QA` and' }, finish_reason: 'length' }] }));
+  assert.equal((await chat({ messages }, fake(cut).fetchImpl)).finish, 'length');
+  assert.equal((await chat({ messages }, fake(() => ok()).fetchImpl)).finish, null);
+});
+
 test('maxTokens is passed through', async () => {
   const { fetchImpl, calls } = fake(() => ok());
   await chat({ messages, maxTokens: 50 }, fetchImpl);

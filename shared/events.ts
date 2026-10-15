@@ -15,6 +15,7 @@ export type ToolName =
   | 'concentration_risk'
   | 'draft_remediation'
   | 'scanner_view'
+  | 'filter_exposures'
   | 'recall_triage';
 
 export interface ToolResult {

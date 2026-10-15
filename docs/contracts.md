@@ -103,3 +103,11 @@ All JSON. SSE responses are `text/event-stream` with one JSON event per `data:` 
 | `GET /api/plan` | `?scenario=&tool=` | `{ plan: string[] }` (`GRAPH.EXPLAIN`) |
 
 Mock streams for UI work live in `shared/fixtures/`.
+
+### Semantics the UI relies on
+
+- **Timeline:** one point per minute from the lockfile snapshot time to `removedAt + 30 min`. Each point comes from the same `exposureAt` as `/api/exposure`, which is re-run only at `CHANGE_TIMES`, and a test holds the two equal.
+- **LOCKED** counts from the repo's newest locked bad publish, since a lockfile cannot pin a version before it exists. **WOULD_PULL** counts while the `ADMITS` window is open.
+- **Minutes ahead** is always `advisoryAt - firstExposureAt`, on `/api/scenarios`, the `start` event and the report alike.
+- **`Remediation.overrides`** keys are version-qualified (`"debug@4.4.2": "4.4.1"`), so they only re-pin the bad version. Steps run in order: `npm ci` (the lockfile is the fix for WOULD_PULL), then overrides only if you must re-resolve, then rotate secrets (LOCKED only).
+- **Narration:** `text` is deterministic (Verdict / Why / Notify / Do, built from the report). `note` is an optional LLM line of at most 40 words, kept only if the guard passes with zero flags.
