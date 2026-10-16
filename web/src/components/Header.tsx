@@ -7,8 +7,9 @@
  *   clockAt        scenario clock (epoch ms): the clock the table and counts are true at, with its date ("Sep 8, 2025 ·
  *                  13:30 UTC"); null (no run to describe) hides the chip, and on a phone the chip is the bare time so the bar
  *                  stays one row
- *   queryTotal     { ms, queries } summed from ToolResult.ms / cypher.length, or null before any result. "N ms in
- *                  FalkorDB" is FalkorDB's own execution time, not the run's wall clock
+ *   queryTotal     { ms, queries } summed from ToolResult.ms / cypher.length, or null before any result. It is FalkorDB's own
+ *                  execution time added up over the queries, not the run's wall clock: a cached call counts the time it first took,
+ *                  so the sum can exceed the run total (the Graph stats tab says the same, InsightTabs.tsx)
  *   mode           LLM mode of the triage narration (live | replay | template), or null
  *   modeNote       what the mode means for this run ("Verdict from the graph · analyst pick replayed", and what "cached" on a
  *                  call means): the mode badge's title and screen-reader text, so the feed spends no line on it
@@ -34,6 +35,9 @@ const MODE_STYLE: Record<LlmMode, string> = {
   replay: 'text-tier-maintainer',
   template: 'text-fg-1',
 };
+
+/** What the FalkorDB figure is, in words: the pill's title and screen-reader text (the sum is not the run's wall clock). */
+const sumNote = (ms: number, queries: string) => `${fmtMs(ms)} of FalkorDB time, summed over ${queries}; cached calls count the time they first took`;
 
 export interface HeaderProps {
   scenario: ScenarioChoice;
@@ -120,7 +124,7 @@ export function Header(p: HeaderProps) {
           type="button"
           onClick={p.onOpenStats}
           className="hidden items-center gap-1.5 rounded-xs border border-line-2 px-2 py-0.5 text-xs whitespace-nowrap text-fg-0 pointer-coarse:min-h-11 md:inline-flex short:hidden hov:bg-bg-3"
-          title={p.queryTotal ? `${fmtMs(p.queryTotal.ms)} in FalkorDB across ${queries}` : undefined}
+          title={p.queryTotal ? sumNote(p.queryTotal.ms, queries) : undefined}
         >
           Built on FalkorDB
           {/* the run's FalkorDB time rides in the pill from 1280px, the one place it is printed in the header */}
@@ -130,7 +134,7 @@ export function Header(p: HeaderProps) {
             </span>
           )}
           <span className="sr-only">
-            {p.queryTotal ? `, ${fmtMs(p.queryTotal.ms)} in FalkorDB across ${queries}` : ''}. Opens the graph stats.
+            {p.queryTotal ? `, ${sumNote(p.queryTotal.ms, queries)}` : ''}. Opens the graph stats.
           </span>
         </button>
         {/* A phone (and a phone held sideways) gets the word, not the glyph alone: the upload tray read as Share there. Between

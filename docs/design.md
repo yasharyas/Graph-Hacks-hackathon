@@ -369,3 +369,8 @@ These supersede the sections above where they differ.
     - The disclosure label no longer names the pick. The first tool call now sits below the fold at 1366x768.
   - The agent lines' place is held while the verdict is coming (`AgentRoom`, and the pick's placeholder), so the tool calls do not jump down when the verdict lands.
   - Fix: the `tight` variant had lost its second media clause (1024x768 never matched), so ToolFeed's placeholder was 64 px too tall there. It is now two rules.
+- **Round 7b (polish).**
+  - Why: a name longer than 33 characters (a pasted repo's `@typescript-eslint/eslint-plugin@6.21.0`) is a `span role="button"` with `box-decoration-break: clone`, not a `<button>`. A button is one unbreakable box, so it wrapped the name inside itself: a bordered block that split the sentence. The span breaks across lines like prose, each line boxed. Shorter names stay buttons.
+  - Repo column, checked and unchanged: the measure is exact. The whole id shows as soon as the cell holds it (`FalkorDB/falkordb-browser` is 153 px, so from a 156 px cell: 1540 px wide, and at 1024 px). At 1440 px the cell is 136 px, so the owner gives way (`Fa…/falkordb-browser`). More room would cost the path column its 22 characters.
+  - `recall_triage` card: the ACTION column is 4.75 rem ("remediated" is 59 px) and the repo column takes what is left, instead of a fixed 46%.
+  - FalkorDB time: the header pill, the feed heading and the Graph stats tab all say it is each query's own FalkorDB time added up, not the run's wall clock. The queries run one after another. The gap to "Run total" comes from cached calls, which count the time they first took (42 of 49 on qix: 495 ms against 248 ms).

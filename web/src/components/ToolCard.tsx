@@ -150,8 +150,8 @@ function RowsTable({ tool, rows, flash, showAll, onToggleAll, guest }: { tool: s
       <thead>
         <tr>
           {cols.map((c, j) => (
-            // the tier column fits "WOULD_PULL" in Martian Mono on one line
-            <th key={c} scope="col" className={`label-caps text-xs border-b border-line-1 py-1 pr-2 font-medium ${j === 0 ? 'w-[46%]' : c === 'tier' ? 'w-[6.5rem]' : ''}`}>
+            // the tier column fits "WOULD_PULL" in Martian Mono on one line, the action column "remediated" in the UI font; with an action the repo takes what is left
+            <th key={c} scope="col" className={`label-caps text-xs border-b border-line-1 py-1 pr-2 font-medium ${j === 0 ? (cols.includes('action') ? '' : 'w-[46%]') : c === 'tier' ? 'w-[6.5rem]' : c === 'action' ? 'w-[4.75rem]' : ''}`}>
               {c.replace(/([A-Z])/g, ' $1').toLowerCase()}
             </th>
           ))}

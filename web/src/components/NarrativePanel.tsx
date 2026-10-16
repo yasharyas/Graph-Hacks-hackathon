@@ -28,6 +28,9 @@
  * Only the FIRST mention of an entity can be a chip; repeats are plain text with a dotted underline (not a tab stop). A line
  * with more than LIST_MAX verified names is a list: its names get the same dotted-underline look but stay buttons (a wall of
  * boxed chips reads as noise; the click still opens the proof). "Verified" is said once, in text for screen readers.
+ * A name longer than LONG_CHIP characters (a pasted repo's "@typescript-eslint/eslint-plugin@6.21.0") is a span with role=button, not a
+ * <button>: a button is one unbreakable box and would wrap that name inside itself, a bordered block splitting the sentence; the
+ * span breaks like prose, each line of it boxed. Short names stay buttons.
  * On a coarse pointer a Why sentence's names are text (stacked 28px lines cannot each give a chip a 44px target): its proof is
  * a row of 44px "Evidence E1" buttons under it. Each row's chips are one Tab stop (roving: the arrow keys move between them).
  * The "N of N claims traced" line is a native disclosure (id="flagged-claims", the header badge opens it): a compact map of
@@ -89,6 +92,10 @@ interface BlockProps {
 
 const NOT_RETURNED = 'not returned by any graph query';
 const chip = 'rounded-xs border px-1.5 py-0.5 font-mono text-xs';
+// Characters of a chip that fit the narrowest feed line (295px at 1024 to 1365px: 8.4px a character, 14px of padding and border).
+const LONG_CHIP = 33;
+// A chip that is a span, not a button, breaks across lines like prose, each line boxed (a break inside a word only where nothing else fits).
+const FLOW = 'box-decoration-clone [overflow-wrap:anywhere]';
 // A 44px hit area on touch: a pseudo-element reaching 11px into the line gaps (10px past the 1px border), with no change to the chip's size; lines are 28px on touch.
 const HIT = 'relative pointer-coarse:after:absolute pointer-coarse:after:-inset-x-0.5 pointer-coarse:after:-inset-y-[11px]';
 const LABEL = 'label-caps text-xs';
@@ -198,7 +205,7 @@ function Spans({ segs, onTrace, hint, checking = false, still = false }: { segs:
         if (s.verdict === 'flagged') {
           return (
             <span key={i}>
-              <span className={`${chip} border-line-3 text-fg-0 line-through decoration-1`}>{s.text}</span>
+              <span className={`${chip} ${FLOW} border-line-3 text-fg-0 line-through decoration-1`}>{s.text}</span>
               <span className="text-xs text-fg-1"> ({NOT_RETURNED})</span>
             </span>
           );
@@ -221,7 +228,7 @@ function Spans({ segs, onTrace, hint, checking = false, still = false }: { segs:
         }
         if (s.verdict === 'plain') {
           return (
-            <span key={i} className={`${chip} border-dashed border-line-3 text-fg-1`} title="The guard did not check this text">
+            <span key={i} className={`${chip} ${FLOW} border-dashed border-line-3 text-fg-1`} title="The guard did not check this text">
               {s.text}
               <span className="sr-only"> (not checked)</span>
             </span>
@@ -249,6 +256,27 @@ function Spans({ segs, onTrace, hint, checking = false, still = false }: { segs:
             >
               {s.text}
             </button>
+          );
+        }
+        if (s.text.length > LONG_CHIP) {
+          return (
+            <span
+              key={i}
+              role="button"
+              tabIndex={0}
+              data-chip=""
+              aria-describedby={hint}
+              onClick={() => onTrace(s.text)}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                e.preventDefault();
+                onTrace(s.text);
+              }}
+              title={TRACE_TITLE}
+              className={`${chip} ${FLOW} cursor-pointer border-line-2 bg-bg-2 text-fg-0 transition-colors duration-(--dur-fast) ease-out hov:border-line-3 hov:bg-bg-3`}
+            >
+              {s.text}
+            </span>
           );
         }
         return (

@@ -70,8 +70,9 @@ export interface ToolFeedProps {
 /** Consecutive cards of the same tool, in feed order. */
 const runs = (cs: ToolCardState[]) => cs.reduce<ToolCardState[][]>((rs, c) => (rs.at(-1)?.[0].tool === c.tool ? rs.at(-1)!.push(c) : rs.push([c]), rs), []);
 
-/** "Tool calls . 17 . 187.4 ms" */
+/** "Tool calls . 17 . 187.4 ms": the ms is every query's own FalkorDB time added up, not the run's wall clock (CALLS_TITLE says so). */
 const calls = (cs: ToolCardState[]) => `Tool calls · ${cs.length} · ${cs.reduce((n, c) => n + (c.result?.ms ?? 0), 0).toFixed(1)} ms`;
+const CALLS_TITLE = "FalkorDB time, summed over the queries; a cached call counts the time it first took, so the sum can exceed the run's wall clock";
 
 const failTitle = (e: TriageError) =>
   e.status === 0 ? 'The server is not reachable' : e.status === 429 ? 'Triage is rate limited' : e.status === 413 || e.status === 415 ? 'The request was refused' : 'The triage did not run';
@@ -213,7 +214,7 @@ export function ToolFeed({ cards, followUps, narration, guard, status, error, sc
     return (
       <div id={n === 0 ? 'tool-calls-list' : undefined} className="flex flex-col gap-3">
         <div className="-mb-1 flex items-baseline justify-between gap-2">
-          <h3 id={n === 0 ? 'tool-calls' : undefined} tabIndex={n === 0 ? -1 : undefined} className="label-caps text-xs">
+          <h3 id={n === 0 ? 'tool-calls' : undefined} tabIndex={n === 0 ? -1 : undefined} title={CALLS_TITLE} className="label-caps text-xs">
             {calls(cs)}
           </h3>
           {cs.some((c) => c.status === 'done') && (

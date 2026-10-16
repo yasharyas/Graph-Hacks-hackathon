@@ -9,8 +9,9 @@
  * each repo with its UTC time (the app's one zone), first; and "Assessed in earlier runs": how many repos, the latest time
  * and their tiers, both from recall_triage rows {repo, tier, action, at}, one row per repo), Graph stats (graph name and
  * the graph's node / edge counts from /api/stats, per-tool queries / rows / FalkorDB ms, and the schema this run's Cypher
- * touched; the per-run figures are read from this run's real tool results). The Concentration tab says where its scores
- * come from (algo.pageRank at ingest). role=tablist, arrow keys.
+ * touched; the per-run figures are read from this run's real tool results). "FalkorDB time" is each query's own time added up,
+ * and a cached call counts the time it first took, so it can exceed "Run total" (the run's wall clock) beside it; the tab says so.
+ * The Concentration tab says where its scores come from (algo.pageRank at ingest). role=tablist, arrow keys.
  */
 import { useId, useRef, useState, type KeyboardEvent } from 'react';
 import { schemaOf } from '../data/cypher.ts';
@@ -48,6 +49,7 @@ export function InsightTabs({ report, cards, graph, totalMs, remediated }: Insig
   // One example per distinct statement, each ";"-terminated and labelled: FalkorDB runs one statement per query.
   const cypher = cypherScript(results.flatMap(({ card, r }) => r.cypher.map((q, i) => ({ tool: r.tool, q, params: r.params ?? card.params, n: i + 1, of: r.cypher.length }))), hints);
   const schema = schemaOf(results.flatMap(({ r }) => r.cypher));
+  const cached = results.filter(({ r }) => r.cached).length;
   const earlier = (results.find(({ r }) => r.tool === 'recall_triage')?.r.rows ?? []).flatMap((row) =>
     typeof row.repo === 'string' ? [{ repo: row.repo, tier: String(row.tier ?? ''), action: typeof row.action === 'string' ? row.action : null, at: typeof row.at === 'number' ? row.at : 0 }] : [],
   );
@@ -243,11 +245,15 @@ export function InsightTabs({ report, cards, graph, totalMs, remediated }: Insig
             )}
             <dt className="text-fg-1">Queries run</dt>
             <dd className="font-mono text-xs text-fg-0 tabular-nums">{results.reduce((n, { r }) => n + r.cypher.length, 0)}</dd>
-            <dt className="text-fg-1">Time in FalkorDB</dt>
-            <dd className="font-mono text-xs text-fg-0 tabular-nums">{fmtMs(results.reduce((n, { r }) => n + r.ms, 0))}</dd>
+            <dt className="text-fg-1">FalkorDB time, summed over queries</dt>
+            <dd className="font-mono text-xs text-fg-0 tabular-nums">
+              {fmtMs(results.reduce((n, { r }) => n + r.ms, 0))}
+              {/* a cached call carries the time it first took, so this sum can read above the run total beside it: say so */}
+              {cached > 0 && <span className="block font-sans text-fg-1">includes {plural(cached, 'cached call')}, each at the time it first took</span>}
+            </dd>
             {totalMs !== null && (
               <>
-                <dt className="text-fg-1">Run total</dt>
+                <dt className="text-fg-1">Run total, wall clock</dt>
                 <dd className="font-mono text-xs text-fg-0 tabular-nums">{totalMs} ms</dd>
               </>
             )}
@@ -267,7 +273,7 @@ export function InsightTabs({ report, cards, graph, totalMs, remediated }: Insig
               <div key={card.id} className="contents">
                 <dt className="font-mono text-xs break-words text-fg-2">{r.tool}</dt>
                 <dd className="font-mono text-xs text-fg-1 tabular-nums">
-                  {r.cypher.length} {r.cypher.length === 1 ? 'query' : 'queries'} · {r.rows.length} rows · {fmtMs(r.ms)}
+                  {r.cypher.length} {r.cypher.length === 1 ? 'query' : 'queries'} · {r.rows.length} rows · {fmtMs(r.ms)}{r.cached && ' · cached'}
                 </dd>
               </div>
             ))}
