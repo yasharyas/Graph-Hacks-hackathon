@@ -263,7 +263,7 @@ function Spans({ segs, onTrace, hint, checking = false, still = false }: { segs:
             <span
               key={i}
               role="button"
-              tabIndex={0}
+              tabIndex={-1} // a Tab stop only as its line's roving chip (useRoving sets 0 on that one), like the buttons
               data-chip=""
               aria-describedby={hint}
               onClick={() => onTrace(s.text)}
