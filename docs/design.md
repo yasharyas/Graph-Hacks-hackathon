@@ -340,3 +340,10 @@ These supersede the sections above where they differ.
   - Tier counts open the legend.
   - Every control, chips included, has a 44 px target on coarse pointers.
   - The drawer's sticky bar stays one row, and status shows as a pill that clears itself.
+- **Fix tab order:**
+  - It opens with "Today, in hindsight" (what to do now).
+  - Next comes the check against today's package.json, for a pasted repo judged on a pre-incident snapshot.
+  - The scope note follows as secondary text.
+  - Above Copy JSON sits a line naming any override or pin to skip.
+- **Table:** a long repo id gives way at the owner first (`ni…/nightwatch`), never at the name. Below 1366 px, Export is icon-only, with the same accessible name.
+- **Paste sheet:** progress and errors sit after the fields, sticky at the bottom (so nothing above them moves). A long error opens with one line, and its details sit behind "How to check it by hand".
