@@ -320,3 +320,23 @@ Builders re-run `/impeccable critique` on the rendered war room at the Phase 2 g
 5. **Graph shapes and draw-on.** `react-force-graph-2d` needs a custom `nodeCanvasObject` (5 shapes, maintainer ring, pulse ring) and a `linkCanvasObject` for the dash-offset draw-on; budget ~60 lines in PathGraph.
 6. **Share image.** The exec summary card doubles as the 1200×630 share card; no html-to-canvas dependency is installed. Decide client-side render vs a W13 pre-render.
 7. **Cabinet Grotesk has no `tnum`.** Counters are Satoshi; if you want the Cabinet look on the hero counter, it must only render the final value.
+
+## 12. Revisions after persona QA (rounds 2 to 5)
+
+These supersede the sections above where they differ.
+
+- **Header:** clock, mode and claims pills share one radius (`rounded-xs`). The clock shows the date ("Sep 8, 2025 · 13:30 UTC"). From 1280 px the FalkorDB ms sits inside its pill.
+- **Laptop density:** at widths of 1024 px and up with heights of 900 px or less, the narrative is one step tighter (14 px headline). The mode and "cached" gloss moves into the header pill's title. An empty analyst pick renders nothing. Target: the first tool card's top at 560 px or less at 1366×768.
+- **Verdict:**
+  - It shows as a headline plus one line per tier, never clamped mid-sentence.
+  - WHY shows whole path sentences only.
+  - Every disclosure names what it reveals ("Show 2 more evidence paths, who to notify and the steps").
+- **Autoplay caption:** one polite line narrates the 12 s replay in three states. Under reduced motion it shows the final state.
+- **Text floor:** nothing is set under 12 px. `text-2xs` is 12 px, and code is `max(.92em, 12px)`.
+- **Path text:** a scope shortens from the left (`@ty…/parser@8.30.1`), and package names stay whole. The full ref is the accessible name and the title.
+- **Graph:** the selected chain takes its tier colour (LOCKED red, WOULD_PULL amber, MAINTAINER steel), and the legend has six entries.
+- **Time and hindsight:** numbers, verdicts and notices are as of the scenario clock. Later facts appear only in sentences that start "In hindsight", or in the Fix tab's "Today, in hindsight" note.
+- **Phone:**
+  - Tier counts open the legend.
+  - Every control, chips included, has a 44 px target on coarse pointers.
+  - The drawer's sticky bar stays one row, and status shows as a pill that clears itself.
