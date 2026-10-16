@@ -1,12 +1,12 @@
 # Launch posts
 
-Placeholders: `<render-url>` (live demo), `<repo-url>` (GitHub), `<video-url>`, `<blog-url>` (dev.to). No vote requests anywhere; the hackathon rules forbid canvassing judges.
+Placeholders still to fill: `<render-url>` (live demo), `<video-url>`, `<blog-url>` (dev.to). No vote requests anywhere; the hackathon rules forbid canvassing judges.
 
 ## FalkorDB Discord, #showcase (3 lines)
 
 Patient Zero: npm account-hijack triage on FalkorDB. When `qix` was hijacked, advisory-based scanners (npm audit, OSV, Dependabot) had no record for 74 minutes; the graph shows which repos would have fetched the malware on a fresh install, through which exact lockfile path, and who owns the fix.
 FalkorDB does the reasoning: `GRAPH.COPY` per tenant and scenario, time-windowed `ADMITS` edges, `shortestPath` explanations, PageRank for "who could be the next qix", `GRAPH.EXPLAIN` on every card, a read-only ACL user. The LLM only picks one observation by id; it never writes a fact.
-Live: <render-url> · Code, MIT, every Cypher query in the README: <repo-url> · Graph Hacks Track 1 entry.
+Live: <render-url> · Code, MIT, every Cypher query in the README: https://github.com/yasharyas/Graph-Hacks-hackathon · Graph Hacks Track 1 entry.
 
 ## LinkedIn
 
@@ -30,7 +30,7 @@ The LLM's only job is to pick one observation, by id, from facts the graph produ
 Runs on free tiers, $0. MIT.
 
 Live: <render-url>
-Code: <repo-url>
+Code: https://github.com/yasharyas/Graph-Hacks-hackathon
 Write-up: <blog-url>
 
 ## X thread (5 posts)
@@ -45,9 +45,9 @@ Write-up: <blog-url>
 
 5/ Also an MCP server (same read-only tools in Claude Code), a paste-your-repo mode, and an Ask box where list questions are answered from the graph. $0 to run, MIT.
 Live: <render-url>
-Code: <repo-url>
+Code: https://github.com/yasharyas/Graph-Hacks-hackathon
 Write-up: <blog-url>
 
 ## falkordb.com community projects blurb
 
-**Patient Zero** is an npm supply-chain triage agent built on FalkorDB for Graph Hacks (Track 1). When a maintainer account is hijacked, it shows which repos would fetch the malicious version on a fresh install, through which exact lockfile path, and who owns the fix, before advisory-based scanners have a record (74 minutes ahead in the qix incident). The graph does the reasoning: `GRAPH.COPY` per tenant and scenario, time-windowed `ADMITS` edges, `shortestPath` explanations, PageRank for maintainer concentration, `GRAPH.EXPLAIN` on every query, and a read-only ACL user for every tool. An LLM only picks one observation from graph-built facts. MIT, runs on free tiers, also exposed over MCP. Demo: <render-url>. Code: <repo-url>.
+**Patient Zero** is an npm supply-chain triage agent built on FalkorDB for Graph Hacks (Track 1). When a maintainer account is hijacked, it shows which repos would fetch the malicious version on a fresh install, through which exact lockfile path, and who owns the fix, before advisory-based scanners have a record (74 minutes ahead in the qix incident). The graph does the reasoning: `GRAPH.COPY` per tenant and scenario, time-windowed `ADMITS` edges, `shortestPath` explanations, PageRank for maintainer concentration, `GRAPH.EXPLAIN` on every query, and a read-only ACL user for every tool. An LLM only picks one observation from graph-built facts. MIT, runs on free tiers, also exposed over MCP. Demo: <render-url>. Code: https://github.com/yasharyas/Graph-Hacks-hackathon.

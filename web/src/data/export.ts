@@ -171,7 +171,7 @@ export function reportToMarkdown(whole: Report, view?: ReportView, now?: number)
     '',
     ...summaryLines(whole, r, now),
     '',
-    `Scenario clock: ${utcLabel(r.at)}. ${r.minutesAhead} min ahead of the first OSV record.${live < total ? ` The incident lists ${total} in total; later publishes are not counted here.` : ''}`,
+    `Scenario clock: ${utcLabel(r.at)}. First OSV record: ${utcLabel(r.incident.advisoryAt)}${r.at < r.incident.advisoryAt ? ' (in hindsight; none existed at this clock)' : ''}, ${r.minutesAhead} min after the first exposure.${live < total ? ` The incident lists ${total} in total; later publishes are not counted here.` : ''}`,
     scoped
       ? `Filter: ${label(scoped.view.label)}. Only these repos are listed.${scoped.view.outside ? ` ${scoped.view.outside} repo${scoped.view.outside === 1 ? '' : 's'} on screen ${scoped.view.outside === 1 ? 'is' : 'are'} not part of this run.` : ''}`
       : `Scope: whole report, ${r.exposures.length} exposed repo${r.exposures.length === 1 ? '' : 's'}; clean repos are only counted.`,

@@ -114,7 +114,13 @@ RETURN v.id AS version, p.name AS package, v.publishedAt AS publishedAt, v.remov
 ORDER BY publishedAt LIMIT 40
 ```
 
-From a shell, the same query is `GRAPH.RO_QUERY pz_acme_qix "CYPHER maintainer='qix' since=1757336400000 until=1757341800000 MATCH ..."`. In the app, every tool card's **Copy Cypher** puts the parameters of that run in front of each statement, so what you copy runs as is (13:30 UTC on 2025-09-08 is `at=1757338200000`).
+From a shell (with `docker compose up` running):
+
+```bash
+docker compose exec falkordb redis-cli GRAPH.RO_QUERY pz_acme_qix 'CYPHER maintainer="qix" since=1757336400000 until=1757341800000 MATCH (:Maintainer {name: $maintainer})-[:MAINTAINS]->(p:Package)<-[:OF]-(v:Version) WHERE v.publishedAt >= $since AND v.publishedAt < $until RETURN v.id AS version, v.publishedAt AS publishedAt ORDER BY publishedAt LIMIT 40'
+```
+
+In the app, every tool card's **Copy Cypher** puts the parameters of that run in front of each statement, so what you copy runs as is (13:30 UTC on 2025-09-08 is `at=1757338200000`).
 
 <!-- cypher:start -->
 
