@@ -14,7 +14,7 @@ AI agents also did the following:
 
 LLMs on free tiers (Groq `qwen/qwen3.8-27b`, then Groq `gpt-oss-120b`, then Gemini `3.5-flash-lite`) do two things:
 
-1. **Pick one analyst observation.** After a triage, the server builds three to six observations from the graph results (the carrier dependency, the production share, the advisory gap). The model answers with the id of the one most worth acting on. It chooses; it does not write.
+1. **Pick one analyst observation.** After a triage, the server builds up to five observations from the graph results (the malicious version that reaches the most repos, a carrier dependency many repos' shortest paths share, the ranges repos declare themselves, the busiest team, a repo that would fetch several malicious versions). The ones the verdict already states (tier counts, the production split, the advisory gap) are not offered. The model answers with the id of the one most worth acting on. It chooses; it does not write.
 2. **Handle open-ended Ask questions.** A question the server cannot classify goes to a bounded tool loop (4 model calls, 6 graph tool calls). The model picks read-only graph tools and composes a reply from their rows; the claims guard checks every repo, `name@version`, count and `[E#]` citation against the tool results.
 
 Everything else is deterministic. The LLM never:

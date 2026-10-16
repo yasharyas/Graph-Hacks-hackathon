@@ -37,7 +37,7 @@ The oracle is a differential test, not a second engine: it reproduces the tier c
 
 ## On screen (source: the production build on `:8080` in headless Chromium at 1440x900, plus a replay-mode API with `LLM_CHAIN=replay`, 2026-10-16)
 
-- Landing (qix): the autoplay runs 13:05 to 14:30 UTC in about 14 s. From about 2 s the hero reads "21 repos one install from malware, 20 safe with npm ci" (LOCKED 1 + WOULD_PULL 20) next to "Advisory scanner 0", and the caption "13:12 malicious versions out · no advisory for 74 min, until 14:26" is on screen. The circled "74 min" appears at about 12 s, once the playhead passes 14:26.
+- Landing (qix): the autoplay runs 13:05 to 14:30 UTC in about 12 s. From about 2 s the hero reads "21 repos one install from malware, 20 safe with npm ci" (LOCKED 1 + WOULD_PULL 20) next to "Advisory scanner 0", and the caption "13:12 malicious versions out · no advisory for 74 min, until 14:26" is on screen. The circled "74 min" appears at about 12 s, once the playhead passes 14:26.
 - qix triage at 13:30: **49 tool calls** (with a browser session; `recall_triage` is one of them). The Notify roster lists **7 teams**. Replay mode traces 62 of 62 claims; a live run that picked another observation traced 61 of 61.
 - axios triage at 01:30: **27 tool calls**; the hero reads "10 repos one install from malware, 9 safe with npm ci" (LOCKED 1 + WOULD_PULL 9). The timeline marks read 00:21 exposed, 02:07 OSV, 02:19 alert, 03:15 removed: the first OSV record came before the first vendor alert.
 - A pasted repo (`mochajs/mocha`, qix 13:30) runs **9 tool calls**, judged on its `package-lock.json` at commit 5f8e8a8 (2025-09-01), the last change before the incident.
