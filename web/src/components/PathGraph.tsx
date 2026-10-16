@@ -120,7 +120,7 @@ export function PathGraph({ exposures, paths, incident, selectedRepo, playing, o
   const shownPath = selectedRepo ? paths.find((p) => p.repo === selectedRepo) : paths[0];
   const selected = exposures.find((e) => e.repo === selectedRepo);
   const label = selectedRepo
-    ? `Path graph. Selected: ${repoLabel(selectedRepo)}.${shownPath ? ` Path: ${shownPath.chain.map((c, i) => (i === 0 ? repoShort(c) : c)).join(', then ')}${shownPath.chain.at(-1) === shownPath.version ? '' : `, then ${shownPath.version}`}.` : selected ? ` Reaches ${versionsText(selected.versions)}.` : ''}`
+    ? `Path graph. Selected: ${repoLabel(selectedRepo)}.${shownPath ? ` Path: ${shownPath.chain.map((c, i) => (i === 0 ? repoShort(c) : c)).join(', then ')}${shownPath.chain.at(-1) === shownPath.version ? '' : `, then ${shownPath.version}`}.` : selected?.versions.length ? ` Reaches ${versionsText(selected.versions)}.` : ''}`
     : `Path graph of ${exposures.length} exposed repos. ${paths.length ? 'Select a repo in the table to highlight its path.' : 'Run a triage, then select a repo in the table to highlight its path.'}`;
   // The canvas draws the 3 most widely shared versions for repos without a drafted path (buildGraph).
   const capped = exposures.some((e) => e.versions.length > 3 && !paths.some((p) => p.repo === e.repo));
@@ -215,7 +215,11 @@ export function PathGraph({ exposures, paths, incident, selectedRepo, playing, o
           return (
             <li key={e.repo}>
               {repoLabel(e.repo)} ({e.tier}):{' '}
-              {p ? `reaches ${p.version}${deps.length ? ` via ${deps.join(', then ')}` : ', declared directly'}${p.range ? ` (range ${p.range})` : ''}` : `reaches ${versionsText(e.versions)}`}
+              {p
+                ? `reaches ${p.version}${deps.length ? ` via ${deps.join(', then ')}` : ', declared directly'}${p.range ? ` (range ${p.range})` : ''}`
+                : e.versions.length
+                  ? `reaches ${versionsText(e.versions)}`
+                  : 'uses the account’s packages, no malicious version yet'}
             </li>
           );
         })}

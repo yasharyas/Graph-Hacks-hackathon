@@ -4,9 +4,10 @@
  * the link named. Until then it says plainly that the numbers below are the demo org's, not the shared repo's (the band keeps
  * its "Acme demo org" label: nothing is hidden, nothing is mistaken for the shared result). While it runs the strip says
  * which step; if it fails it says why, and offers the click again only when a retry can help (data/failure.ts).
- * Props: repo (owner/name), scenario, analyze (AnalyzeState from useAnalyze), onRecheck(), onDismiss().
+ * Props: repo (owner/name), scenario, analyze (AnalyzeState from useAnalyze), done (the re-check worked), onRecheck(), onDismiss().
  * The Re-check button keeps the keyboard focus while it works (Button's loading state is aria-disabled, not disabled), and
- * the strip's own status line is the one that says each step.
+ * the strip's own status line is the one that says each step. When it is done the strip stays, at its height, saying so
+ * (the result is below it, and focus has moved to the feed): taking it away when a slow analysis ended moved the page up 65px.
  *
  * Also here, SharedRepoNote: a share link that names a demo-org repo (?repo=owner/name, with or without &open=). The triage
  * reruns at the link's minute and the repo is selected with its path drawn; this one-line strip, there from the first paint
@@ -27,25 +28,32 @@ const STEP = { fetch: 'fetching the lockfile', parse: 'parsing it', write: 'writ
 
 export function SharedRepoNote({ repo, found, total, onShow, onDismiss }: { repo: string; found: boolean | null; total: number | null; onShow: (() => void) | null; onDismiss: () => void }) {
   const name = <span className="font-mono text-xs">{repo}</span>;
+  const said = {
+    running: <>Shared link: {name}. Running its triage&hellip;</>,
+    found: <>Shared link: {name} is selected; its path is drawn in the graph.</>,
+    missing: <>Shared link: {name} is not one of {total === null ? 'the repos' : `the ${total} repos`} in this scenario.</>,
+  };
+  const now = found === null ? 'running' : found ? 'found' : 'missing';
+  // The strip keeps one height from the first paint: the status line sits in one grid cell with the two longer outcomes
+  // (invisible, aria-hidden), and the "Show its path" slot is laid out (invisible) until it applies. It grew 81 to 101px
+  // at ~340ms on a phone and pushed the page down.
   return (
     <aside aria-label="Shared link" className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-line-1 bg-bg-2 px-(--gutter) py-1.5 text-sm text-fg-0">
-      <p role="status" className="min-w-0 flex-1 basis-64">
-        {found === null ? (
-          <>Shared link: {name}. Running its triage&hellip;</>
-        ) : found ? (
-          <>Shared link: {name} is selected; its path is drawn in the graph.</>
-        ) : (
-          <>
-            Shared link: {name} is not one of {total === null ? 'the repos' : `the ${total} repos`} in this scenario, so nothing is selected for it.
-          </>
-        )}
-      </p>
+      <div className="grid min-w-0 flex-1 basis-64">
+        <p role="status" className="[grid-area:1/1]">
+          {said[now]}
+        </p>
+        {(['found', 'missing'] as const).map((k) => (
+          <p key={k} aria-hidden className="invisible [grid-area:1/1]">
+            {said[k]}
+          </p>
+        ))}
+      </div>
       <div className="flex items-center gap-2">
-        {found && onShow && (
-          <Button onClick={onShow} className="lg:hidden">
-            Show its path
-          </Button>
-        )}
+        {/* visibility: hidden until it applies (not focusable, not in the accessibility tree), but it keeps its place */}
+        <Button onClick={() => onShow?.()} className={`lg:hidden ${found && onShow ? '' : 'invisible'}`}>
+          Show its path
+        </Button>
         <Button variant="ghost" onClick={onDismiss}>
           Dismiss
         </Button>
@@ -54,17 +62,21 @@ export function SharedRepoNote({ repo, found, total, onShow, onDismiss }: { repo
   );
 }
 
-export function SharedPrompt({ repo, scenario, analyze, onRecheck, onDismiss }: { repo: string; scenario: ScenarioId; analyze: AnalyzeState; onRecheck: () => void; onDismiss: () => void }) {
-  const running = analyze.status === 'running';
-  const failed = analyze.status === 'error' && analyze.error ? analyze.error : null;
+export function SharedPrompt({ repo, scenario, analyze, done = false, onRecheck, onDismiss }: { repo: string; scenario: ScenarioId; analyze: AnalyzeState; done?: boolean; onRecheck: () => void; onDismiss: () => void }) {
+  const running = analyze.status === 'running' && !done;
+  const failed = !done && analyze.status === 'error' && analyze.error ? analyze.error : null;
   const error = failed ? { message: plainError(failed), fix: nextStep(failed, 'analyze'), retry: !permanent(failed) } : null;
   return (
     <aside aria-label="Shared result" className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line-1 bg-bg-2 px-(--gutter) py-3 text-sm text-fg-0">
       <div className="min-w-0 flex-1 basis-72">
         <p>
-          A shared link for <span className="font-mono text-xs">{repo}</span> against {scenarioLabel(scenario)}: not checked yet.
+          A shared link for <span className="font-mono text-xs">{repo}</span> against {scenarioLabel(scenario)}: {done ? 're-checked.' : 'not checked yet.'}
         </p>
-        {running ? (
+        {done ? (
+          <p key="done" className="text-fg-1">
+            Its result is below: these numbers are now this repo&rsquo;s.
+          </p>
+        ) : running ? (
           <p role="status" className="text-fg-1">
             Re-checking {repo}: {analyze.stage ? STEP[analyze.stage.stage] : 'starting'}&hellip;
           </p>
@@ -80,7 +92,7 @@ export function SharedPrompt({ repo, scenario, analyze, onRecheck, onDismiss }: 
         )}
       </div>
       <div className="flex items-center gap-2">
-        {(!error || error.retry) && (
+        {!done && (!error || error.retry) && (
           <Button variant="primary" loading={running} onClick={onRecheck}>
             {error ? `Re-check ${repo} again` : `Re-check ${repo}`}
           </Button>

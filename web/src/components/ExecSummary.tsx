@@ -2,7 +2,9 @@
  * sees first. Props: report (Report), onShare (copies a link; wiring lives in App), marked (repos marked remediated: said
  * beside the exposed count, with the one line that marks are kept for this browser session only).
  * Reads: a stacked tier bar, "N of M exposed", "+N min ahead of the advisory" (only when something is exposed; at a clock
- * before the advisory: "No advisory yet · in hindsight, it came N min after the first exposure") and an icon Share button. The incident, scope and clock are the band above and the header chip (named here for screen
+ * before the advisory: "No advisory yet · in hindsight, it came N min after the first exposure"; below 1440px the hindsight
+ * half is screen-reader text, so the strip is one row and the band above is not said a third time) and an icon Share button.
+ * Past the removal (15:15 for qix) the count is past tense: "1 of 21 exposed until 15:15 UTC". The incident, scope and clock are the band above and the header chip (named here for screen
  * readers only); tier counts by name live in the band (one place, not three); the top maintainers are the
  * Concentration tab. Figures are Satoshi bold with tabular figures.
  * Also exports influenceShares(), shared with InsightTabs so both views print the same percentages.
@@ -36,6 +38,7 @@ export function ExecSummary({ report, onShare, marked = 0 }: { report: Report; o
   // As of the clock (docs/decisions.md, rounds 4 and 5): before the advisory there is no advisory to be ahead of; the lead
   // time is a later fact, so it is said as hindsight.
   const before = report.at < report.incident.advisoryAt;
+  const gone = exposed > 0 && report.at >= report.incident.removedAt; // npm no longer serves the malicious versions
   return (
     <section aria-label="Executive summary" className="animate-enter flex items-center gap-x-3 border-b border-line-1 py-0.5 pr-1 pl-3">
       <h2 className="sr-only">
@@ -53,7 +56,10 @@ export function ExecSummary({ report, onShare, marked = 0 }: { report: Report; o
             </span>
             <span className="text-sm whitespace-nowrap text-fg-0 tabular-nums">
               <b className="font-bold">{exposed}</b>
-              <span className="text-fg-1"> of {total} exposed</span>
+              <span className="text-fg-1">
+                {' '}
+                of {total} exposed{gone ? ` until ${utcLabel(report.incident.removedAt)}` : ''}
+              </span>
             </span>
           </dd>
         </div>
@@ -71,7 +77,7 @@ export function ExecSummary({ report, onShare, marked = 0 }: { report: Report; o
               <dt className="sr-only">Advisory</dt>
               <dd className="text-sm">
                 <b className="font-bold whitespace-nowrap text-fg-0">No advisory yet</b>
-                <span className="text-fg-1">
+                <span className="text-fg-1 max-[1439px]:sr-only">
                   {' '}
                   · in hindsight, it came <span className="tabular-nums">{report.minutesAhead}</span> min after the first exposure
                 </span>

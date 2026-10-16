@@ -36,7 +36,7 @@
  * whose own aria-valuetext speaks each step), and a move the app makes itself (a run aligning the scrubber, "Back to")
  * settles at once, so nothing ever claims the clock moved when it did not.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { alertNotes } from './data/alertNote.ts';
 import { getScenarios, isMock } from './data/api.ts';
@@ -124,10 +124,12 @@ export function App() {
   const [alertText, setAlertText] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [announce, setAnnounce] = useState('');
+  const [feedSaid, setFeedSaid] = useState(''); // the feed's status line, spoken from a region outside <main> (see ToolFeed onStatus)
   const [drawer, setDrawer] = useState<{ repo: string | null; tab: DrawerTab }>({ repo: null, tab: 'fix' });
   const [userAt, setUserAt] = useState<number | null>(null);
   const [guest, setGuest] = useState<Guest | null>(null); // the pasted repo the current run is about
   const [shared, setShared] = useState<string | null>(urlInit.guest); // a share link's pasted repo, waiting for its one click
+  const [sharedDone, setSharedDone] = useState(false); // its re-check worked: the strip stays, at its height, and says so
   const [retry, setRetry] = useState(0);
   const [hintDismissed, setHintDismissed] = useState(readHint);
   const guestReq = useRef<PasteRequest | null>(null); // what was pasted, so another incident can re-analyze it
@@ -298,8 +300,9 @@ export function App() {
   useBackClose(drawer.repo !== null, () => setDrawer((d) => ({ ...d, repo: null })));
   useBackClose(sheet, closeSheet);
   useEffect(() => {
-    if (sheet) playback.pause(); // the autoplay would keep ticking behind a sheet nobody can see it through
-  }, [sheet]);
+    // the autoplay would keep ticking behind a sheet nobody can see it through, or under an alert someone is typing
+    if (sheet || panel === 'alert') playback.pause();
+  }, [sheet, panel === 'alert']);
   // Hover tips (.tip) can be dismissed without moving the pointer (WCAG 1.4.13): Esc hides them until the pointer moves again.
   useEffect(() => {
     const root = document.documentElement;
@@ -375,7 +378,9 @@ export function App() {
     if (performance.now() - runStarted.current > 600) triage.abort();
   };
   // A run starts in the feed: keyboard focus lands there (where its progress and its verdict are), whichever button started it.
-  useEffect(() => {
+  // Before paint: the control that started it may unmount in the same commit (a share link's Re-check), and a passive effect
+  // left one frame with the focus on <body>.
+  useLayoutEffect(() => {
     if (turnKey > 0) feedRef.current?.focus({ preventScroll: true });
   }, [turnKey]);
   /** Run (or re-run) the triage at a clock, for a scenario. A re-run first commits any "mark remediated" still inside its Undo window, so it shows. */
@@ -398,14 +403,15 @@ export function App() {
     startRun(() => triage.run({ alert: text }));
   };
   /** Analyze a pasted repo or lockfile for an incident, then triage it. The request is kept so another incident can re-run it. */
-  const onAnalyze = async (req: PasteRequest, scn: ScenarioId = scenario) => {
+  const onAnalyze = async (req: PasteRequest, scn: ScenarioId = scenario, fromShare = false) => {
     const g = await analyze.analyze({ ...req, scenario: scn });
     if (g) {
       guestReq.current = req;
       setGuest({ ...g, scenario: scn });
       setPanel('none');
       setAlertText(null);
-      setShared(null);
+      if (fromShare) setSharedDone(true); // the share strip stays where it is (removing it moved the page), saying it is done
+      else setShared(null);
       const at = clockFor(scn);
       startRun(() => triage.run({ guest: g.graph, scenario: scn, at }), at);
     }
@@ -422,7 +428,7 @@ export function App() {
     if (!shared) return;
     restoreRepo.current = shared;
     restoreOpen.current = urlInit.open;
-    void onAnalyze({ url: `https://github.com/${shared}` });
+    void onAnalyze({ url: `https://github.com/${shared}` }, scenario, true);
   };
 
   /** Another incident. `rerun`: whatever was on screen (a report, a pasted repo) is run again for it; the timeline follows either way. */
@@ -544,7 +550,9 @@ export function App() {
     return isGuest && !new URL(url).searchParams.has('guest') ? null : url;
   };
   const share = () => {
-    const url = link(selected, !isGuest && selected ? 'fix' : null); // an org repo's link opens its Fix tab: the link is about that repo
+    // what its creator sees: the repo selected with its path drawn (the drawer is a modal, so it is never open behind this
+    // button; the drawer's own share link carries its tab)
+    const url = link(selected, null);
     if (url) void copyText(url, 'Link');
     else toast({ message: NO_SHARE_LOCKFILE });
   };
@@ -573,7 +581,26 @@ export function App() {
   // `clockAt` is the resting clock: that line must not change on every step of a scrub or the autoplay, nor while a run aligns it.
   // `cypherHints`: what a tool derived inside its run (incident_exposure looks up the maintainer), for the runnable Cypher.
   const maintainer = (report?.incident ?? triage.incident)?.maintainer;
-  const feedExtra = { clockAt: settledAt ?? undefined, onRerun: run, onShowFlagged: showFlagged, guest: isGuest, cypherHints: maintainer ? { maintainer } : undefined, notices: report?.notices };
+  // Each copied team notice ends with a link back to this run (the scenario and its clock; no repo, no drawer).
+  const noticeLink = report && !isGuest ? link(null, null) : null;
+  const feedExtra = { clockAt: settledAt ?? undefined, onRerun: run, onShowFlagged: showFlagged, guest: isGuest, cypherHints: maintainer ? { maintainer } : undefined, notices: report?.notices, noticeLink, onStatus: setFeedSaid };
+  // "Back to 13:30 UTC" right after the slider in the tab order (the strip's own button is 30 stops away, in the Table pane):
+  // shown when it has focus, like a skip link. It unmounts once the clock is back, so focus returns to the slider.
+  const backToRun =
+    report && settledWant !== null && !other ? (
+      <button
+        type="button"
+        onClick={() => {
+          setUserAt(report.at);
+          playback.seek(report.at);
+          snapSettled(report.at);
+          document.querySelector<HTMLInputElement>('input[aria-label="Scenario time, UTC"]')?.focus();
+        }}
+        className="sr-only focus:not-sr-only focus:absolute focus:top-0 focus:right-2 focus:z-(--z-dropdown) focus:rounded-sm focus:bg-bg-2 focus:px-3 focus:py-1 focus:text-sm focus:text-fg-0"
+      >
+        Back to {utcLabel(report.at)}
+      </button>
+    ) : null;
   // What the mode badge means for this run: the badge's title and screen-reader text, not a line above the verdict.
   const modeNote =
     triage.narration === null
@@ -589,7 +616,9 @@ export function App() {
         }${results.some((r) => r.cached) ? '. “cached” on a call: it reused an earlier read-only query' : ''}`;
 
   return (
-    <div className={`relative flex min-h-dvh flex-col pb-(--tabbar-h) lg:pb-0 xl:h-dvh xl:overflow-clip ${compact ? 'lg:h-dvh lg:overflow-clip' : ''}`}>
+    // Below 1024px (and 560px tall or more) the Ask bar is fixed above the tab bar while the Feed is shown: the page ends that much
+    // higher, after the footer, so the last card and the footer clear it (a spacer inside the feed left the footer under it).
+    <div className={`relative flex min-h-dvh flex-col pb-(--tabbar-h) lg:pb-0 xl:h-dvh xl:overflow-clip ${compact ? 'lg:h-dvh lg:overflow-clip' : ''} ${report && pane === 'feed' ? 'max-lg:[@media(min-height:560px)]:pb-[calc(var(--tabbar-h)+var(--ask-live))]' : ''}`}>
       {/* Tab order: skip link first, then (WCAG 2.2.2) the autoplay can be stopped before anything else. */}
       <a href="#results" className={skipLink}>
         Skip to results
@@ -619,7 +648,7 @@ export function App() {
       <a href="#exposures" onClick={skipToTable} className={skipLink}>
         Skip to exposure table
       </a>
-      {shared && <SharedPrompt repo={shared} scenario={scenario} analyze={analyze} onRecheck={recheck} onDismiss={() => setShared(null)} />}
+      {shared && <SharedPrompt repo={shared} scenario={scenario} analyze={analyze} done={sharedDone} onRecheck={recheck} onDismiss={() => setShared(null)} />}
       {linked && (
         <SharedRepoNote
           repo={linked.repo}
@@ -638,6 +667,9 @@ export function App() {
       <p role="status" className="sr-only">
         {announce}
       </p>
+      <p role="status" className="sr-only">
+        {feedSaid}
+      </p>
       {/* what the report clock strip says when the clock moves: here, outside every pane, so it is spoken on a phone too
           (the strip itself sits in the Table pane, which is not rendered while the Feed is shown) */}
       <p role="status" className="sr-only">
@@ -648,7 +680,7 @@ export function App() {
           closes on its result: see `compact`): the page is laid out anew instead of everything on it jumping up. */}
       <main key={covered ? (compact ? 'report' : 'landing') : 'main'} id="results" tabIndex={-1} className="flex min-h-0 flex-1 flex-col">
         <div className="shrink-0 border-b border-line-1">
-          {!compact && <p className="px-(--gutter) pt-3 text-base text-fg-1 max-sm:text-sm short:hidden">{PURPOSE}</p>}
+          {!compact && <p className="max-w-(--measure) px-(--gutter) pt-3 text-base text-fg-1 max-sm:text-sm short:hidden">{PURPOSE}</p>}
           <div className={compact ? '' : 'grid short:grid-cols-2 xl:grid-cols-[4fr_6fr] min-[1440px]:grid-cols-[5fr_6fr]'}>
             <div className={compact ? '' : 'border-b border-line-1 short:border-r short:border-b-0 xl:border-r xl:border-b-0'}>
               {timeline.status === 'error' && timeline.error ? (
@@ -680,6 +712,7 @@ export function App() {
                   remediated={marked}
                   stale={stale}
                   fixedCount={isGuest && report ? { exposed: report.counts.LOCKED + report.counts.WOULD_PULL, total: report.scope?.repos ?? 1, at: report.at } : null}
+                  back={backToRun}
                   trailing={
                     // While a run streams the band's action stops it; after one, it runs again. A run that failed has its one
                     // action in the feed ("Run triage"), so the band offers none. Same width either way: nothing beside it moves.
@@ -726,9 +759,10 @@ export function App() {
               // Opening a tool call (or its Cypher) is "first use" too: retire the hint.
               if ((e.target as HTMLElement).closest('button[aria-expanded]')) dismissHint();
             }}
-            // Below 1024px the Ask box is fixed above the tab bar: keep the last cards clear of it. From the click that starts a run
-            // the feed holds at least one screen, so the page never collapses (and jumps back) while the run streams in.
-            className={`scroll-pane border-line-1 bg-bg-1 p-3 fold:pt-2 lg:row-span-2 lg:border-r xl:row-span-1 xl:h-auto xl:min-h-0 ${report ? 'max-lg:pb-36' : ''} ${compact ? 'max-lg:min-h-dvh lg:min-h-0' : 'lg:h-0 lg:min-h-full'} ${paneClass('feed')}`}
+            // Below 1024px the Ask box is fixed above the tab bar: the page's own bottom padding keeps the last cards clear of it
+            // (the root, above). From the click that starts a run the feed holds at least one screen, so the page never collapses
+            // (and jumps back) while the run streams in.
+            className={`scroll-pane border-line-1 bg-bg-1 p-3 fold:pt-2 lg:row-span-2 lg:border-r xl:row-span-1 xl:h-auto xl:min-h-0 ${compact ? 'max-lg:min-h-dvh lg:min-h-0' : 'lg:h-0 lg:min-h-full'} ${paneClass('feed')}`}
           >
             <ToolFeed
               {...feedExtra}

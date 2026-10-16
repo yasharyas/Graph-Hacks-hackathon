@@ -112,7 +112,8 @@ function Cell({ k, v }: { k: string; v: unknown }) {
   );
 }
 
-const rowFlash = 'bg-bg-3 outline-2 -outline-offset-2 outline-fg-0';
+// The ring sits 1px outside the row (in the card body's 12px padding): drawn inside, it covered the first letter ("E1", "debug").
+const rowFlash = 'bg-bg-3 outline-2 outline-offset-1 outline-fg-0';
 
 /** Cypher with a line-break opportunity at each joint of a pattern (`)-[:R]->(`, a list's commas); the text itself is unchanged. */
 export function Wrapped({ text }: { text: string }) {

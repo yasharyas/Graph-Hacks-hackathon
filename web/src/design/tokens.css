@@ -170,6 +170,7 @@
   /* Density */
   --header-h: 48px;
   --tabbar-h: 56px;         /* bottom tab bar under 1024px */
+  --ask-live: 5.5rem;       /* the fixed Ask bar's measured height below 1024px (ToolFeed sets it): the page's bottom padding */
   --ask-h: 7rem;            /* the sticky Ask bar (desktop) / the one fixed above the tab bar (below 1024px): scrolling to a focused element stops short of it */
   --control-h: 36px;        /* 44px on coarse pointers (below) */
   --row-h: 36px;            /* dense table row; 44px on coarse pointers */

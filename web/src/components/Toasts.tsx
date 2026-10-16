@@ -1,9 +1,13 @@
 /* Toasts: call toast() from anywhere (no provider, no hook); mount <Toasts /> once in App.
- * toast({ message, tone?: 'info' | 'success' | 'error', action?: { label, onClick }, ms? }) returns the id;
- * dismissToast(id) removes it. Defaults: 4 s, 10 s when an action (Undo) is attached.
+ * toast({ message, tone?: 'info' | 'success' | 'error', action?: { label, onClick }, ms?, group? }) returns the id;
+ * dismissToast(id) removes it. Defaults: 4 s, 10 s when an action (Undo) is attached. A toast with a `group` ('copy')
+ * replaces the live one of that group in place (new text, timer restarted): five copies in a row are one toast, not three.
  * Never covers the Ask input or the focused element (WCAG 2.4.11): from 1024px the stack sits bottom-right, above the
  * footer (the Ask bar is pinned in the left pane); below it, bottom-left above the fixed Ask bar and the tab bar. If the
- * focused element would still be under it, it moves to the top. Never steals focus, announced politely. Timers pause on
+ * focused control would still be under it, it moves to the other bottom corner, then to the top. A pane focused by a script
+ * (tabindex=-1, a fifth of the window or more: a row click focuses the table pane) is not a control a toast can hide.
+ * Never steals focus, announced politely: the live region is a plain wrapper that is always there; the list inside it
+ * exists only while it has a toast (an empty list was in the accessibility tree). Timers pause on
  * hover, while the toast holds focus and while the tab is hidden; Esc dismisses the newest (its Dismiss is far down the tab
  * order). Dismiss is 44x44 on touch. Errors are neutral, never infection red.
  * A toast that goes away while it holds the keyboard focus (Dismiss, Esc, its action, its timer) hands focus back to where
@@ -19,11 +23,14 @@ export interface ToastInput {
   tone?: 'info' | 'success' | 'error';
   action?: { label: string; onClick: () => void };
   ms?: number;
+  /** Replaces the live toast of the same group instead of stacking a new one. */
+  group?: string;
 }
 interface ToastItem extends ToastInput {
   id: number;
   tone: NonNullable<ToastInput['tone']>;
   ms: number;
+  v: number; // bumped when a grouped toast is replaced in place: its timer starts again
 }
 
 let items: ToastItem[] = [];
@@ -32,8 +39,9 @@ const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
 
 export function toast(t: ToastInput): number {
-  const item: ToastItem = { ...t, id: nextId++, tone: t.tone ?? 'info', ms: t.ms ?? (t.action ? 10_000 : 4_000) };
-  items = [...items, item].slice(-3);
+  const same = t.group ? items.find((i) => i.group === t.group) : undefined;
+  const item: ToastItem = { ...t, id: same?.id ?? nextId++, tone: t.tone ?? 'info', ms: t.ms ?? (t.action ? 10_000 : 4_000), v: (same?.v ?? 0) + 1 };
+  items = same ? items.map((i) => (i === same ? item : i)) : [...items, item].slice(-3);
   emit();
   return item.id;
 }
@@ -59,7 +67,9 @@ function ToastView({ item }: { item: ToastItem }) {
     return () => document.removeEventListener('visibilitychange', onVis);
   }, []);
 
+  const v = useRef(item.v);
   useEffect(() => {
+    if (v.current !== item.v) ((v.current = item.v), (left.current = item.ms)); // replaced in place: a fresh timer
     if (hover || focused || hidden) return;
     const t0 = performance.now();
     const timer = setTimeout(() => dismissToast(item.id), left.current);
@@ -67,7 +77,7 @@ function ToastView({ item }: { item: ToastItem }) {
       clearTimeout(timer);
       left.current -= performance.now() - t0;
     };
-  }, [hover, focused, hidden, item.id]);
+  }, [hover, focused, hidden, item.id, item.v, item.ms]);
 
   const Icon = item.tone === 'success' ? Check : CircleAlert;
   // red means infected here: a failed copy or save is neutral (fg-0 on the dark toast), only success is tinted
@@ -121,7 +131,7 @@ const fixedBarTop = (el: Element | null): number | null => {
 
 export function Toasts() {
   const list = useSyncExternalStore(subscribe, () => items);
-  const ref = useRef<HTMLUListElement>(null);
+  const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<CSSProperties>({ left: 16, bottom: 16 });
 
   // Where the stack goes: clear of the fixed bars and of whatever has keyboard focus.
@@ -135,12 +145,16 @@ export function Toasts() {
     const bottom = Math.max(16, innerHeight - floor + GAP);
     const w = ul.offsetWidth;
     const h = ul.offsetHeight;
-    const x = wide ? { left: innerWidth - 16 - w, right: innerWidth - 16 } : { left: 16, right: 16 + w };
-    const side = wide ? { right: 16 } : { left: 16 };
     const f = document.activeElement;
-    const covered = h > 0 && f instanceof HTMLElement && f !== document.body && !ul.contains(f) && overlaps(f.getBoundingClientRect(), { ...x, top: innerHeight - bottom - h, bottom: innerHeight - bottom });
+    const fr = f instanceof HTMLElement && f !== document.body && !ul.contains(f) ? f.getBoundingClientRect() : null;
+    // a pane a script focused (a row click focuses the table pane) is not a control the stack can hide
+    const pane = fr !== null && f!.getAttribute('tabindex') === '-1' && fr.width * fr.height > innerWidth * innerHeight * 0.2;
+    const covers = (side: 'left' | 'right') =>
+      h > 0 && fr !== null && !pane && overlaps(fr, { left: side === 'left' ? 16 : innerWidth - 16 - w, right: side === 'left' ? 16 + w : innerWidth - 16, top: innerHeight - bottom - h, bottom: innerHeight - bottom });
+    const home = wide ? 'right' : 'left';
+    const away = wide ? 'left' : 'right';
     const header = document.querySelector('body header')?.getBoundingClientRect().bottom ?? 0;
-    const next: CSSProperties = covered ? { ...side, top: Math.max(GAP, header + GAP) } : { ...side, bottom };
+    const next: CSSProperties = !covers(home) ? { [home]: 16, bottom } : !covers(away) ? { [away]: 16, bottom } : { [home]: 16, top: Math.max(GAP, header + GAP) };
     setPos((p) => (JSON.stringify(p) === JSON.stringify(next) ? p : next));
   }, []);
   useLayoutEffect(place, [list, place]);
@@ -164,12 +178,19 @@ export function Toasts() {
   }, [list.length, place]);
 
   return (
-    <ul ref={ref} aria-live="polite" style={pos} className="pointer-events-none fixed z-(--z-toast) flex w-[min(320px,calc(100vw-32px))] flex-col gap-2">
+    <div ref={ref} aria-live="polite" style={pos} className="pointer-events-none fixed z-(--z-toast) w-[min(320px,calc(100vw-32px))]">
+      {/* the list leaves with its last toast's exit, so an empty list is never in the accessibility tree */}
       <AnimatePresence>
-        {list.map((item) => (
-          <ToastView key={item.id} item={item} />
-        ))}
+        {list.length > 0 && (
+          <motion.ul key="list" exit={{ opacity: 1, transition: { duration: 0.14 } }} className="flex flex-col gap-2">
+            <AnimatePresence>
+              {list.map((item) => (
+                <ToastView key={item.id} item={item} />
+              ))}
+            </AnimatePresence>
+          </motion.ul>
+        )}
       </AnimatePresence>
-    </ul>
+    </div>
   );
 }

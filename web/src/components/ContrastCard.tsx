@@ -96,7 +96,7 @@ export function ContrastCard({ snapshot, grepCount, grepName, minutesAhead, reve
               <dt className="label-caps">Advisory scanner</dt>
               <dd className={`flex items-baseline gap-2 ${VAL}`}>
                 <Num n={snapshot?.scanner} cls="text-fg-0" />
-                <span className="text-sm text-fg-1">OSV advisories</span>
+                <span className="text-sm text-fg-1">{snapshot?.scanner === 1 ? 'OSV advisory' : 'OSV advisories'}</span>
               </dd>
             </div>
             <div className={ROW}>

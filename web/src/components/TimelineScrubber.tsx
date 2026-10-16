@@ -20,9 +20,14 @@
  *   failed             the triage did not run: no counter, no counts (a stale number beside "did not run" reads as a result)
  *   remediated         repos marked remediated: printed beside the exposed count ("· 2 marked remediated")
  *   trailing           compact row only: the action at its end ("Run again", or "Cancel run" while one runs)
+ *   back               a control right after the slider in the tab order ("Back to 13:30 UTC" after a scrub, shown on focus)
  *   stale              the previous incident, dimmed while the next one loads (no skeleton flash)
  *   fixedCount         a pasted repo's count, true at the one clock it was analysed at: the slider then says that ("13:45 UTC;
  *                      this repo: 1 of 1 exposed at 13:30 UTC"), not the demo org's timeline count
+ * The headline is as of the clock: past the removal ("15:15 removed") it is past tense, "1 repo was one install from malware
+ * until 15:15": npm no longer serves the version, so "one install from malware" is no longer true.
+ * The compact label line never sets the row's width (`w-0 min-w-full`): a pasted repo's long provenance pushed "Run again"
+ * past the right edge at 1280px. It shows the scope and the few-word note; the provenance is in its title and in the verdict.
  * The landing band's last line is the autoplay's caption (data/markers.ts autoplayCaption: what the 90 minutes are showing,
  * in three states). It is a polite live region only while the autoplay plays, so it speaks at its two changes and never on
  * a scrub (the slider's own aria-valuetext does that). The clock is printed by the header chip and the scrub bubble only.
@@ -69,17 +74,21 @@ export interface TimelineScrubberProps {
   stale?: boolean;
   /** Compact row only: the action at its end ("Run again"). */
   trailing?: ReactNode;
+  /** Right after the slider in the tab order: "Back to 13:30 UTC" after a scrub (App). */
+  back?: ReactNode;
   /** A pasted repo's count at the clock it was analysed at: what the slider says instead of the timeline's count. */
   fixedCount?: { exposed: number; total: number; at: number } | null;
 }
 
-export function TimelineScrubber({ incident, points, at, snapshot, playing, onPlay, onPause, onSeek, landingEnd, compact = false, scope = null, scopeNote = null, scopeNoteShort = null, scopeSource = null, failed = false, remediated = 0, stale = false, trailing, fixedCount = null }: TimelineScrubberProps) {
+export function TimelineScrubber({ incident, points, at, snapshot, playing, onPlay, onPause, onSeek, landingEnd, compact = false, scope = null, scopeNote = null, scopeNoteShort = null, scopeSource = null, failed = false, remediated = 0, stale = false, trailing, back = null, fixedCount = null }: TimelineScrubberProps) {
   const ready = incident !== null && points.length > 0;
   const start = ready ? points[0]!.at : 0;
   const end = ready ? points.at(-1)!.at : 1;
   const pct = (t: number) => Math.min(100, Math.max(0, ((t - start) / (end - start)) * 100));
   const exposed = snapshot && !failed ? exposedCount(snapshot.counts) : null;
   const safe = exposed ? (snapshot?.counts.WOULD_PULL ?? 0) : 0; // exposed only to a fresh install: npm ci from the lockfile is safe
+  // past the removal npm no longer serves the malicious versions: the count is what was true until then
+  const gone = !!exposed && incident !== null && snapshot !== null && snapshot.at >= incident.removedAt;
   const sample = ready ? snapshotAt(points, at) : null; // the slider speaks for the timeline, whoever's numbers the band shows
 
   const [trackEl, setTrackEl] = useState<HTMLDivElement | null>(null); // state, not a ref: the track is re-parented when the band collapses
@@ -155,18 +164,26 @@ export function TimelineScrubber({ incident, points, at, snapshot, playing, onPl
       aria-label={compact ? playLabel : undefined}
       title={compact ? playLabel : undefined}
       // landing: wide enough for "Play the 163 minutes" (the label changes when the autoplay ends and must not push the
-      // counter); compact: the icon alone, so the one-row band fits 1280px with its action at the end
-      className={compact ? 'w-(--control-h) px-0' : 'min-w-[12rem]'}
+      // counter); compact, and a phone held sideways: the icon alone (the label stays as screen-reader text), so the one-row
+      // band fits 1280px with its action at the end, and the sideways band keeps its track and caption above the tab bar
+      className={compact ? 'w-(--control-h) px-0' : 'min-w-[12rem] short:w-(--control-h) short:min-w-0 short:px-0'}
     >
-      {compact ? null : playLabel}
+      {compact ? null : <span className="short:sr-only">{playLabel}</span>}
     </Button>
   );
 
   const headline = (
-    <div className="flex min-w-0 flex-col">
+    // sideways on a phone it shares the row with the icon-only Play and wraps inside itself, so the track stays above the tab bar
+    <div className={`flex min-w-0 flex-col ${compact ? '' : 'short:flex-1 short:basis-0'}`}>
       <p className="flex flex-wrap items-baseline gap-x-2">
-        <span className={`inline-block min-w-[2ch] text-right font-bold text-fg-0 tabular-nums ${compact ? 'text-2xl' : 'text-3xl'}`}>{exposed ?? '–'}</span>
-        <span className="text-sm text-fg-1">{failed ? 'no result: the triage did not run' : `${exposed === 1 ? 'repo' : 'repos'} one install from malware${safe > 0 ? ',' : ''}`}</span>
+        <span className={`inline-block min-w-[2ch] text-right font-bold text-fg-0 tabular-nums ${compact ? 'text-2xl' : 'text-3xl short:text-2xl'}`}>{exposed ?? '–'}</span>
+        <span className="text-sm text-fg-1">
+          {failed
+            ? 'no result: the triage did not run'
+            : gone
+              ? `${exposed === 1 ? 'repo was' : 'repos were'} one install from malware until ${utc(incident!.removedAt)}${safe > 0 ? ',' : ''}`
+              : `${exposed === 1 ? 'repo' : 'repos'} one install from malware${safe > 0 ? ',' : ''}`}
+        </span>
         {/* the number is not the whole story: WOULD_PULL repos are safe as long as they install from their lockfile. One repo
             (a pasted one) says it plainly: a bare "safe" read as a missing word, or as "the repo is safe". */}
         {/* the slot is always laid out (invisible when it does not apply), so a narrow band never gains or loses a line when
@@ -186,17 +203,18 @@ export function TimelineScrubber({ incident, points, at, snapshot, playing, onPl
       </p>
       {scope &&
         (compact ? (
-          // one line: "Acme demo org · 21 repos · teams synthetic" (truncated, the whole of it in the title)
-          <p className="truncate text-xs text-fg-1" title={[scope, scopeSource ?? scopeNoteShort].filter(Boolean).join(' · ')}>
+          // one line: "Acme demo org · 21 repos · teams synthetic" (truncated, the whole of it in the title); never wider than the headline
+          <p className="w-0 min-w-full truncate text-xs text-fg-1" title={[scope, scopeSource ?? scopeNoteShort].filter(Boolean).join(' · ')}>
             {scope}
-            {(scopeSource ?? scopeNoteShort) && <span className="text-fg-2"> · {scopeSource ?? scopeNoteShort}</span>}
+            {!scopeSource && scopeNoteShort && <span className="text-fg-2"> · {scopeNoteShort}</span>}
           </p>
         ) : (
           <p className="text-xs text-fg-1">
             {scope}
-            {/* a phone gets the few-word note: one line, so the Run action stays above the tab bar at 320x640 */}
-            {scopeNote && <span className="text-fg-2 max-sm:hidden"> · {scopeNote}</span>}
-            {scopeNoteShort && <span className="text-fg-2 sm:hidden"> · {scopeNoteShort}</span>}
+            {/* a phone gets the few-word note: one line, so the Run action stays above the tab bar at 320x640 (and, held
+                sideways, the track and its caption above the tab bar) */}
+            {scopeNote && <span className="text-fg-2 max-sm:hidden short:hidden"> · {scopeNote}</span>}
+            {scopeNoteShort && <span className="text-fg-2 sm:hidden short:inline"> · {scopeNoteShort}</span>}
           </p>
         ))}
     </div>
@@ -227,7 +245,7 @@ export function TimelineScrubber({ incident, points, at, snapshot, playing, onPl
       <TierLegend open={legend} onOpenChange={setLegend} />
     </div>
   ) : (
-    <div className="flex items-start gap-2 border-y border-line-1 py-1.5">
+    <div className="flex items-start gap-2 border-y border-line-1 py-1.5 short:py-1">
       <dl data-legend-trigger="" onClick={openLegend} className="flex min-w-0 flex-1 cursor-help flex-wrap gap-x-4 gap-y-1 sm:grid sm:grid-cols-4 sm:gap-x-5 short:grid-cols-2 xl:grid-cols-2 xl:[@media(max-height:800px)]:flex">
         {stats.map((s) => (
           <div key={s.label} className="grid min-w-0 grid-cols-[auto_1fr] items-baseline gap-x-1.5">
@@ -275,7 +293,8 @@ export function TimelineScrubber({ incident, points, at, snapshot, playing, onPl
       </div>
       <input
         type="range"
-        className={`scrub relative ${compact ? 'scrub-compact pointer-coarse:-my-3.5' : 'pointer-coarse:-my-2.5'} pointer-coarse:h-11`}
+        // 24px tall wherever it sits (the compact row lends it 4px above and below), 44px on a coarse pointer
+        className={`scrub relative ${compact ? '-my-1 pointer-coarse:-my-3.5' : 'pointer-coarse:-my-2.5'} pointer-coarse:h-11`}
         aria-label="Scenario time, UTC"
         min={start}
         max={end}
@@ -287,11 +306,12 @@ export function TimelineScrubber({ incident, points, at, snapshot, playing, onPl
         onKeyDown={onKeyDown}
         onFocus={() => playing && onPause()}
       />
+      {back}
     </div>
   );
 
   return (
-    <section aria-label="Incident timeline" aria-busy={stale || !ready || undefined} className={`flex flex-col gap-2 transition-opacity duration-(--dur-fast) ease-out ${compact ? 'px-(--gutter) py-1' : 'p-3 max-sm:gap-1.5 sm:p-4'} ${stale ? 'pointer-events-none opacity-50' : ''}`}>
+    <section aria-label="Incident timeline" aria-busy={stale || !ready || undefined} className={`flex flex-col gap-2 transition-opacity duration-(--dur-fast) ease-out ${compact ? 'px-(--gutter) py-1' : 'p-3 max-sm:gap-1.5 sm:p-4 short:gap-1.5 short:py-2'} ${stale ? 'pointer-events-none opacity-50' : ''}`}>
       {compact ? (
         <div className="flex flex-wrap items-center gap-x-5 gap-y-1 xl:flex-nowrap">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 xl:shrink-0 xl:flex-nowrap">
@@ -312,7 +332,7 @@ export function TimelineScrubber({ incident, points, at, snapshot, playing, onPl
           {track}
           {/* One line, reserved from the first paint (each state is written to fit it): what the autoplay is showing. The short
               wording on a phone and in the half-width column of a phone held sideways, where the long one took two lines. */}
-          <p aria-live={playing ? 'polite' : 'off'} className="-mt-1 min-h-[18px] text-xs text-fg-1 max-sm:-mt-2">
+          <p aria-live={playing ? 'polite' : 'off'} className="-mt-1 min-h-[18px] text-xs text-fg-1 max-sm:-mt-2 short:-mt-2">
             {incident && ready && (
               <>
                 <span className="lg:hidden [@media(min-width:640px)_and_(min-height:501px)]:hidden">{autoplayCaption(incident, at, true)}</span>

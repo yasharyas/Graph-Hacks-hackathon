@@ -281,20 +281,8 @@
     border-radius: 9999px;
     background: var(--fg-0);
   }
-  /* The compact band's slider: 16px, the thumb's own height (the band is what a laptop pays before the feed). */
-  .scrub-compact {
-    height: 16px;
-  }
-  /* separate rules: one browser's unknown pseudo-element would drop a whole selector list */
-  .scrub-compact::-webkit-slider-runnable-track {
-    height: 16px;
-  }
-  .scrub-compact::-moz-range-track {
-    height: 16px;
-  }
-  .scrub-compact::-webkit-slider-thumb {
-    margin-top: 0;
-  }
+  /* The compact band's slider is 24px too (a 24px target, WCAG 2.5.8): it borrows 4px above and below (-my-1), so the band
+     keeps the 16px row it pays before the feed. */
   .scrub:focus-visible::-webkit-slider-thumb {
     outline: var(--focus-ring-width) solid var(--focus-ring-color);
     outline-offset: 2px;

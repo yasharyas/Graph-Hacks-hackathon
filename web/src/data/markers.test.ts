@@ -73,7 +73,8 @@ test('the autoplay caption has three states, keyed to the first exposure and the
   const at = (s: string) => D(`2025-09-08T${s}:00Z`);
   assert.equal(autoplayCaption(q, at('13:05')), 'Before 13:12 UTC: no malicious version published yet');
   assert.equal(autoplayCaption(q, at('13:12')), 'Before 13:12 UTC: no malicious version published yet'); // 13:12:00 is before 13:12:10
-  assert.equal(autoplayCaption(q, at('13:13')), '13:12 malicious versions out · exposed repos climb · no advisory until 14:26');
+  assert.equal(autoplayCaption(q, at('13:13')), '13:12 malicious versions out · no advisory for 74 min, until 14:26'); // the gap is named ~2 s in
+  assert.equal(autoplayCaption(q, at('13:13'), true), '13:12 malware out · no advisory for 74 min');
   assert.equal(autoplayCaption(q, at('14:26')), autoplayCaption(q, at('13:40'))); // 14:26:00 is before 14:26:51: one caption all the way
   assert.equal(autoplayCaption(q, at('14:30')), '14:26 first OSV record: scanners can flag it only now, 74 min late');
   assert.equal(autoplayCaption(inc(AXIOS), D('2026-03-31T02:10:00Z'), true), '02:07 first OSV record · 106 min late'); // the figure's 105, not 02:07 − 00:21

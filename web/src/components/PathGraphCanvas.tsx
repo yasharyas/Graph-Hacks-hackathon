@@ -17,7 +17,7 @@
  * stays what it means on this screen, an infected repo) drawn on from the bad version toward the repo, arrowheads, and
  * directional particles for a bounded time (and during the landing autoplay); everything else is dimmed.
  * Teams: a pasted repo has no owning team (the server files it under a placeholder), so no team node is drawn for it.
- * Reduced motion: no pulse, no draw-on, no particles.
+ * Reduced motion: no pulse, no draw-on, no particles. The renderer's 60 Hz loop pauses whenever nothing moves (both modes).
  *
  * Props:
  *   exposures, paths, incident   graph input (exposures without a drafted path link straight to their versions)
@@ -294,6 +294,24 @@ export default function PathGraphCanvas({ exposures, paths, incident, selectedRe
 
   // Particles: on the selected chain for a bounded time, on every link during the landing autoplay, never under reduced motion.
   const emitting = !reduce && (recent || playing);
+
+  // The renderer's own loop runs at 60 Hz for ever, drawing nothing new once the motion is over (and never anything under
+  // reduced motion). It runs while something moves or the pointer is over the canvas (hover is read in that loop), for a
+  // few frames after any change (a new graph, a resize, a selection, the fonts), and is paused otherwise.
+  const [pointer, setPointer] = useState(false);
+  const idle = !emitting && !(recent && !reduce) && !pointer;
+  useEffect(() => {
+    const g = fg.current;
+    if (!g) return;
+    g.resumeAnimation();
+    if (!idle) return;
+    let left = 12;
+    let raf = requestAnimationFrame(function wait() {
+      if (--left > 0) raf = requestAnimationFrame(wait);
+      else g.pauseAnimation();
+    });
+    return () => cancelAnimationFrame(raf);
+  });
   const particles = useMemo(
     () =>
       emitting
@@ -518,43 +536,46 @@ export default function PathGraphCanvas({ exposures, paths, incident, selectedRe
   };
 
   return (
-    <ForceGraph2D
-      ref={fg}
-      width={width}
-      height={height}
-      backgroundColor={tok.canvas}
-      graphData={graph}
-      nodeId="id"
-      // Every node is pinned (fx by kind, fy by row), so a few ticks settle it and the fit can run straight away.
-      cooldownTicks={3}
-      onEngineStop={fit}
-      minZoom={0.2}
-      maxZoom={6}
-      enableNodeDrag={false}
-      nodeLabel={() => ''}
-      linkLabel={() => ''}
-      nodeCanvasObjectMode={() => 'replace'}
-      nodeCanvasObject={paint}
-      nodePointerAreaPaint={(n, color, ctx, scale) => {
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.arc(n.x ?? 0, n.y ?? 0, Math.max(rad((n as NodeObject<GNode>).type, scale), 6 / scale), 0, 2 * Math.PI);
-        ctx.fill();
-      }}
-      linkCanvasObjectMode={() => 'replace'}
-      linkCanvasObject={paintLink}
-      linkDirectionalParticles={particles}
-      linkDirectionalParticleWidth={2.5}
-      linkDirectionalParticleSpeed={0.012}
-      linkDirectionalParticleColor={() => chainColor}
-      onRenderFramePost={(ctx) => paintHud(ctx)}
-      autoPauseRedraw={!recent}
-      onNodeClick={(n) => {
-        const node = n as NodeObject<GNode>;
-        const repo = node.type === 'repo' ? node.id : node.type === 'maintainer' ? undefined : firstRepo.get(node.id);
-        if (repo) onSelectRepo(repo);
-      }}
-      onNodeHover={(n) => setHover(n ? (n as NodeObject<GNode>).id : null)}
-    />
+    // a tap's click is read from the hover the loop computes: a paused loop resumes on the press itself, not a render later
+    <div onPointerEnter={() => setPointer(true)} onPointerLeave={() => setPointer(false)} onPointerDown={() => fg.current?.resumeAnimation()}>
+      <ForceGraph2D
+        ref={fg}
+        width={width}
+        height={height}
+        backgroundColor={tok.canvas}
+        graphData={graph}
+        nodeId="id"
+        // Every node is pinned (fx by kind, fy by row), so a few ticks settle it and the fit can run straight away.
+        cooldownTicks={3}
+        onEngineStop={fit}
+        minZoom={0.2}
+        maxZoom={6}
+        enableNodeDrag={false}
+        nodeLabel={() => ''}
+        linkLabel={() => ''}
+        nodeCanvasObjectMode={() => 'replace'}
+        nodeCanvasObject={paint}
+        nodePointerAreaPaint={(n, color, ctx, scale) => {
+          ctx.fillStyle = color;
+          ctx.beginPath();
+          ctx.arc(n.x ?? 0, n.y ?? 0, Math.max(rad((n as NodeObject<GNode>).type, scale), 6 / scale), 0, 2 * Math.PI);
+          ctx.fill();
+        }}
+        linkCanvasObjectMode={() => 'replace'}
+        linkCanvasObject={paintLink}
+        linkDirectionalParticles={particles}
+        linkDirectionalParticleWidth={2.5}
+        linkDirectionalParticleSpeed={0.012}
+        linkDirectionalParticleColor={() => chainColor}
+        onRenderFramePost={(ctx) => paintHud(ctx)}
+        autoPauseRedraw={!recent}
+        onNodeClick={(n) => {
+          const node = n as NodeObject<GNode>;
+          const repo = node.type === 'repo' ? node.id : node.type === 'maintainer' ? undefined : firstRepo.get(node.id);
+          if (repo) onSelectRepo(repo);
+        }}
+        onNodeHover={(n) => setHover(n ? (n as NodeObject<GNode>).id : null)}
+      />
+    </div>
   );
 }

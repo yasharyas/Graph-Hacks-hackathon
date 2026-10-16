@@ -12,6 +12,9 @@
  *   guest        the run is about one pasted repo: no team routing to show (the narrative and route_owners say so instead)
  *   cypherHints  values a tool derived inside its run (the incident's maintainer), for the runnable Cypher's parameter prefix
  *   notices      each team's notice (Report.notices): the narrative's Notify roster copies one per team
+ *   noticeLink   a link back to this run, appended to each copied team notice
+ *   onStatus     where the feed's one status line goes: App keeps that live region mounted outside <main>, which is rebuilt
+ *                below 768px when a run starts (a region inserted already holding "Starting the triage" is not read out)
  *   footer       the AskBox, pinned: sticky at the bottom of the pane, fixed above the tab bar below 1024px
  *
  * Proof: every claim chip, [E#] tag and claim-map entry calls trace(entity). The tool call that returned it (data/
@@ -32,7 +35,7 @@
  * `narration.draft` (when the state carries it) or, failing that, "still running, no guard yet" means the analyst pick may
  * still arrive: its place is reserved.
  */
-import { Fragment, useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { plainError } from '../data/errors.ts';
 import { nextStep, requestIdFor } from '../data/failure.ts';
 import { answerLabel, proofFor, spokenAnswer } from '../data/narration.ts';
@@ -59,6 +62,8 @@ export interface ToolFeedProps {
   guest?: boolean;
   cypherHints?: Record<string, unknown>;
   notices?: Notice[];
+  noticeLink?: string | null;
+  onStatus?: (text: string) => void;
   footer?: ReactNode;
 }
 
@@ -95,7 +100,7 @@ function useCalm(text: string, calm: boolean, ms: number): string {
   return out;
 }
 
-export function ToolFeed({ cards, followUps, narration, guard, status, error, scenario, onRun, onSelectEntity, clockAt, guest = false, cypherHints, notices, footer }: ToolFeedProps) {
+export function ToolFeed({ cards, followUps, narration, guard, status, error, scenario, onRun, onSelectEntity, clockAt, guest = false, cypherHints, notices, noticeLink, onStatus, footer }: ToolFeedProps) {
   const lastRef = useRef<HTMLElement>(null);
   const nonce = useRef(0);
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
@@ -265,11 +270,25 @@ export function ToolFeed({ cards, followUps, narration, guard, status, error, sc
     );
   };
 
+  // The fixed Ask bar's height, for the page's bottom padding below 1024px (App): it grows by a line for an error or "4 of 4 used".
+  const askRef = useRef<HTMLDivElement>(null);
+  const hasFooter = !!footer;
+  useLayoutEffect(() => {
+    const el = askRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => document.documentElement.style.setProperty('--ask-live', `${el.offsetHeight}px`));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [hasFooter, cards.length === 0]);
+
   // ONE status region for both states (empty and running): the element stays mounted, so the first thing it says
-  // ("Starting the triage") is a change a screen reader speaks, not a region inserted already holding its text.
-  const region = (
+  // ("Starting the triage") is a change a screen reader speaks, not a region inserted already holding its text. With
+  // onStatus the region is App's (outside <main>, which a phone rebuilds when a run starts); this one is the fallback.
+  const line = said || spoken;
+  useEffect(() => onStatus?.(line), [line, onStatus]);
+  const region = onStatus ? null : (
     <p role="status" className="sr-only">
-      {said || spoken}
+      {line}
     </p>
   );
   if (cards.length === 0 && status !== 'running') {
@@ -356,6 +375,7 @@ export function ToolFeed({ cards, followUps, narration, guard, status, error, sc
           awaitingGuard={status === 'running' && guard === null}
           guest={guest}
           notices={notices}
+          noticeLink={noticeLink}
         />
         {list(0)}
         {status === 'error' && error && cards.length > 0 && (
@@ -395,8 +415,8 @@ export function ToolFeed({ cards, followUps, narration, guard, status, error, sc
         ))}
         {footer && (
           <>
-            <div aria-hidden className="h-20 lg:hidden [@media(max-height:559px)]:hidden" />
             <div
+              ref={askRef}
               id="ask"
               className="z-(--z-sticky) -mx-3 -mb-3 border-t border-line-1 bg-bg-1 px-3 pt-2 pb-3 max-lg:mx-0 max-lg:mb-0 max-lg:[@media(min-height:560px)]:fixed max-lg:[@media(min-height:560px)]:inset-x-0 max-lg:[@media(min-height:560px)]:bottom-(--tabbar-h) lg:sticky lg:-bottom-3"
             >

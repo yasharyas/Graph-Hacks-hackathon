@@ -7,8 +7,11 @@
  * without moving the pointer or the focus, WCAG 1.4.13. The words are also printed or screen-reader text elsewhere, so the
  * popover is aria-hidden: it never carries meaning alone).
  * Vertical padding: on a phone the chip is 20px high with 2px above and below the text (the dense desktop table keeps 18px).
+ * The screen-reader meaning is left out where it is said already: `define={false}` (the legends print it beside the chip),
+ * and inside a list of repos (a `[data-repo]` row or card), where the list says it once (the table's "?" and description,
+ * the phone list's key) instead of in each of 21 cells.
  */
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import type { Tier } from '../data/types.ts';
 
 export const TIER_SUBTITLE: Record<Tier, string> = {
@@ -52,9 +55,12 @@ function useRowFocus(host: RefObject<HTMLElement | null>, enabled: boolean): boo
   return focused;
 }
 
-export function TierChip({ tier, dev = false, showSubtitle = false, tip = false }: { tier: Tier; dev?: boolean; showSubtitle?: boolean; tip?: boolean }) {
+export function TierChip({ tier, dev = false, showSubtitle = false, tip = false, define = true }: { tier: Tier; dev?: boolean; showSubtitle?: boolean; tip?: boolean; define?: boolean }) {
   const host = useRef<HTMLSpanElement>(null);
   const focused = useRowFocus(host, tip);
+  const [inRow, setInRow] = useState(false);
+  useLayoutEffect(() => setInRow(host.current?.closest('[data-repo]') != null), []);
+  const meaning = define && !inRow;
   const [dismissed, setDismissed] = useState(false);
   const [hover, setHover] = useState(false);
   const wanted = tip && (focused || hover);
@@ -77,10 +83,12 @@ export function TierChip({ tier, dev = false, showSubtitle = false, tip = false 
         <span className={`inline-flex h-[18px] shrink-0 items-center gap-1.5 rounded-xs px-1.5 font-mono text-xs leading-none font-medium whitespace-nowrap max-md:h-auto max-md:py-0.5 max-md:leading-4 ${STYLE[tier]}`}>
           <span aria-hidden className="size-1.5 rounded-full bg-current" />
           {tier}
-          <span className="sr-only">
-            : {TIER_SUBTITLE[tier]}
-            {dev ? ' (dev dependencies only)' : ''}
-          </span>
+          {(meaning || dev) && (
+            <span className="sr-only">
+              {meaning ? `: ${TIER_SUBTITLE[tier]}` : ''}
+              {dev ? ' (dev dependencies only)' : ''}
+            </span>
+          )}
         </span>
         {tip && (
           <span aria-hidden className={`tip ${dismissed ? 'hidden!' : ''}`} style={show ? { opacity: 1, visibility: 'visible', pointerEvents: 'auto' } : { pointerEvents: 'auto' }}>

@@ -6,17 +6,16 @@
  * question), All Cypher used (one <pre>, wrapped, scrolling down only, Copy all: one example per distinct statement with the FalkorDB parameter
  * prefix it ran with, each ";"-terminated and labelled, since FalkorDB runs one statement per query; data/cypherParams.ts
  * cypherScript), Triage history (two lists: "Marked remediated",
- * each repo with the time in the person's own zone, first; and "Assessed in earlier runs": how many repos, the latest time
+ * each repo with its UTC time (the app's one zone), first; and "Assessed in earlier runs": how many repos, the latest time
  * and their tiers, both from recall_triage rows {repo, tier, action, at}, one row per repo), Graph stats (graph name and
  * the graph's node / edge counts from /api/stats, per-tool queries / rows / FalkorDB ms, and the schema this run's Cypher
  * touched; the per-run figures are read from this run's real tool results). The Concentration tab says where its scores
  * come from (algo.pageRank at ingest). role=tablist, arrow keys.
  */
 import { useId, useRef, useState, type KeyboardEvent } from 'react';
-import { localStamp } from '../data/clock.ts';
 import { schemaOf } from '../data/cypher.ts';
 import { cypherScript } from '../data/cypherParams.ts';
-import { fmtMs, plural } from '../data/format.ts';
+import { fmtMs, plural, utcStamp } from '../data/format.ts';
 import { repoLabel } from '../data/repoLabel.ts';
 import type { Report } from '../data/types.ts';
 import { useStats } from '../data/useStats.ts';
@@ -69,13 +68,18 @@ export function InsightTabs({ report, cards, graph, totalMs, remediated }: Insig
     const next = e.key === 'Home' ? 0 : e.key === 'End' ? TABS.length - 1 : e.key === 'ArrowRight' ? (i + 1) % TABS.length : e.key === 'ArrowLeft' ? (i - 1 + TABS.length) % TABS.length : -1;
     if (next < 0) return;
     e.preventDefault();
-    setTab(next);
+    select(next);
     refs.current[next]?.focus();
+  };
+  // the strip scrolls sideways on a phone: the chosen tab comes fully into view, 12px clear of the edge (it sat at x = -13)
+  const select = (i: number) => {
+    setTab(i);
+    refs.current[i]?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
   };
 
   return (
     <section aria-label="Details" className="border-t border-line-1">
-      <div role="tablist" aria-label="Details" className="flex gap-1 overflow-x-auto border-b border-line-1 px-3">
+      <div role="tablist" aria-label="Details" className="flex scroll-px-3 gap-1 overflow-x-auto border-b border-line-1 px-3">
         {TABS.map((t, i) => (
           <button
             key={t}
@@ -86,7 +90,7 @@ export function InsightTabs({ report, cards, graph, totalMs, remediated }: Insig
             aria-selected={tab === i}
             aria-controls={`${base}-panel${i}`} // every tab's panel is in the DOM (hidden unless selected), so the id always resolves
             tabIndex={tab === i ? 0 : -1}
-            onClick={() => setTab(i)}
+            onClick={() => select(i)}
             onKeyDown={(e) => onKey(e, i)}
             // The ring sits inside the button: the tablist scrolls horizontally and would clip an outer ring.
             className={`-mb-px min-h-(--control-h) shrink-0 border-b-2 px-2 text-sm whitespace-nowrap focus-visible:-outline-offset-2 ${tab === i ? 'border-fg-0 text-fg-0' : 'border-transparent text-fg-1 hov:text-fg-0'}`}
@@ -169,16 +173,16 @@ export function InsightTabs({ report, cards, graph, totalMs, remediated }: Insig
           (marks.length || earlier.length ? (
             <div className="flex flex-col gap-4">
               <section aria-labelledby={`${base}-marked`}>
-                <h4 id={`${base}-marked`} className="label-caps mb-1.5">
+                <h3 id={`${base}-marked`} className="label-caps mb-1.5">
                   Marked remediated
-                </h4>
+                </h3>
                 {marks.length ? (
                   <ul className="flex flex-col gap-1">
                     {marks.map(([repo, at]) => (
                       <li key={repo} className="flex flex-wrap items-baseline gap-x-2 text-xs">
                         <span className="font-mono text-fg-0 [overflow-wrap:anywhere]">{repoLabel(repo)}</span>
                         <time dateTime={new Date(at).toISOString()} className="text-fg-1">
-                          {localStamp(at)}
+                          {utcStamp(at)}
                         </time>
                       </li>
                     ))}
@@ -189,13 +193,13 @@ export function InsightTabs({ report, cards, graph, totalMs, remediated }: Insig
                 <p className="mt-1.5 text-xs text-fg-2">Marks are saved for this browser session only.</p>
               </section>
               <section aria-labelledby={`${base}-earlier`}>
-                <h4 id={`${base}-earlier`} className="label-caps mb-1.5">
+                <h3 id={`${base}-earlier`} className="label-caps mb-1.5">
                   Assessed in earlier runs
-                </h4>
+                </h3>
                 {earlier.length ? (
                   <p className="text-fg-0">
                     {plural(earlier.length, 'repo')} <span className="text-fg-1">· latest </span>
-                    <time dateTime={new Date(latest).toISOString()}>{localStamp(latest)}</time>
+                    <time dateTime={new Date(latest).toISOString()}>{utcStamp(latest)}</time>
                     <span className="mt-1 block font-mono text-xs text-fg-1">{tiers.map(([t, n]) => `${t} ${n}`).join(' · ')}</span>
                   </p>
                 ) : (
@@ -216,6 +220,15 @@ export function InsightTabs({ report, cards, graph, totalMs, remediated }: Insig
                 <dd className="font-mono text-xs text-fg-0 tabular-nums">
                   {count(stats.data.nodes.reduce((n, x) => n + x.count, 0))} nodes · {count(stats.data.edges.reduce((n, x) => n + x.count, 0))} edges
                   <span className="block text-fg-1">{stats.data.nodes.slice(0, 5).map((x) => `${x.label} ${count(x.count)}`).join(' · ')}</span>
+                </dd>
+              </>
+            )}
+            {guest && (
+              <>
+                <dt className="text-fg-1">Graph size</dt>
+                <dd className="max-w-(--measure) text-xs text-fg-1">
+                  Not counted for a pasted repo: its graph is a temporary one built from its lockfile (deleted after an hour unused). The node
+                  and edge counts (/api/stats) cover the demo org&rsquo;s graphs.
                 </dd>
               </>
             )}

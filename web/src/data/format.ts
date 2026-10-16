@@ -16,6 +16,13 @@ export function utcSec(ms: number): string {
 /** "13:30 UTC" */
 export const utcLabel = (ms: number): string => `${utc(ms)} UTC`;
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** "16 Oct, 09:46 UTC": a wall-clock moment (a mark, an earlier run) in the app's one zone, never the browser's. */
+export const utcStamp = (ms: number): string => {
+  const d = new Date(ms);
+  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}, ${utcLabel(ms)}`;
+};
+
 /** "+74 min" / "−04 min" (true minus sign) */
 export const signedMin = (m: number): string => `${m < 0 ? '−' : '+'}${Math.abs(m)} min`;
 
