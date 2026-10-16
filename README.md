@@ -104,7 +104,7 @@ Why one `Dep` node per lockfile location instead of shared `Version -> Version` 
 
 Generated from `server/tools/cypher.ts` by `node scripts/gen-readme-cypher.ts`; `test/readme.test.ts` fails if this drifts from the code.
 
-**Run one yourself.** Every query takes `$parameters` (times are epoch milliseconds). In the FalkorDB Browser (http://localhost:3000 with `docker compose up`), pick the graph `pz_acme_qix` and paste a query with its parameters in front. This one returns the 19 versions the hijacked `qix` account published between 13:00 and 14:30 UTC on 2025-09-08, 74 minutes before the first OSV record:
+**Run one yourself.** Every query takes `$parameters` (times are epoch milliseconds). In the FalkorDB Browser (http://localhost:3000 with `docker compose up`; log in with host `localhost`, port `6379` and the `REDIS_PASSWORD` from your `.env`, default `pz-dev-redis`), pick the graph `pz_acme_qix` and paste a query with its parameters in front. This one returns the 19 versions the hijacked `qix` account published between 13:00 and 14:30 UTC on 2025-09-08, 74 minutes before the first OSV record:
 
 ```cypher
 CYPHER maintainer="qix" since=1757336400000 until=1757341800000
