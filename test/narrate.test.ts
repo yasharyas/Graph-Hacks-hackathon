@@ -247,7 +247,7 @@ test('observations: built only from the report, so every one passes the guard; d
   r.exposures = [...r.exposures, exposure('appium/appium', 'WOULD_PULL'), exposure('nestjs/nest', 'WOULD_PULL', { dev: true })];
   const more = observations(r);
   const carrier = more.find((o) => o.id === 'carrier')!;
-  assert.equal(carrier.text, '2 repos get a malicious version through the same dependency, `@babel/core`: `appium/appium` and `nestjs/nest`.');
+  assert.equal(carrier.text, "2 repos' shortest paths to a malicious version run through the same dependency, `@babel/core`: `appium/appium` and `nestjs/nest`.");
   assert.equal(more.find((o) => o.id === 'team')!.text, '`QA` owns 4 of the 7 exposed repos, more than any other team.');
   for (const o of more) assert.deepEqual(guard(o.text, evidenceSet(r)).flagged, [], o.text);
   // nothing exposed: nothing to pick

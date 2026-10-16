@@ -139,7 +139,9 @@ export function observations(r: Report): Observation[] {
     const all = top[1] === exposed.length;
     out.push({ id: 'spread', numbers: [top[1], exposed.length], text: `${tk(top[0])} reaches ${all ? 'every one' : top[1]} of the ${exposed.length} exposed repos${!second || second[1] < top[1] ? ', more than any other malicious version' : ''}.` });
   }
-  const via = new Map<string, string[]>(); // the dependency that declares the admitting range -> repos
+  // The dependency that declares the admitting range on each repo's shortest path -> repos. Shortest paths only: other paths
+  // through the same dependency exist (Ask "which repos get debug@4.4.2 through @babel/core?" lists every one), so say so.
+  const via = new Map<string, string[]>();
   for (const p of paths) {
     if (p.kind !== 'ADMITS' || p.hops === 0) continue;
     const dep = split(p.chain.at(-1)!)[0];
@@ -147,7 +149,7 @@ export function observations(r: Report): Observation[] {
   }
   const [carrier, carried] = [...via].sort((a, b) => b[1].length - a[1].length)[0] ?? [];
   if (org && carrier && carried.length >= 2) {
-    out.push({ id: 'carrier', numbers: [carried.length, carried.length - 3], text: `${carried.length} repos get a malicious version through the same dependency, ${tk(carrier)}: ${listed(carried)}.` });
+    out.push({ id: 'carrier', numbers: [carried.length, carried.length - 3], text: `${carried.length} repos' shortest paths to a malicious version run through the same dependency, ${tk(carrier)}: ${listed(carried)}.` });
   }
   const own = paths.filter((p) => p.kind === 'ADMITS' && p.hops === 0).map((p) => p.repo);
   if (own.length) {

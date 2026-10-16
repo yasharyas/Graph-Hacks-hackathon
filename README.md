@@ -145,7 +145,7 @@ Why one `Dep` node per lockfile location instead of shared `Version -> Version` 
    …
 ```
 
-The `@babel/core` hop is the carrier that the recorded analyst pick names in the app: 4 repos get a malicious version through that one dependency.
+The `@babel/core` hop is the carrier that the recorded analyst pick names in the app: it is on the shortest path of 4 repos, and on some path of 16 (ask "which repos get debug@4.4.2 through @babel/core?").
 
 ## Run it locally
 
@@ -260,6 +260,16 @@ MATCH (:Incident {id: $incident})-[:INVOLVES]->(bad:Version)<-[a:ADMITS]-(p:Dep)
 WHERE a.fromT <= $at AND $at < a.toT AND l.name = bad.name AND r.range = a.range
 RETURN p.repo AS repo, bad.id AS version, min(p.depth) AS depth, collect(DISTINCT l.dev) AS devFlags,
   collect(DISTINCT a.range)[0..3] AS ranges, min(a.fromT) AS since, collect(DISTINCT l.name + '@' + l.version) AS locked
+```
+
+#### `EXPOSURE_CARRIERS`
+
+filter_exposures (carriers, via): per repo and malicious version, every dependency whose declared range admits it at $at ('' = the repo's own package.json). Changing one of them touches only the repos it carries; an override on the malicious version covers every carrier.
+
+```cypher
+MATCH (:Incident {id: $incident})-[:INVOLVES]->(bad:Version)<-[a:ADMITS]-(p:Dep)-[r:REQUIRES]->(l:Dep)
+WHERE a.fromT <= $at AND $at < a.toT AND l.name = bad.name AND r.range = a.range
+RETURN p.repo AS repo, bad.id AS version, collect(DISTINCT CASE WHEN p.path = '' THEN '' ELSE p.name END) AS carriers
 ```
 
 #### `MAINTAINER_BLAST_RADIUS`
