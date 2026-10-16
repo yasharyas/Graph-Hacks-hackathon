@@ -441,7 +441,7 @@ Two incidents are ingested: qix (2025-09-08) and axios (2026-03-31). The scenari
 
 ## AI-use disclosure
 
-Built with Claude Code (Anthropic) as the coding assistant, under the author's direction; the author reviewed every Cypher query and design decision. At runtime, free-tier models (Groq, Gemini) do two things: pick one analyst observation, by id, from facts the server built from the graph, and handle open-ended Ask questions by picking read-only graph tools, with the claims guard checking every name and count in the reply. They never write the verdict, decide tiers, parse the alert, or answer list, rotate or `npm ci` questions. Every fact shown comes from Cypher. AI agents also ran the persona QA (`qa/reports/`) and the security reviews, and drafted the docs, the blog, the video script and the UI copy. Full disclosure, with a dated list of the decisions taken during the build: `docs/AI_USE.md`.
+Built with Claude Code (Anthropic) as the coding assistant, under the author's direction; the author reviewed every Cypher query and design decision. At runtime, free-tier models (Groq, Gemini) do two things: pick one analyst observation, by id, from facts the server built from the graph, and handle open-ended Ask questions by picking read-only graph tools, with the claims guard checking every name and count in the reply. They never write the verdict, decide tiers, parse the alert, or answer list, rotate or `npm ci` questions. Every fact shown comes from Cypher. AI agents also ran the persona QA (`qa/reports/`) and the security reviews, and drafted the docs, the blog, the video script and the UI copy; the demo video's voices are ElevenLabs (AI). Full disclosure, with a dated list of the decisions taken during the build: `docs/AI_USE.md`.
 
 ## License
 

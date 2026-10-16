@@ -140,3 +140,60 @@ Opus reviewer, read-only, against rules S1–S13: **fail** (3 high, 3 medium) �
   - An unknown alert is a 200 with an SSE error, so a handled case logs no console error.
   - The font fetch retries network and 5xx failures 3 times; a hash mismatch still fails.
 - **Docs:** the README has a 60-second judge tour, "What the agent does", a real MCP transcript and the setup above the Cypher. The claims the app contradicted are corrected (the EXPLAIN_PATH plan starts at the Dep index), the AI-use disclosure is complete, and `docs/submission.md` is new.
+
+## Video script arena — 2026-10-16
+
+- **The brief:**
+  - ElevenLabs voice-over with at least two voices
+  - pixel art and p5.brush, each in specific parts only
+  - the curve: animation, then explanation, then the real UI, with cut-the-curve seams
+  - hard cap 2:30
+- **Candidates:**
+  - C1 "Resolution" (Opus): pixel, then brush, then UI. A third "graph" voice reads only on-screen strings.
+  - C2 "The Record and the Moment" (Sonnet): one time axis through all three looks, with a Ledger voice and an On-call voice.
+  - C3 "One red thing, three resolutions" (Fable): the malicious version as a pixel tile, then a pen dot, then the UI node.
+- **Scores (Sonnet cross-judge):** C2 86.8, C3 77.0, C1 75.5. My own scoring agreed on the order (about 84 / 78 / 76.5).
+- **Base: C2.** It has:
+  - the only real hook ("Seventy-four minutes.")
+  - the clearest two-voice split
+  - no version strings spoken
+  - all seven FalkorDB points covered
+  - a machine-readable line list
+  - a cut ladder that only shrinks the work
+
+  C3 is simpler to build, but its weak points are the first things a viewer hears.
+- **Convergence, shipped as is:**
+  - Two of three scripts made a voice that only reads what is on screen (C1's GRAPH, C2's Ledger). It is the Ledger.
+  - Two of three cast Alice as the narrator, and two of three cast Viraj as the engineer, so the cast is Alice and Viraj (C2 had Roger, who is now the A/B).
+- **Grafts:**
+  - **From C1:**
+    - the mosaic resolve at the pixel → brush seam (resolution rises)
+    - DSF-2 capture with a click-log cursor
+    - the replay callout "a recorded pick, rebuilt from this run's rows"
+    - the app's legend shapes in the notebook
+  - **From C3:**
+    - the on-screen WOULD_PULL chip with its plain definition
+    - CSS-mask stroke reveals instead of stroke-polyline logging
+    - `plan-loop` round the EXPLAIN index scan
+    - the "Every query is in the read-me" author line
+- **Fixed from the judge's must-fix list:**
+  - The payoff no longer claims Patient Zero "had the answer at 13:30". It now says "the graph needed no advisory: the alarm, our lockfiles, the registry", with the arrow from 14:26 to the 13:16 alert.
+  - The axios 106 is spoken with its referent (the campaign's first OSV record).
+  - Brush marks on the UI are `fg-0`, amber or green. Red is kept for infection and the two time-gap figures.
+  - The disclosure is 24 px or larger and spoken.
+  - `docs/AI_USE.md`, the README and the submission copy now say "Voices: ElevenLabs (AI)".
+  - The UI arrives at 0:45.5.
+  - Brush overlays went from 7 to 4.
+  - An author line is never given to an AI voice.
+- **Rejected:**
+  - C1's third voice: two scripts converged on the rule, which needs no third voice.
+  - C1's animated engineer sprite and Seam B geometry match (too costly, and fragile across takes).
+  - C2's loop drawn round stacked pixel numerals (fit risk, and it broke confinement).
+  - C3's raw version strings in the VO and its date-first opening.
+  - Pixel art anywhere near the explanation: a game look trivializes the security story.
+- **Verification:**
+  - A script parses the line list and checks it: no `[clear]` tag, no banned WOULD_PULL wording, no version string spoken, every cue word present in its line, and every number in a caption found in `docs/proof-points.md` or the measured strings.
+  - The beats sum to 147.5 s.
+  - Counts: 297 synthesized words, 1,776 characters per pass.
+  - Two facts the scripts lean on were checked against the dev graph: socket.io's `@babel/core@7.24.7` sits at depth 1, and mocha pins `debug@4.3.5` at `node_modules/debug`, with a nested `debug@3.2.7`.
+  - An `eleven_v4` audition (Alice, Viraj, Roger, plus the qix A/B; 354 characters) measured Alice at about 128 wpm, so the Ledger runs at tempo 1.06.

@@ -8,7 +8,8 @@ AI agents also did the following:
 
 - **Persona QA.** AI agents role-played six testers against the running app over seven rounds: a FalkorDB judge, an on-call AppSec engineer, an OSS maintainer, a keyboard-only user, a phone user and a design reviewer. Their reports are `qa/reports/phase3*.md`. The judge win audit, `qa/reports/win-audit.md`, came from three AI auditors (Opus, Sonnet and Fable) and a Sonnet cross-judge.
 - **Security reviews.** Claude Opus reviewed the code read-only against S1 to S13, and probed the running app. It ran the Phase 1 gate (findings in `docs/decisions.md`), the Phase 3 gate (`qa/reports/phase3-security.md`) and rounds 3 to 6 (`qa/security/`). Claude Code made the fixes.
-- **Docs and copy.** Claude Code drafted the README, everything in `docs/`, the blog draft, the video script, the launch posts, the submission copy (`docs/submission.md`) and the UI copy. The blog draft and the video voiceover are written in the first person; they are for the author to edit, record and publish.
+- **Docs and copy.** Claude Code drafted the README, everything in `docs/`, the blog draft, the video script, the launch posts, the submission copy (`docs/submission.md`) and the UI copy. The blog draft is written in the first person, for the author to edit and publish.
+- **Demo video.** Three AI-drafted scripts (Opus, Sonnet, Fable) were scored by a Sonnet cross-judge and merged by Claude Code (`docs/decisions.md`, "Video script arena"). The voice-over uses **ElevenLabs AI voices** ("Voices: ElevenLabs (AI)" on the end card and in the description), and the music and sound effects are ElevenLabs or generated locally. The pixel-art and p5.brush scenes are rendered from code. The UI footage is the real app in replay mode. The one line in the author's own voice, if it is in the cut, is recorded on the author's microphone, never synthesized.
 
 ## At runtime
 

@@ -30,7 +30,7 @@ Track 1: Agents That Act on Connected Data
 
 ## AI use (one line)
 
-Built with Claude Code under the author's direction, with AI-run QA and security reviews and AI-drafted docs; at runtime an LLM only picks one graph-built observation by id, or picks read-only tools for open questions (`docs/AI_USE.md`).
+Built with Claude Code under the author's direction, with AI-run QA and security reviews, AI-drafted docs and AI voices in the video (ElevenLabs); at runtime an LLM only picks one graph-built observation by id, or picks read-only tools for open questions (`docs/AI_USE.md`).
 
 ## Links (in judge order)
 
