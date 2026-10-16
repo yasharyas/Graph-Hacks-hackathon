@@ -63,7 +63,7 @@ RETURN type(e) AS kind, e.range AS range, length(p) AS hops, x.depth AS depth,
 ORDER BY kind DESC, hops LIMIT 3
 ```
 
-Two FalkorDB details carried this. `shortestPath` is allowed in `WITH` and `RETURN`, and `*0..` covers a range declared by the root itself, so a direct dependency is a zero-hop path with no special case. And because `Dep.depth` equals the hop count, the query starts from the indexed `Version`, sorts candidates by depth and walks `shortestPath` only for the three shallowest. With path and fix lookups memoized on the immutable demo graphs, a warm qix triage on a 0.1-CPU container takes 2.3 s. Every card shows its Cypher and offers `GRAPH.EXPLAIN` for its plan.
+Two FalkorDB details carried this. `shortestPath` is allowed in `WITH` and `RETURN`, and `*0..` covers a range declared by the root itself, so a direct dependency is a zero-hop path with no special case. And because `Dep.depth` equals the hop count, the query never walks the whole tree. Its `GRAPH.EXPLAIN` plan starts with an index scan of the repo's lockfile entries (`Dep.repo`), keeps the ones whose `RESOLVES_TO` or live `ADMITS` edge reaches the bad `Version`, sorts them by depth and walks `shortestPath` only for the three shallowest. With path and fix lookups memoized on the immutable demo graphs, a warm qix triage on a 0.1-CPU container takes 2.3 s. Every card shows its Cypher and offers `GRAPH.EXPLAIN` for its plan.
 
 ## The graph decides, the LLM picks, never writes
 
@@ -87,7 +87,7 @@ WHERE a.publishedAt <= $at
 RETURN DISTINCT d.repo AS repo, v.id AS version, a.id AS advisory ORDER BY repo, version, advisory
 ```
 
-Zero rows for the whole 74-minute window, and zero for 2 h 54 min on the axios day. That is not a criticism of those tools. It is what advisory-based means.
+Zero rows for the whole 74-minute window, and zero for 106 minutes on the axios day, until the campaign's first OSV record. Even then it flags only the synthetic repo that locks a malicious version. It never flags a `WOULD_PULL` repo, because those lockfiles pin safe versions. That is not a criticism of those tools. It is what advisory-based means.
 
 ## Free tiers, measured
 

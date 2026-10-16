@@ -18,3 +18,5 @@ Needs Node 24+, a running FalkorDB with `pz_acme_qix` / `pz_acme_axios` built (`
 1. "Which repos would have pulled the qix malware at 13:30 UTC on 2025-09-08, and through which path?" (`incident_exposure`, then `explain_path`)
 2. "Who should I tell about it, and what overrides should acme/checkout-web pin?" (`route_owners`, `draft_remediation`)
 3. "Which maintainer is the next likeliest account takeover, and how many repos does it reach?" (`concentration_risk`, `maintainer_blast_radius`)
+
+**Checked** on 2026-10-16 over stdio with only `FALKOR_PORT=6380` and `REDIS_PASSWORD=devpass` set: `initialize` answers as `patient-zero` 1.0.0, `tools/list` returns the 10 tools above (each `readOnlyHint: true`, each with a required `scenario`), and `explain_path` returns rows plus its Cypher. The transcript is in the README under "MCP transcript". The MCP server never writes: triage memory and "Mark remediated" exist only in the web app.

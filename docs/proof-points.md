@@ -2,6 +2,7 @@
 
 The only numbers the README, video, blog and posts may quote. Each line names its source. Recompute with
 `node scripts/exposure-oracle.ts <scenario> <atISO>` (graph-free) and, once the graph is up, the matching Cypher.
+The oracle is a differential test, not a second engine: it reproduces the tier counts only, with no paths from the root, owners, carrier grouping, concentration or tenancy, and the app never calls it.
 
 ## Advisory timing (source: npm packument `time` map in `data/cache/npm/packuments.json`, OSV `published` in `data/cache/osv.json`)
 
@@ -33,6 +34,22 @@ The only numbers the README, video, blog and posts may quote. Each line names it
 - Ask "which exposures are prod-only and who owns them?" at qix 13:30Z: **14 repos across 6 teams**, answered from the graph (`filter_exposures`), never in a model's words.
 - Analyst pick: the LLM chooses one of the observations the server built from the graph, so its words are always the graph's. The pick varies by run and provider; the recorded replays pick the shared-dependency observation: at qix 13:30Z "4 repos get a malicious version through the same dependency, `@babel/core`" (socket.io, jquery, pdf.js and 1 more), at axios 01:30Z "2 repos ... through `nx`" (appium, nest). A live run may pick another observation; every option is built from the graph.
 - Every claim in the narrative is checked against the run's evidence: a qix run traces **all of its claims, about 60** (the exact count depends on the analyst pick and on what the session has marked remediated).
+
+## On screen (source: the production build on `:8080` in headless Chromium at 1440x900, plus a replay-mode API with `LLM_CHAIN=replay`, 2026-10-16)
+
+- Landing (qix): the autoplay runs 13:05 to 14:30 UTC in about 14 s. From about 2 s the hero reads "21 repos one install from malware, 20 safe with npm ci" (LOCKED 1 + WOULD_PULL 20) next to "Advisory scanner 0", and the caption "13:12 malicious versions out · no advisory for 74 min, until 14:26" is on screen. The circled "74 min" appears at about 12 s, once the playhead passes 14:26.
+- qix triage at 13:30: **49 tool calls** (with a browser session; `recall_triage` is one of them). The Notify roster lists **7 teams**. Replay mode traces 62 of 62 claims; a live run that picked another observation traced 61 of 61.
+- axios triage at 01:30: **27 tool calls**; the hero reads "10 repos one install from malware, 9 safe with npm ci" (LOCKED 1 + WOULD_PULL 9). The timeline marks read 00:21 exposed, 02:07 OSV, 02:19 alert, 03:15 removed: the first OSV record came before the first vendor alert.
+- A pasted repo (`mochajs/mocha`, qix 13:30) runs **9 tool calls**, judged on its `package-lock.json` at commit 5f8e8a8 (2025-09-01), the last change before the incident.
+- Mark remediated on `mochajs/mocha`, then Run again: the `recall_triage` card reads "21 repos assessed earlier in this session; 1 marked remediated: mochajs/mocha", and Triage history lists the mark.
+- Concentration tab (each maintainer's share of the top 3's combined PageRank): sindresorhus 43% (307 packages, reaches 21 of 21 repos), ljharb 29% (183 packages, 20 of 21), types 29% (234 packages, 20 of 21).
+
+## Graph, read-only checks (source: `GRAPH.RO_QUERY` / `GRAPH.EXPLAIN` on `pz-falkor`, 2026-10-16)
+
+- ljharb: the `MAINTAINER_BLAST_RADIUS` query reaches **20 repos** in `pz_acme_qix` (183 packages): every repo except the synthetic `acme/checkout-web`.
+- `EXPLAIN_PATH` plan: `Node By Index Scan | (x:Dep)` (the `Dep.repo` index), then `Conditional Traverse | (x)-[e:RESOLVES_TO|:ADMITS]->(Version)` and a filter, in a cartesian product with `Node By Index Scan | (Repo)` and the `ROOT` hop; then sort, limit 3 and `shortestPath`.
+- Scanner view: the only hit in `pz_acme_qix` is `acme/checkout-web` from 14:26:51 (MAL-2025-46974); the only hits in `pz_acme_axios` are `acme/billing-api` from 02:07:58 (MAL-2026-2306, 106 min after the first publish) and 03:15:49 (MAL-2026-2307). No `WOULD_PULL` repo is ever flagged.
+- MCP over stdio: 10 read-only tools (`recall_triage` is not exposed); `explain_path` on `socketio/socket.io` returns 3 rows, the first through `@babel/core@7.24.7` (`^4.1.0`).
 
 ## Free-tier speed (source: `docker run --cpus=0.1 --memory=512m` of the production image, 2026-10-16)
 
