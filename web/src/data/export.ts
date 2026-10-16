@@ -4,6 +4,7 @@
 import { plural, utc, utcLabel } from './format.ts';
 import { lockNote, realTeam, repoLabel, repoShort } from './repoLabel.ts';
 import { scopeReport, type ReportView } from './reportView.ts';
+import { skipsAll, todayAdvice, todayCheck, type TodayCheck } from './todayCheck.ts';
 import type { Exposure, ExposurePath, IncidentMeta, LockSource, Remediation, Report, Tier } from './types.ts';
 import { readUrlState, shareUrl, type OpenTab } from './urlState.ts';
 
@@ -55,25 +56,103 @@ export const isClosed = (incident: IncidentMeta, now: number = Date.now()): bool
 const removedWhen = (incident: IncidentMeta) => `around ${utcLabel(incident.removedAt)} on ${dayOf(incident.removedAt)}`;
 
 /**
- * What the snippet was made for. It comes from the lockfile that was judged, as it stood at the incident, so it can disagree with
- * today's package.json (a range moved past the bad one, a dependency dropped). `subject` names that lockfile where the note is read.
+ * What the snippet was made for. A snapshot's lockfile is the one judged as it stood at the incident, so it can disagree with
+ * today's package.json (a range moved past the bad one, a dependency dropped). Today's lockfile (GitHub's history could not be
+ * read) and a pasted one are not that, and say what they are. `subject` names the lockfile where the note is read.
  */
-export function fixScopeNote(fix?: Pick<Remediation, 'direct' | 'devDirect'>, subject = 'the lockfile judged above'): string {
+export function fixScopeNote(fix?: Pick<Remediation, 'direct' | 'devDirect'>, subject = 'the lockfile judged above', kind?: LockSource['kind']): string {
   const sets = fix
     ? [...Object.entries(fix.direct ?? {}).map(([n, v]) => `${n} ${v} under dependencies`), ...Object.entries(fix.devDirect ?? {}).map(([n, v]) => `${n} ${v} under devDependencies`)]
     : [];
-  return `This is the fix for ${subject}, as it stood at the incident, not for today's package.json. Check it against your current file before you merge: yours may differ.${
+  const what =
+    kind === 'head'
+      ? "This is the fix for today's lockfile, which stands in for the one from the incident (a counterfactual), not for your package.json."
+      : kind === 'pasted'
+        ? 'This is the fix for the lockfile you pasted (a counterfactual), not for your package.json.'
+        : `This is the fix for ${subject}, as it stood at the incident, not for today's package.json.`;
+  return `${what} Check it against your current file before you merge: yours may differ.${
     sets.length ? ` It also sets ${sets.join(', ')}: skip a package you have since removed, and keep a newer version if you already have one.` : ''
   }`;
 }
 
-/** What is true now: npm removed the malicious versions, so installing from a clean lockfile needs no change; a LOCKED lockfile pins a removed version. `tier` null = a report of many repos. */
-export function fixTodayNote(incident: IncidentMeta, tier: Tier | null, now?: number): string {
-  if (!isClosed(incident, now)) return 'The malicious versions are still on npm: keep installing from your committed lockfile (npm ci), and use the overrides only if you must re-resolve dependencies while they are live.';
-  const gone = `Today, in hindsight: npm removed the malicious versions ${removedWhen(incident)}`;
-  if (tier === 'LOCKED') return `${gone}, so npm ci on a lockfile that pins one can no longer fetch it. Re-resolve to a clean release (the overrides below force it), rotate the secrets that builds could read, and rebuild.`;
-  if (tier === null) return `${gone}. A lockfile that pins a clean version (npm ci) needs no change today and a fresh install resolves a clean release; a LOCKED repo's lockfile pins a removed version and has to be re-resolved.`;
-  return `${gone}, so today npm ci needs no change and a fresh install resolves a clean release. Keep the overrides only to hold that release or to replay the window.`;
+/** What holds at the scenario clock first; what is true today apart. `hindsight` is null once the clock has passed the removal. */
+export interface FixToday {
+  lead: string;
+  hindsight: string | null;
+}
+
+/**
+ * The Fix tab's opening, read as of the scenario clock `at` (default: now). While the malicious versions are still on npm the
+ * lead is the advice that holds then (keep npm ci on the lockfile; a LOCKED repo rotates secrets first, then re-resolves, then
+ * rebuilds) and what npm did later is a separate "Today, in hindsight" line. Once the clock has passed the removal it is plain
+ * past tense, no hindsight. `tier` null = a report of many repos.
+ */
+export function fixToday(incident: IncidentMeta, tier: Tier | null, at?: number): FixToday {
+  const gone = `npm removed the malicious versions ${removedWhen(incident)}`;
+  const fixIt = 'rotate the secrets that builds could read, then re-resolve to a clean release (the overrides below force it) and rebuild';
+  if (!isClosed(incident, at)) {
+    const lead =
+      tier === 'LOCKED'
+        ? `The malicious versions are still on npm and this lockfile pins one, so npm ci installs it: ${fixIt}.`
+        : tier === null
+          ? "The malicious versions are still on npm. Installing from a lockfile that pins a clean version (npm ci) is safe; a LOCKED repo's lockfile pins a malicious one: rotate secrets first, then re-resolve to a clean release and rebuild."
+          : 'The malicious versions are still on npm: keep installing from your committed lockfile (npm ci), and use the overrides only if you must re-resolve dependencies while they are live.';
+    const hindsight =
+      tier === 'LOCKED'
+        ? `Today, in hindsight: ${gone}, so npm ci on a lockfile that pins one can no longer fetch it. The re-resolve is still needed.`
+        : tier === null
+          ? `Today, in hindsight: ${gone}, so a clean lockfile needs no change and a fresh install resolves a clean release; a LOCKED repo's lockfile pins a removed version and has to be re-resolved.`
+          : `Today, in hindsight: ${gone}, so npm ci needs no change and a fresh install resolves a clean release. Keep the overrides only to hold that release or to replay the window.`;
+    return { lead, hindsight };
+  }
+  const lead =
+    tier === 'LOCKED'
+      ? `${gone}, so npm ci on a lockfile that pins one can no longer fetch it: ${fixIt}.`
+      : tier === null
+        ? `${gone}. A lockfile that pins a clean version (npm ci) needs no change and a fresh install resolves a clean release; a LOCKED repo's lockfile pins a removed version and has to be re-resolved.`
+        : `${gone}, so npm ci needs no change and a fresh install resolves a clean release. Keep the overrides only to hold that release or to replay the window.`;
+  return { lead, hindsight: null }; // "npm" starts a sentence in lower case, as npm writes it
+}
+
+/** A fix read against today's package.json (Remediation.today, a pasted repo's): what differs, and the line that goes beside Copy. */
+export interface TodayRead {
+  check: TodayCheck | null;
+  /** "Before you paste: skip ...", null when nothing differs. */
+  advice: string | null;
+  /** Every override of the fix is one to skip: the snippet adds nothing today (its direct pins exist only for the overrides). */
+  skipAll: boolean;
+  /** The same as plain lines for a copy (the Notice, the steps): empty unless something differs. When the whole snippet is to be skipped the advice says why, so the per-key notes are not repeated. */
+  lines: string[];
+}
+
+/**
+ * todayCheck + todayAdvice for one fix. A note the check cannot sort into skip / move (a shape this client does not know) is
+ * kept in the advice as the server wrote it: nothing that changes the snippet is left out of the line beside Copy.
+ */
+export function readToday(fix?: Pick<Remediation, 'overrides' | 'today'>): TodayRead {
+  const check = todayCheck(fix?.today);
+  const skipAll = skipsAll(check, fix);
+  let advice = todayAdvice(check, fix);
+  const sorted = (check?.status === 'differs' ? check.notes : []).filter((n) => todayCheck([n])?.status !== 'match').map((n) => ({ n, read: todayCheck([n])!.actions.length > 0 }));
+  const unread = sorted.filter((x) => !x.read).map((x) => x.n);
+  if (check && unread.length) advice = `Before you paste: ${skipAll ? 'skip all of it. ' : check.actions.length ? `${check.actions.join(', ')}. ` : ''}${unread.join(' ')}`;
+  // the notes the advice does not already carry, one per line, unless the advice says to skip all of it (then it says why)
+  const lines = check?.status === 'differs' ? ["Checked against today's package.json: it differs from this fix.", ...(skipAll ? [] : sorted.filter((x) => x.read).map((x) => `- ${prose(x.n)}`)), prose(advice!)] : [];
+  return { check, advice, skipAll, lines };
+}
+
+/** The fix without the overrides and direct pins today's package.json says to skip (a pasted repo's Remediation.today). */
+function unskipped(fix: Remediation, check: TodayCheck | null): Pick<Remediation, 'overrides' | 'direct' | 'devDirect'> {
+  if (check?.status !== 'differs') return fix;
+  const keep = (m: Record<string, string> | undefined, override: boolean) =>
+    Object.fromEntries(Object.entries(m ?? {}).filter(([k, v]) => !(override && check.skipped.includes(k)) && !check.skippedPins.includes(`${pinName(k)}@${v}`) && !(!override && check.skippedNames.includes(k))));
+  return { overrides: keep(fix.overrides, true), direct: keep(fix.direct, false), devDirect: keep(fix.devDirect, false) };
+}
+
+/** The steps as copied: what today's package.json changes about the snippet first (what to skip), then the server's steps, numbered. */
+export function stepsText(fix: Pick<Remediation, 'overrides' | 'today' | 'steps'>): string {
+  const { lines } = readToday(fix);
+  return [...(lines.length ? [...lines, ''] : []), ...fix.steps.map((s, i) => `${i + 1}. ${s}`)].join('\n');
 }
 
 /** How npm applies an override key: a version-qualified key reaches every dependent whose range admits that version, not only the one that resolved it. */
@@ -168,6 +247,7 @@ export function reportToMarkdown(whole: Report, view?: ReportView, now?: number)
   const live = publishedBy(r.incident, r.at);
   const total = r.incident.versions.length;
   const lock = lockNote(whole.scope?.source, whole.exposures[0]?.repo ?? whole.scope?.label ?? '');
+  const today = fixToday(r.incident, null, r.at); // as of the scenario clock; what npm did later is its own "in hindsight" line
   const lines = [
     `# ${r.incident.id.replace(/[\r\n]+/g, ' ')}: ${live} malicious version${live === 1 ? '' : 's'} published by ${utcLabel(r.at)}`,
     '',
@@ -194,12 +274,12 @@ export function reportToMarkdown(whole: Report, view?: ReportView, now?: number)
     '',
     '## Fixes',
     '',
-    ...(r.remediations.length ? [fixScopeNote(undefined, 'the lockfile each repo was judged on'), '', fixTodayNote(r.incident, null), '', 'Each override key names a bad version and pins every dependent whose range admits it to the clean release, other majors untouched.', ''] : []),
+    ...(r.remediations.length ? [fixScopeNote(undefined, 'the lockfile each repo was judged on', lock?.kind), '', today.lead, ...(today.hindsight ? ['', today.hindsight] : []), '', 'Each override key names a bad version and pins every dependent whose range admits it to the clean release, other majors untouched.', ''] : []),
     ...r.remediations.flatMap((f) => [
       `### ${code(repoLabel(f.repo))}`,
       '',
       // a pasted repo's fix, read against today's package.json: what to leave out is said before the snippet, as in the Fix tab
-      ...(f.today?.length ? ["Checked against today's package.json:", ...f.today.map((n) => `- ${prose(n)}`), ''] : []),
+      ...(f.today?.length ? ["Checked against today's package.json:", ...f.today.map((n) => `- ${prose(n)}`), ...(readToday(f).advice ? [prose(readToday(f).advice!)] : []), ''] : []),
       DIRECT_NOTE,
       '',
       fence(fixJson(f)),
@@ -227,6 +307,8 @@ const ACTION: Record<Tier, string> = {
   MAINTAINER: 'Nothing to change yet. Watch for new advisories.',
   CLEAN: 'Nothing to do.',
 };
+// WOULD_PULL with the window still open, and today's package.json already resolves newer, clean versions of every package: there is nothing to pin.
+const NO_PIN = "Keep npm ci on the committed lockfile. Don't add the pins: today's package.json already resolves newer, clean versions.";
 // Once npm has removed the malicious versions: a clean lockfile needs nothing, a LOCKED one pins a version npm no longer serves.
 const ACTION_CLOSED: Record<Tier, string> = {
   ...ACTION,
@@ -273,7 +355,10 @@ export function slackMessage(i: { exposure: Exposure; paths: ExposurePath[]; fix
   const closed = i.at === undefined ? isClosed(i.incident, i.now) : i.at >= i.incident.removedAt; // as of the scenario clock
   const lock = lockNote(i.source, e.repo);
   const bad = new Set(i.incident.versions.map((v) => v.id));
-  const pins = i.fix ? pinTargets(i.fix.overrides) : [];
+  // A pasted repo's fix, read against today's package.json: what to skip is said before the pins, and a pin to skip is not offered.
+  const { check, skipAll, lines } = readToday(i.fix);
+  const fix = i.fix && unskipped(i.fix, check); // the pins and overrides left once the notes' skips are taken out
+  const pins = fix ? pinTargets(fix.overrides) : [];
   const locked = lockedOf(e).map((l) => `${code(l)} ${bad.has(l) ? '(malicious)' : '(safe)'}`);
   return [
     `${i.anonymous ? '' : `${oneLine(e.team ?? 'Owner not mapped')}: `}npm incident ${oneLine(i.incident.id)}. ${code(repoLabel(e.repo))} ${TIER_WORDS[e.tier]} (${e.dev ? 'dev dependency only' : 'prod dependency'}).`,
@@ -281,10 +366,11 @@ export function slackMessage(i: { exposure: Exposure; paths: ExposurePath[]; fix
     ...(lock ? [`Lockfile judged: ${lock.short}`] : []),
     ...i.paths.slice(0, 2).map((p) => `Path: ${p.chain.map((c, n) => code(n === 0 ? repoShort(c) : c)).join(' > ')}${p.chain.at(-1) === p.version ? '' : ` > ${code(p.version)}`}${p.range ? ` (range ${code(p.range)})` : ''}`),
     ...(locked.length ? [`Your lockfile pins: ${locked.join(', ')}`] : []),
+    ...lines,
     ...(pins.length ? [`Pin to${closed ? ' (optional now)' : ''}: ${pins.map(code).join(', ')}`] : []),
-    ...(i.fix && hasDirect(i.fix) ? [`Also set in package.json${Object.keys(i.fix.direct ?? {}).length ? `, under dependencies: ${pinTargets(i.fix.direct!).map(code).join(', ')}` : ''}${Object.keys(i.fix.devDirect ?? {}).length ? `${Object.keys(i.fix.direct ?? {}).length ? ';' : ','} under devDependencies: ${pinTargets(i.fix.devDirect!).map(code).join(', ')}` : ''}. npm rejects an override that conflicts with a direct dependency.`] : []),
+    ...(fix && hasDirect(fix) && !skipAll ? [`Also set in package.json${Object.keys(fix.direct ?? {}).length ? `, under dependencies: ${pinTargets(fix.direct!).map(code).join(', ')}` : ''}${Object.keys(fix.devDirect ?? {}).length ? `${Object.keys(fix.direct ?? {}).length ? ';' : ','} under devDependencies: ${pinTargets(fix.devDirect!).map(code).join(', ')}` : ''}. npm rejects an override that conflicts with a direct dependency.`] : []),
     windowLine(i.incident, i.at, i.now),
-    `Do: ${(closed ? ACTION_CLOSED : ACTION)[e.tier]}`,
+    `Do: ${skipAll && !closed && e.tier === 'WOULD_PULL' ? NO_PIN : (closed ? ACTION_CLOSED : ACTION)[e.tier]}`,
     ...(i.link ? [`Details: ${i.link}`] : []),
   ].join('\n');
 }

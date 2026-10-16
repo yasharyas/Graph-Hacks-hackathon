@@ -45,6 +45,17 @@ test('a snapshot names its commit and day; head and pasted are counterfactuals',
   assert.ok(pasted.counterfactual);
 });
 
+test("today's lockfile says why: GitHub's history could not be read is not the same as no lockfile before the incident", () => {
+  const none = lockNote({ kind: 'head', reason: 'no-history' }, 'a/b@HEAD')!;
+  assert.match(none.text, /no snapshot from before the incident was available/);
+  const down = lockNote({ kind: 'head', reason: 'unavailable' }, 'a/b@HEAD')!;
+  assert.match(down.text, /GitHub's commit history could not be read just now/);
+  assert.match(down.text, /Try again later for the lockfile as it was/);
+  assert.ok(down.counterfactual && down.kind === 'head');
+  assert.equal(lockNote({ kind: 'snapshot' }, 'a/b')!.kind, 'snapshot');
+  assert.equal(lockNote(undefined, 'pasted/x')!.kind, 'pasted');
+});
+
 test('no source: the repo id still tells head and pasted apart; the demo org has no note', () => {
   assert.ok(lockNote(undefined, 'a/b@HEAD')!.counterfactual);
   assert.ok(lockNote(undefined, 'pasted/x')!.counterfactual);

@@ -15,13 +15,15 @@
  * Header: the repo as words (data/repoLabel.ts: "owner/name (today's lockfile)", "your pasted lockfile (name)"), its tier and,
  * for the demo org only, its team (tagged demo). A pasted repo has no team: the server's placeholder is never shown.
  * Fix tab: which lockfile the repo was judged on (Report.scope.source), what that lockfile pins ("your lockfile pins
- * chalk@5.4.1: safe"; the first 3, malicious ones first, then "+N more"), then the Fix tab leads with what is true TODAY
- * (data/export.ts fixTodayNote: npm has removed the malicious versions, so npm ci needs no change; a LOCKED lockfile pins a
- * removed version and has to be re-resolved), in the largest text of the tab. For a pasted repo judged on a pre-incident
- * snapshot, right under it comes the check against today's package.json (Remediation.today, data/todayCheck.ts): "still
- * matches", or each override or pin today's file does not need, as the server wrote it. Only then what the fix was made for
- * (fixScopeNote: the lockfile that was judged, as it stood at the incident). When the check says to skip a key, the footer
- * says so in a line right above the Copy button (todayAdvice, also the button's description). Then the package.json
+ * chalk@5.4.1: safe"; the first 3, malicious ones first, then "+N more"), then the Fix tab leads with what holds at the
+ * SCENARIO CLOCK (data/export.ts fixToday, report.at: while the versions are live, keep npm ci on the lockfile, and a LOCKED
+ * repo rotates secrets, then re-resolves, then rebuilds; past the removal, plain past tense), in the largest text of the tab.
+ * What npm did later is its own "Today, in hindsight: ..." paragraph under it, never the lead. For a pasted repo judged on a
+ * pre-incident snapshot, right under it comes the check against today's package.json (Remediation.today, data/todayCheck.ts):
+ * "still matches" (the only state that gets the green tick), or each override or pin today's file does not need or would
+ * downgrade, as the server wrote it. Only then what the fix was made for (fixScopeNote: the lockfile that was judged, as it
+ * stood at the incident; today's lockfile and a pasted one say what they are instead). When the check says to skip a key, the
+ * footer says so in a line right above the Copy button (readToday().advice, also the button's description). Then the package.json
  * snippet: the overrides AND each direct pin in the block it is declared in (dependencies / devDependencies), because npm
  * rejects an override that conflicts with a direct dependency. The snippet is valid JSON on its own and is what "Copy JSON"
  * copies (one copy button: the bar's); DIRECT_NOTE sits next to it always, because package.json usually has these blocks
@@ -35,15 +37,17 @@
  * whole team's notice for a demo-org repo, whole-report .md / .json, share link). The dialog is modal, so page toasts would sit
  * dimmed and inert under its scrim: every outcome (copied, exported, marked, undone) is reported by the polite status line
  * inside it, a pill over the foot of the body that goes after a few seconds.
+ * "Mark remediated" and "Undo" are spoken by that status but drawn only from 768px up: below it the bar itself shows the change
+ * (Remediated + Undo) and the pill would cover the snippet. Under 380px the Copy button's second word is for screen readers only,
+ * so the bar (Copy, Remediated Undo, More actions) stays one row at 375px.
  * Focus: Mark remediated hands focus to Undo, Undo hands it back to Mark remediated (the button that replaces it), so it
  * is never dropped on the page behind the dialog. In a short window (a phone held sideways) the header and footer are
  * compact so the body keeps most of the height.
  */
 import { useEffect, useId, useRef, useState } from 'react';
-import { detailsLink, DIRECT_NOTE, fixJson, fixPinsNote, fixScopeNote, fixTodayNote, lockedOf, pinTargets, slackMessage } from '../data/export.ts';
-import { localStamp } from '../data/clock.ts';
+import { detailsLink, DIRECT_NOTE, fixJson, fixPinsNote, fixScopeNote, fixToday, lockedOf, pinTargets, readToday, slackMessage, stepsText } from '../data/export.ts';
+import { utcStamp } from '../data/format.ts';
 import { lockNote, realTeam, repoLabel } from '../data/repoLabel.ts';
-import { todayAdvice, todayCheck } from '../data/todayCheck.ts';
 import type { Report } from '../data/types.ts';
 import { Button, IconButton } from './Button.tsx';
 import { copyText } from './copy.ts';
@@ -97,10 +101,10 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
   const menuRef = useRef<HTMLDivElement>(null);
   const handoff = useRef<'undo' | 'mark' | null>(null); // which button focus is owed to once the parent has swapped them
   const hadUndo = useRef<{ repo: string | null; canUndo: boolean }>({ repo: null, canUndo: false });
-  const [note, setNote] = useState({ text: '', n: 0 }); // `n` tells two identical messages apart, so the second one restarts the clock
+  const [note, setNote] = useState({ text: '', n: 0, quiet: false }); // `n` tells two identical messages apart, so the second one restarts the clock; `quiet`: spoken, and drawn only from 768px up (the bar already shows the change)
   const [menu, setMenu] = useState(false);
   const [allPins, setAllPins] = useState(false);
-  const say = (text: string) => setNote((s) => ({ text, n: s.n + 1 }));
+  const say = (text: string, quiet = false) => setNote((s) => ({ text, n: s.n + 1, quiet }));
   const shown = useRef<string | null>(repo);
   if (repo) shown.current = repo; // keep the content on screen while the exit transition runs
   const id = useId();
@@ -118,7 +122,7 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
   // The status floats over the foot of the body (the bar stays one row) and goes by itself: a message that stayed would hide the snippet's last lines.
   useEffect(() => {
     if (!note.text) return;
-    const t = setTimeout(() => setNote((s) => (s.n === note.n ? { text: '', n: s.n } : s)), NOTE_MS);
+    const t = setTimeout(() => setNote((s) => (s.n === note.n ? { text: '', n: s.n, quiet: false } : s)), NOTE_MS);
     return () => clearTimeout(t);
   }, [note]);
   // "Mark remediated" unmounts the button that had focus and "Undo" unmounts its own: each hands focus to the button that
@@ -158,12 +162,11 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
   const snippet = fix ? fixJson(fix) : '';
   const blocks = fix ? [fix.direct && Object.keys(fix.direct).length && 'dependencies', fix.devDirect && Object.keys(fix.devDirect).length && 'devDependencies', 'overrides'].filter(Boolean).join(', ').replace(/, ([^,]*)$/, ' and $1') : '';
   // What the snippet was made for, what it pins and what is true today: said before the snippet can be copied (data/export.ts)
-  const scopeNote = fix ? fixScopeNote(fix) : '';
-  const todayNote = fix && exposure ? fixTodayNote(report.incident, exposure.tier) : '';
-  const check = fix ? todayCheck(fix.today) : null; // a pasted repo's fix, read against today's package.json
-  const advice = todayAdvice(check, fix); // beside the Copy button: what to leave out of the snippet
+  const scopeNote = fix ? fixScopeNote(fix, undefined, lock?.kind) : '';
+  const today = fix && exposure ? fixToday(report.incident, exposure.tier, report.at) : null; // as of the scenario clock; the removal is a separate "in hindsight" line
+  const { check, advice } = readToday(fix); // a pasted repo's fix, read against today's package.json; `advice` goes beside the Copy button: what to leave out of the snippet
   const pinsNote = fix ? fixPinsNote(fix.overrides) : null;
-  const stepsText = fix ? fix.steps.map((s, i) => `${i + 1}. ${s}`).join('\n') : '';
+  const steps = fix ? stepsText(fix) : ''; // what "Copy steps" copies: the skip notes first, then the numbered steps
   const slack = exposure ? slackMessage({ exposure, paths, fix, incident: report.incident, at: report.at, anonymous: guest, source: report.scope?.source, link: detailsLink(location.href, report, exposure.repo, 'notice') }) : '';
   const copyWhat = async (text: string, what: string) => say((await copyText(text, what, true)) ? `${what} copied` : `Clipboard blocked. Select the ${what.toLowerCase()} text and copy it manually.`);
   // malicious pins first: they are what the reader must not miss, and what survives the cut
@@ -284,7 +287,9 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
                     {/* The tab opens with what is true today (is there anything to do now?), then how today's package.json compares
                         with the fix (Remediation.today, pasted repos only), and only then what the snippet was made for. */}
                     <div className="flex flex-col gap-3 rounded-xs border border-line-2 bg-bg-2 p-3 text-fg-0">
-                      <p className="text-base leading-6 font-medium">{todayNote}</p>
+                      <p className="text-base leading-6 font-medium">{today?.lead}</p>
+                      {/* a later fact (the clock is before npm removed the versions) is its own paragraph, labelled in its own words */}
+                      {today?.hindsight && <p className="text-sm text-fg-1">{today.hindsight}</p>}
                       {check?.status === 'match' && (
                         <p className="flex items-start gap-2 text-sm">
                           <Check size={16} className="mt-0.5 shrink-0 text-tier-clean" />
@@ -356,13 +361,14 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
                 and goes by itself after a few seconds: the snippet's last lines are never covered for good. */}
             <p
               role="status"
-              className="absolute inset-x-4 bottom-full z-10 mb-2 rounded-xs border border-line-2 bg-bg-3 px-3 py-2 text-xs text-fg-0 shadow-popover empty:hidden [@media(max-height:500px)]:inset-x-2 [@media(max-height:500px)]:mb-1 [@media(max-height:500px)]:py-1"
+              className={`absolute inset-x-4 bottom-full z-10 mb-2 rounded-xs border border-line-2 bg-bg-3 px-3 py-2 text-xs text-fg-0 shadow-popover empty:hidden [@media(max-height:500px)]:inset-x-2 [@media(max-height:500px)]:mb-1 [@media(max-height:500px)]:py-1 ${note.quiet ? 'max-md:sr-only' : ''}`}
             >
               {note.text}
             </p>
             {/* right above the button: a key the snippet holds that today's package.json does not need (Remediation.today) */}
             {tab === 'fix' && advice && (
-              <p id={`${id}-advice`} className="text-xs leading-4 text-fg-0">
+              <p id={`${id}-advice`} className="flex items-start gap-1.5 text-xs leading-4 font-medium text-fg-0">
+                <CircleAlert size={14} className="mt-px shrink-0 text-warn" />
                 {advice}
               </p>
             )}
@@ -375,33 +381,33 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
                 disabled={tab === 'fix' ? !fix : !slack}
                 onClick={() => void (tab === 'fix' ? copyWhat(snippet, 'package.json snippet') : copyWhat(slack, 'Slack message'))}
               >
-                {/* under 360px the bar keeps to one row: the second word is for screen readers there */}
-                Copy<span className="max-[359px]:sr-only"> {tab === 'fix' ? 'JSON' : 'message'}</span>
+                {/* under 380px the bar keeps to one row (with Remediated + Undo and the menu): the second word is for screen readers there */}
+                Copy<span className="max-[379px]:sr-only"> {tab === 'fix' ? 'JSON' : 'message'}</span>
               </Button>
               {remediatedAt !== null ? (
                 <span className="inline-flex items-center gap-1 text-sm text-tier-clean">
                   <Check size={16} />
                   {/* the stamp is in the name and the tooltip; the bar has no room to print the date and a zone */}
-                  <span title={`Marked remediated ${localStamp(remediatedAt)}`}>
-                    Remediated<span className="sr-only"> {localStamp(remediatedAt)}</span>
+                  <span title={`Marked remediated ${utcStamp(remediatedAt)}`}>
+                    Remediated<span className="sr-only"> {utcStamp(remediatedAt)}</span>
                   </span>
                   {canUndo && (
                     <button
                       ref={undoRef}
                       type="button"
                       className="inline-flex min-h-(--control-h) min-w-(--control-h) items-center justify-center rounded-xs text-link underline underline-offset-2"
-                      onClick={() => ((handoff.current = 'mark'), onUndo(r), say('Undone: not marked remediated'))}
+                      onClick={() => ((handoff.current = 'mark'), onUndo(r), say('Undone: not marked remediated', true))}
                     >
                       Undo
                     </button>
                   )}
                 </span>
               ) : (
-                <Button ref={markRef} className="px-3" onClick={() => ((handoff.current = 'undo'), onRemediate(r), say('Marked remediated. You can undo it here.'))}>
+                <Button ref={markRef} className="px-3" onClick={() => ((handoff.current = 'undo'), onRemediate(r), say('Marked remediated. You can undo it here.', true))}>
                   Mark remediated
                 </Button>
               )}
-              <IconButton ref={moreRef} label="More actions" aria-expanded={menu} aria-controls={`${id}-menu`} icon={<Dots />} onClick={() => setMenu((m) => !m)} />
+              <IconButton ref={moreRef} label="More actions" aria-expanded={menu} aria-controls={menu ? `${id}-menu` : undefined} icon={<Dots />} onClick={() => setMenu((m) => !m)} />
               {menu && (
                 <div
                   ref={menuRef}
@@ -415,7 +421,7 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
                 >
                   {fix && (
                     <>
-                      <button type="button" className={menuItem} onClick={() => (void copyWhat(stepsText, 'Steps'), setMenu(false), moreRef.current?.focus())}>
+                      <button type="button" className={menuItem} onClick={() => (void copyWhat(steps, 'Steps'), setMenu(false), moreRef.current?.focus())}>
                         <Copy size={16} /> Copy steps
                       </button>
                       <button type="button" className={menuItem} onClick={() => (void copyWhat(fix.prBody, 'PR description'), setMenu(false), moreRef.current?.focus())}>

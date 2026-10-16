@@ -25,6 +25,8 @@ export interface LockNote {
   short: string;
   /** Today's file or a pasted one: the tiers say what it WOULD have done, not what the repo had during the window. */
   counterfactual: boolean;
+  /** Which lockfile: the incident-time snapshot, today's (history unavailable or none), or a pasted one. */
+  kind: LockSource['kind'];
 }
 
 const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
@@ -38,10 +40,14 @@ export function lockNote(source: LockSource | undefined, repo: string): LockNote
   if (kind === 'snapshot') {
     const at = source?.sha ? ` at commit ${source.sha.slice(0, 7)}` : '';
     const from = source?.date !== undefined && Number.isFinite(source.date) ? ` from ${day(source.date)}` : '';
-    return { text: `Judged on the lockfile${at}${from}, the last change before the incident.`, short: `the lockfile${at}${from}, the last change before the incident`, counterfactual: false };
+    return { text: `Judged on the lockfile${at}${from}, the last change before the incident.`, short: `the lockfile${at}${from}, the last change before the incident`, counterfactual: false, kind };
   }
-  if (kind === 'head') return { text: "Judged on today's lockfile (counterfactual): no snapshot from before the incident was available, so the tiers say what today's file would have done during the window.", short: "today's lockfile (counterfactual)", counterfactual: true };
-  if (kind === 'pasted') return { text: 'Judged on your pasted lockfile (counterfactual): the tiers say what this file would have done during the window, not what your repo had then.', short: 'your pasted lockfile (counterfactual)', counterfactual: true };
+  if (kind === 'head') {
+    // GitHub's history could not be read (a rate limit, an outage) is not the same as a repo with no lockfile before the incident
+    const why = source?.reason === 'unavailable' ? "GitHub's commit history could not be read just now" : 'no snapshot from before the incident was available';
+    return { text: `Judged on today's lockfile (counterfactual): ${why}, so the tiers say what today's file would have done during the window.${source?.reason === 'unavailable' ? ' Try again later for the lockfile as it was.' : ''}`, short: "today's lockfile (counterfactual)", counterfactual: true, kind };
+  }
+  if (kind === 'pasted') return { text: 'Judged on your pasted lockfile (counterfactual): the tiers say what this file would have done during the window, not what your repo had then.', short: 'your pasted lockfile (counterfactual)', counterfactual: true, kind };
   return null;
 }
 

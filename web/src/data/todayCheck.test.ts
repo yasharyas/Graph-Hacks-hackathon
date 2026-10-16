@@ -1,7 +1,7 @@
 // Run: node --test web/src/data/todayCheck.test.ts
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { todayAdvice, todayCheck } from './todayCheck.ts';
+import { skipsAll, todayAdvice, todayCheck } from './todayCheck.ts';
 
 // The sentences server/agent/triage.ts todayNotes writes (louislam/uptime-kuma under the axios incident, and the other shapes).
 const KUMA = [
@@ -58,7 +58,7 @@ test('a difference in a shape this does not know still differs, and the advice s
   const c = todayCheck(['Something new: read it.'])!;
   assert.equal(c.status, 'differs');
   assert.deepEqual(c.actions, []);
-  assert.match(todayAdvice(c)!, /check each key below against it/);
+  assert.match(todayAdvice(c)!, /read the notes above/);
 });
 
 test('a match line next to a difference does not hide the difference', () => {
@@ -69,4 +69,35 @@ test('a match line next to a difference does not hide the difference', () => {
 
 test('the same instruction twice is said once', () => {
   assert.deepEqual(todayCheck([KUMA[0]!, KUMA[0]!])!.actions, ['skip the axios@0.30.4 override']);
+});
+
+// A pin or override that would move a package backwards: today's declared range already resolves a newer clean release.
+const DOWN = "debug ^4.3.5 resolves 4.4.3 today: skip the 4.4.1 pin and override.";
+
+test('a pin or override that would move a package backwards is a skip, named by the pinned version', () => {
+  const c = todayCheck([DOWN])!;
+  assert.equal(c.status, 'differs');
+  assert.deepEqual(c.actions, ['skip the debug@4.4.1 pin and override']);
+  assert.deepEqual(c.skippedPins, ['debug@4.4.1']);
+  assert.deepEqual(c.skipped, []);
+  assert.match(todayAdvice(c)!, /^Before you paste: skip the debug@4\.4\.1 pin and override\. Today's package\.json differs/);
+  // with the server's longer wording around it, and the two shorter endings
+  assert.deepEqual(todayCheck(["Today's package.json declares debug ^4.3.5, which resolves 4.4.3: skip the 4.4.1 pin and override."])!.actions, ['skip the debug@4.4.1 pin and override']);
+  assert.deepEqual(todayCheck(['@types/node ^20 resolves 20.19.1 today: skip the 20.11.0 pin.'])!.actions, ['skip the @types/node@20.11.0 pin']);
+  assert.deepEqual(todayCheck(['chalk ^5.3.0 resolves 5.6.2 today: skip the 5.6.0 override.'])!.actions, ['skip the chalk@5.6.0 override']);
+});
+
+test('every override of the fix skipped, by key or by the version it pins, is "skip all of it", with a reason that fits both kinds of note', () => {
+  const fix = { overrides: { 'debug@4.4.2': '4.4.1', 'axios@0.30.4': '0.30.3' } };
+  const both = todayCheck([DOWN, KUMA[0]!])!;
+  assert.equal(skipsAll(both, fix), true);
+  const all = todayAdvice(both, fix)!;
+  assert.match(all, /^Before you paste: skip all of it\. Today's package\.json already resolves newer, clean versions of these packages, so the overrides would only move them backwards/);
+  assert.match(all, /direct pins are only there for the overrides/);
+  assert.ok(!/no longer admits/.test(all), 'the reason does not claim a range check the downgrade note did not make');
+  // one override the notes do not cover: not all of it
+  assert.equal(skipsAll(todayCheck([DOWN])!, { overrides: { ...fix.overrides, 'ansi-styles@6.2.2': '6.2.1' } }), false);
+  assert.equal(skipsAll(todayCheck([MATCH]), fix), false);
+  assert.equal(skipsAll(null, fix), false);
+  assert.equal(skipsAll(todayCheck([DOWN]), { overrides: {} }), false, 'no overrides, nothing to be all of');
 });

@@ -1,8 +1,11 @@
 // Remediation.today, read for the Fix tab. For a pasted repo judged on a pre-incident snapshot the server compares the fix
 // with today's package.json (server/agent/triage.ts todayNotes) and sends one sentence per difference, or one "still match"
-// sentence. The tab shows the sentences as they are; this only decides whether anything differs and what to do about it, so
-// the line beside the Copy button can say "skip the axios@0.30.4 and axios@1.14.1 overrides" without a reader opening the
-// check above.
+// sentence. The differences are of four kinds: an override today's declared range no longer needs ("skip the axios@0.30.4
+// override"), a pin for a package no longer declared ("skip its pin"), a pin declared in the other block ("move its pin"),
+// and a pin or override that would move a package BACKWARDS, because today's declared range already resolves a newer clean
+// release ("debug ^4.3.5 resolves 4.4.3 today: skip the 4.4.1 pin and override"). The tab shows the sentences as they are; this
+// only decides whether anything differs and what to do about it, so the line beside the Copy button can say "skip the
+// debug@4.4.1 pin and override" without a reader opening the check above.
 export interface TodayCheck {
   /** `match`: the fix still fits today's package.json. `differs`: at least one key of the snippet does not apply to it. */
   status: 'match' | 'differs';
@@ -12,12 +15,19 @@ export interface TodayCheck {
   actions: string[];
   /** The override keys the notes say to skip ("axios@0.30.4"). */
   skipped: string[];
+  /** The pins a downgrade note says to skip, as `name@version` ("debug@4.4.1"): they name the pinned version, which is also the value of the override. */
+  skippedPins: string[];
+  /** The packages whose direct pin the notes say to skip by name ("chalk": no longer declared). */
+  skippedNames: string[];
 }
 
 const MATCH = /^Checked against today's package\.json: its direct dependencies still match this fix\.$/;
 const SKIP_OVERRIDE = /: skip the (\S+) override\b/;
 const SKIP_PIN = /no longer declares (\S+): skip its pin\b/;
 const MOVE_PIN = /declares (\S+) in (\w+), not \w+: move its pin there\b/;
+// "debug ^4.3.5 resolves 4.4.3 today: skip the 4.4.1 pin and override", with or without a "Today's package.json declares" before it
+// and a ", which" in it: the package, the pinned version to skip and whether the override goes with the pin.
+const DOWNGRADE = /(@?[\w.-]+(?:\/[\w.-]+)?) \S+?,? (?:which )?resolves \S+?(?: today)?: skip the (\d\S*?) (pin and override|pin|override)\b/;
 
 const and = (xs: string[]) => (xs.length < 2 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
 
@@ -25,16 +35,19 @@ const and = (xs: string[]) => (xs.length < 2 ? (xs[0] ?? '') : `${xs.slice(0, -1
 export function todayCheck(notes: readonly string[] | undefined): TodayCheck | null {
   const list = (notes ?? []).filter((n) => typeof n === 'string' && n.trim());
   if (!list.length) return null;
-  if (list.every((n) => MATCH.test(n))) return { status: 'match', notes: list, actions: [], skipped: [] };
+  if (list.every((n) => MATCH.test(n))) return { status: 'match', notes: list, actions: [], skipped: [], skippedPins: [], skippedNames: [] };
   const overrides = new Set<string>();
   const pins = new Set<string>();
   const moves = new Map<string, string>();
+  const downs = new Map<string, string>(); // name@pin -> "pin and override" | "pin" | "override"
   for (const n of list) {
     if (MATCH.test(n)) continue;
     const override = SKIP_OVERRIDE.exec(n)?.[1];
     const pin = SKIP_PIN.exec(n)?.[1];
     const move = MOVE_PIN.exec(n);
-    if (override) overrides.add(override);
+    const down = DOWNGRADE.exec(n);
+    if (down) downs.set(`${down[1]}@${down[2]}`, down[3]!); // first: "skip the 5.6.0 override" is a version, not an override key
+    else if (override) overrides.add(override);
     else if (pin) pins.add(pin);
     else if (move) moves.set(move[1]!, move[2]!);
   }
@@ -42,20 +55,32 @@ export function todayCheck(notes: readonly string[] | undefined): TodayCheck | n
     ...(overrides.size ? [`skip the ${and([...overrides])} ${overrides.size === 1 ? 'override' : 'overrides'}`] : []),
     ...(pins.size ? [`skip the ${and([...pins])} ${pins.size === 1 ? 'pin' : 'pins'}`] : []),
     ...[...moves].map(([name, block]) => `move the ${name} pin to ${block}`),
+    ...[...downs].map(([key, kind]) => `skip the ${key} ${kind}`),
   ];
-  return { status: 'differs', notes: list, actions, skipped: [...overrides] };
+  return { status: 'differs', notes: list, actions, skipped: [...overrides], skippedPins: [...downs.keys()], skippedNames: [...pins] };
+}
+
+/**
+ * Whether every override of the fix is one the notes say to skip, by its key (an override today's range no longer admits) or by
+ * the version it pins (a downgrade note). Then the whole snippet is to be skipped: the direct pins next to the overrides exist
+ * only because npm rejects an override that conflicts with a direct dependency, so without the overrides they would only move a
+ * package backwards.
+ */
+export function skipsAll(check: TodayCheck | null, fix?: { overrides: Record<string, string> }): boolean {
+  if (!check || check.status === 'match') return false;
+  const entries = Object.entries(fix?.overrides ?? {});
+  const name = (key: string) => (key.lastIndexOf('@') > 0 ? key.slice(0, key.lastIndexOf('@')) : key);
+  return entries.length > 0 && entries.every(([key, pin]) => check.skipped.includes(key) || check.skippedPins.includes(`${name(key)}@${pin}`));
 }
 
 /**
  * The line beside the Copy button: what to leave out of the snippet before pasting it. Null when nothing differs. When every
- * override of the fix is one to skip, the whole snippet is: the direct pins next to the overrides exist only because npm rejects
- * an override that conflicts with a direct dependency, so without the overrides they would only move a package backwards.
+ * override of the fix is one to skip, the whole snippet is.
  */
 export function todayAdvice(check: TodayCheck | null, fix?: { overrides: Record<string, string> }): string | null {
   if (!check || check.status === 'match') return null;
-  const keys = Object.keys(fix?.overrides ?? {});
-  if (keys.length > 0 && keys.every((k) => check.skipped.includes(k)))
-    return "Before you paste: skip all of it. Today's package.json no longer admits the versions these overrides guard against, and the direct pins are only there for the overrides.";
-  const what = check.actions.length ? and(check.actions) : 'check each key below against it';
+  if (skipsAll(check, fix))
+    return "Before you paste: skip all of it. Today's package.json already resolves newer, clean versions of these packages, so the overrides would only move them backwards, and the direct pins are only there for the overrides.";
+  const what = check.actions.length ? and(check.actions) : 'read the notes above';
   return `Before you paste: ${what}. Today's package.json differs from the lockfile this fix was made for.`;
 }

@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import fixture from '../../../shared/fixtures/triage-qix.json' with { type: 'json' };
-import { detailsLink, DIRECT_NOTE, fixJson, fixPinsNote, fixScopeNote, fixTodayNote, isClosed, pinTargets, publishedBy, reportToMarkdown, slackMessage } from './export.ts';
+import { detailsLink, DIRECT_NOTE, fixJson, fixPinsNote, fixScopeNote, fixToday, isClosed, pinTargets, publishedBy, readToday, reportToMarkdown, slackMessage, stepsText } from './export.ts';
 import type { Exposure, Remediation, Report } from './types.ts';
 
 const report = fixture.events.find((e) => e.type === 'report')!.report as unknown as Report;
@@ -178,20 +178,61 @@ test('the fix says what it was made for: the judged lockfile at the incident, no
   assert.match(fixScopeNote(undefined, 'the lockfile each repo was judged on'), /fix for the lockfile each repo was judged on/);
 });
 
-test('today, with the versions removed from npm, a clean lockfile needs no change; a LOCKED one has to be re-resolved', () => {
+test("a fallback to today's lockfile, or a pasted one, never claims the lockfile as it stood at the incident", () => {
+  for (const kind of ['head', 'pasted'] as const) {
+    const note = fixScopeNote(mocha, undefined, kind);
+    assert.ok(!/as it stood at the incident|stood at the incident/.test(note), note);
+    assert.match(note, /counterfactual/);
+    assert.match(note, /Check it against your current file before you merge/);
+    assert.match(note, /It also sets debug 4\.4\.1 under dependencies/);
+  }
+  assert.match(fixScopeNote(mocha, undefined, 'head'), /today's lockfile/);
+  assert.match(fixScopeNote(mocha, undefined, 'pasted'), /lockfile you pasted/);
+  assert.match(fixScopeNote(mocha, undefined, 'snapshot'), /as it stood at the incident/);
+  const md = reportToMarkdown({ ...report, remediations: [mocha], scope: { kind: 'guest', label: 'mochajs/mocha@HEAD', repos: 1, source: { kind: 'head', reason: 'unavailable' } } });
+  assert.ok(!md.includes('as it stood at the incident'), 'not in the export either');
+});
+
+test('the Fix tab leads with what holds at the scenario clock; what npm did later is its own "in hindsight" line', () => {
   const inc = report.incident;
   assert.ok(isClosed(inc, inc.removedAt) && !isClosed(inc, inc.removedAt - 1));
-  const clean = fixTodayNote(inc, 'WOULD_PULL', inc.removedAt + 1);
-  assert.match(clean, /npm removed the malicious versions around \d\d:\d\d UTC on \d{4}-\d\d-\d\d/);
-  assert.match(clean, /npm ci needs no change/);
-  assert.ok(!/still live|replaces only/.test(clean));
-  const locked = fixTodayNote(inc, 'LOCKED', inc.removedAt + 1);
-  assert.match(locked, /npm ci on a lockfile that pins one can no longer fetch it/);
-  assert.match(locked, /rotate the secrets/);
-  assert.ok(!locked.includes('needs no change'));
-  assert.match(fixTodayNote(inc, null, inc.removedAt + 1), /LOCKED repo's lockfile pins a removed version/);
-  assert.match(fixTodayNote(inc, 'WOULD_PULL', inc.removedAt - 1), /still on npm: keep installing from your committed lockfile/);
+  // 13:16: the versions are live. Nothing in the lead says they are gone.
+  const before = inc.firstPublishAt + 4 * 60_000;
+  const live = fixToday(inc, 'WOULD_PULL', before);
+  assert.match(live.lead, /^The malicious versions are still on npm: keep installing from your committed lockfile \(npm ci\)/);
+  assert.ok(!/removed|can no longer|needs no change|clean release$/.test(live.lead), live.lead);
+  assert.match(live.hindsight!, /^Today, in hindsight: npm removed the malicious versions around \d\d:\d\d UTC on \d{4}-\d\d-\d\d, so npm ci needs no change/);
+  // LOCKED: rotate comes first, then re-resolve, then rebuild; the removal is the hindsight
+  const locked = fixToday(inc, 'LOCKED', before);
+  assert.match(locked.lead, /: rotate the secrets that builds could read, then re-resolve to a clean release .* and rebuild\.$/);
+  assert.ok(locked.lead.indexOf('rotate') < locked.lead.indexOf('re-resolve') && locked.lead.indexOf('re-resolve') < locked.lead.indexOf('rebuild'));
+  assert.ok(!locked.lead.includes('can no longer fetch'), 'that is true only after the removal');
+  assert.match(locked.hindsight!, /^Today, in hindsight: .* can no longer fetch it/);
+  // many repos (the export's intro)
+  assert.match(fixToday(inc, null, before).lead, /rotate secrets first, then re-resolve to a clean release and rebuild/);
+  assert.match(fixToday(inc, null, before).hindsight!, /LOCKED repo's lockfile pins a removed version/);
+  // 15:30 and later: plain past tense, no hindsight
+  const after = inc.removedAt + 15 * 60_000;
+  const clean = fixToday(inc, 'WOULD_PULL', after);
+  assert.equal(clean.hindsight, null);
+  assert.match(clean.lead, /^npm removed the malicious versions around \d\d:\d\d UTC on \d{4}-\d\d-\d\d, so npm ci needs no change/);
+  assert.ok(!/hindsight|still on npm/.test(clean.lead));
+  const lockedAfter = fixToday(inc, 'LOCKED', after);
+  assert.equal(lockedAfter.hindsight, null);
+  assert.match(lockedAfter.lead, /can no longer fetch it: rotate the secrets/);
+  assert.equal(fixToday(inc, 'WOULD_PULL', inc.removedAt).hindsight, null, 'at the removal itself');
 });
+
+test('the export\'s Fixes intro follows the report clock too', () => {
+  const live = reportToMarkdown({ ...report, at: report.incident.firstPublishAt + 4 * 60_000, remediations: [mocha] });
+  assert.ok(live.includes('The malicious versions are still on npm.'));
+  assert.ok(live.includes('Today, in hindsight: npm removed the malicious versions around'));
+  assert.ok(live.indexOf('still on npm') < live.indexOf('Today, in hindsight'));
+  const later = reportToMarkdown({ ...report, at: report.incident.removedAt + 60_000, remediations: [mocha] });
+  assert.ok(!later.includes('Today, in hindsight') && !later.includes('still on npm.'), 'past the removal: plain past tense');
+  assert.ok(later.includes('npm removed the malicious versions around'));
+});
+
 
 test('an override key reaches every dependent whose range admits the bad version, and the fix says so', () => {
   const note = fixPinsNote({ 'debug@4.4.2': '4.4.1' })!;
@@ -216,6 +257,7 @@ test("a pasted repo's fix, read against today's package.json, says what to skip 
   const md = reportToMarkdown({ ...report, remediations: [{ ...mocha, today: [skip] }] });
   assert.ok(md.includes("Checked against today's package.json:\n- " + skip));
   assert.ok(md.indexOf("Checked against today's package.json:") < md.indexOf(fixJson(mocha)), 'said before the snippet');
+  assert.ok(md.includes('Before you paste: skip all of it.'), 'and the line the drawer puts beside Copy');
   assert.ok(!reportToMarkdown({ ...report, remediations: [mocha] }).includes("Checked against today's package.json"), 'no notes: no check');
   const hostile = reportToMarkdown({ ...report, remediations: [{ ...mocha, today: ['x [a](javascript:alert(1)) <b>y</b>'] }] });
   assert.ok(!hostile.includes('[a](javascript') && !hostile.includes('<b>'), 'the server\'s notes are escaped like its steps');
@@ -313,4 +355,102 @@ test('a pasted repo never prints the placeholder team, in the export or in its n
   assert.ok(md.includes('Draft for your own team'));
   assert.ok(!md.includes(', team '), 'no team on the exposure line');
   assert.ok(reportToMarkdown({ ...report, exposures: [{ ...report.exposures[0]!, team: 'Payments' }], notices: [{ team: 'Payments', channel: '#pay', text: 'x' }] }).includes(', team `Payments`'));
+});
+
+// louislam/uptime-kuma under the axios incident: today's ~0.33.0 no longer admits either bad version (server/agent/triage.ts todayNotes).
+const KUMA_NOTES = [
+  "Today's package.json declares axios ~0.33.0, which no longer admits 0.30.4: skip the axios@0.30.4 override (it would hold axios at 0.30.3).",
+  "Today's package.json declares axios ~0.33.0, which no longer admits 1.14.1: skip the axios@1.14.1 override (it would hold axios at 1.14.0).",
+];
+const kuma: Remediation = { repo: 'louislam/uptime-kuma', overrides: { 'axios@0.30.4': '0.30.3', 'axios@1.14.1': '1.14.0' }, direct: { axios: '0.30.3' }, steps: ['Add the override.', 'Regenerate the lockfile.'], prBody: '', today: KUMA_NOTES };
+const MATCH_NOTE = "Checked against today's package.json: its direct dependencies still match this fix.";
+
+test('readToday: the check, the line beside Copy, and whether the whole snippet is to be skipped', () => {
+  assert.deepEqual(readToday(mocha), { check: null, advice: null, skipAll: false, lines: [] }, 'not read against today: nothing to say');
+  const all = readToday(kuma);
+  assert.equal(all.check!.status, 'differs');
+  assert.equal(all.skipAll, true);
+  assert.match(all.advice!, /^Before you paste: skip all of it\./);
+  const some = readToday({ ...kuma, overrides: { ...kuma.overrides, 'axios@0.30.5': '0.30.3' } });
+  assert.equal(some.skipAll, false);
+  assert.match(some.advice!, /skip the axios@0\.30\.4 and axios@1\.14\.1 overrides/);
+  const match = readToday({ ...mocha, today: [MATCH_NOTE] });
+  assert.equal(match.check!.status, 'match');
+  assert.equal(match.advice, null);
+  assert.equal(match.skipAll, false);
+});
+
+test("a note this client cannot sort (a newer server's) is kept in the line beside Copy, never dropped, and never ticks", () => {
+  const down = "Today's package.json declares debug ^4.3.5; the pin 4.4.1 would downgrade it: skip the debug pin.";
+  const r = readToday({ ...mocha, today: [down] });
+  assert.equal(r.check!.status, 'differs', 'a note is never a match');
+  assert.equal(r.advice, `Before you paste: ${down}`);
+  const mixed = readToday({ ...kuma, overrides: { ...kuma.overrides, 'axios@0.30.5': '0.30.3' }, today: [KUMA_NOTES[0]!, down] });
+  assert.match(mixed.advice!, /^Before you paste: skip the axios@0\.30\.4 override\. Today's package\.json declares debug/);
+  const withMatch = readToday({ ...mocha, today: [MATCH_NOTE, down] });
+  assert.ok(!withMatch.advice!.includes('still match'), 'a match line next to a difference is not repeated as a difference');
+});
+
+test("the Notice of a pasted repo whose pins today's file no longer needs says skip, and does not tell the owner to set the pin", () => {
+  const e = { ...report.exposures[0]!, repo: 'louislam/uptime-kuma', team: 'Your team', tier: 'WOULD_PULL' as const, dev: false };
+  const live = slackMessage({ exposure: e, paths: [], fix: kuma, incident: report.incident, link: null, anonymous: true, at: LIVE, source: { kind: 'snapshot', sha: 'df23942aaaa', date: Date.UTC(2026, 2, 6) } });
+  assert.ok(live.includes("Checked against today's package.json: it differs from this fix."), live);
+  assert.match(live, /Before you paste: skip all of it\. Today's package\.json already resolves newer, clean versions of these packages/);
+  assert.ok(!live.includes('\n- Today'), 'skip all: the advice says why, the per-key notes are not repeated');
+  assert.ok(!live.includes('Pin to'), 'nothing to pin');
+  assert.ok(!live.includes('Also set in package.json') && !live.includes('axios@0.30.3`'), live);
+  assert.match(live, /still live at /, 'the window is as of the clock');
+  assert.match(live, /Do: Keep npm ci on the committed lockfile\. Don't add the pins/);
+  assert.ok(!live.includes('add the pin if you resolve fresh'));
+  // one override still needed: it stays offered, the skipped one does not
+  const some = slackMessage({ exposure: e, paths: [], fix: { ...kuma, overrides: { ...kuma.overrides, 'axios@0.30.5': '0.30.3' } }, incident: report.incident, link: null, anonymous: true, at: LIVE });
+  assert.match(some, /Pin to: `axios@0\.30\.3`/);
+  assert.ok(some.includes("- Today's package.json declares axios ~0.33.0, which no longer admits 0.30.4: skip the axios@0.30.4 override"), 'a partial skip lists each note');
+  assert.match(some, /Before you paste: skip the axios@0\.30\.4 and axios@1\.14\.1 overrides\./);
+  assert.ok(!some.includes('axios@1.14.0'));
+  assert.match(some, /Also set in package\.json/);
+  // after the removal the same note, and "Do" is the closed one
+  const closed = slackMessage({ exposure: e, paths: [], fix: kuma, incident: report.incident, link: null, anonymous: true, at: report.incident.removedAt + 60_000 });
+  assert.match(closed, /Before you paste: skip all of it\./);
+  assert.match(closed, /Do: Nothing to change/);
+  // hostile text in a note is escaped like the export's
+  const evil = slackMessage({ exposure: e, paths: [], fix: { ...kuma, today: ['x [a](javascript:alert(1)) <b>y</b>'] }, incident: report.incident, link: null, anonymous: true, at: LIVE });
+  assert.ok(!evil.includes('<b>') && !evil.includes('[a]('), evil);
+  // no notes: the message is what it was
+  assert.ok(!slackMessage({ exposure: e, paths: [], fix: { ...kuma, today: undefined }, incident: report.incident, link: null, at: LIVE }).includes("Today's package.json"));
+});
+
+test('Copy steps carries the skip notes before the numbered steps, like the drawer', () => {
+  assert.equal(stepsText({ ...mocha, steps: ['A.', 'B.'] }), '1. A.\n2. B.', 'no notes: the steps as they were');
+  const text = stepsText(kuma);
+  const lines = text.split('\n');
+  assert.equal(lines[0], "Checked against today's package.json: it differs from this fix.");
+  assert.ok(lines[1]!.startsWith('Before you paste: skip all of it.'), 'skip all: the advice, not five notes');
+  assert.ok(text.indexOf('Before you paste') < text.indexOf('1. Add the override.'));
+  assert.ok(text.endsWith('1. Add the override.\n2. Regenerate the lockfile.'));
+  const some = stepsText({ ...kuma, overrides: { ...kuma.overrides, 'axios@0.30.5': '0.30.3' } }).split('\n');
+  assert.ok(some[1]!.startsWith("- Today's package.json declares axios ~0.33.0") && some[2]!.startsWith("- Today's package.json declares axios ~0.33.0"), 'a partial skip lists each note');
+  assert.ok(some[3]!.startsWith('Before you paste: skip the axios@0.30.4 and axios@1.14.1 overrides.'));
+  assert.equal(stepsText({ ...mocha, steps: ['A.'], today: [MATCH_NOTE] }), '1. A.', 'a match adds nothing to copy');
+});
+
+test('a downgrade note (today\'s range resolves newer than the pin) skips the pin and the override, in the Notice and in the steps', () => {
+  const down = "debug ^4.3.5 resolves 4.4.3 today: skip the 4.4.1 pin and override.";
+  const fix: Remediation = { ...mocha, steps: ['Rotate.', 'Fix the lockfile.', 'Rebuild.'], today: [down] }; // mocha: the only override is debug@4.4.2 -> 4.4.1
+  assert.equal(readToday(fix).skipAll, true);
+  const e = { ...report.exposures[0]!, tier: 'WOULD_PULL' as const, dev: false };
+  const msg = slackMessage({ exposure: e, paths: [], fix, incident: report.incident, link: null, anonymous: true, at: LIVE });
+  assert.ok(!msg.includes('Pin to') && !msg.includes('Also set in package.json'), msg);
+  assert.match(msg, /Before you paste: skip all of it\./);
+  assert.match(msg, /Do: Keep npm ci on the committed lockfile\. Don't add the pins/);
+  const steps = stepsText(fix).split('\n');
+  assert.equal(steps[0], "Checked against today's package.json: it differs from this fix.");
+  assert.deepEqual(steps.slice(-3), ['1. Rotate.', '2. Fix the lockfile.', '3. Rebuild.'], "the server's order is not touched");
+  // a second override today's file says nothing about: the pin and override named are skipped, the other stays
+  const two: Remediation = { ...fix, overrides: { ...fix.overrides, 'ansi-styles@6.2.2': '6.2.1' } };
+  assert.equal(readToday(two).skipAll, false);
+  assert.match(readToday(two).advice!, /^Before you paste: skip the debug@4\.4\.1 pin and override\./);
+  const rest = slackMessage({ exposure: e, paths: [], fix: two, incident: report.incident, link: null, anonymous: true, at: LIVE });
+  assert.match(rest, /\nPin to: `ansi-styles@6\.2\.1`\n/, 'only the override the notes leave');
+  assert.ok(!rest.includes('Also set in package.json'), 'the direct debug pin is the one the note skips');
 });
