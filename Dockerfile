@@ -5,7 +5,8 @@ FROM node:24-trixie-slim@sha256:7f486cabe892bff8fef04c0f7da8dba84a560be3e4e2740b
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund
-# Fontshare's license forbids committing the fonts, so they are fetched here (the build fails if the fetch does).
+# Fontshare's license forbids committing the fonts, so they are fetched here, with no system-font fallback: the build fails if
+# the fetch does. A network error or a 5xx is tried 3 times first (1 s, 2 s apart); a 4xx or a hash mismatch fails at once.
 COPY web/src/design/fetch-fonts.mjs web/src/design/
 RUN node web/src/design/fetch-fonts.mjs
 COPY . .

@@ -8,7 +8,10 @@
 //
 // Usage: node web/src/design/fetch-fonts.mjs [--force]
 // Zero dependencies: Node 24 fetch + zlib. Exits non-zero on any failure so a Docker build fails
-// instead of shipping a site that renders the generic fallback fonts.
+// instead of shipping a site that renders the generic fallback fonts. A network error or an HTTP 5xx is tried
+// 3 times (waits of 1 s, then 2 s) before it fails; an HTTP 4xx or a hash mismatch fails at once: there is no
+// fallback to system fonts, by design. FONTSHARE_API and FONTS_RETRY_MS (the first wait, in ms) exist for the
+// test (fetch-fonts.test.ts); the pinned hashes below hold whichever server answers.
 
 import { access, mkdir, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -75,11 +78,24 @@ function unzip(buf) {
   return files;
 }
 
+const TRIES = 3;
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
 async function fetchZip(slug) {
-  const url = `https://api.fontshare.com/v2/fonts/download/${slug}`;
-  const res = await fetch(url, { headers: { 'user-agent': 'patient-zero-build (fetch-fonts.mjs)' } });
-  if (!res.ok) throw new Error(`${url} → HTTP ${res.status}`);
-  return Buffer.from(await res.arrayBuffer());
+  const url = `${process.env.FONTSHARE_API ?? 'https://api.fontshare.com'}/v2/fonts/download/${slug}`;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const res = await fetch(url, { headers: { 'user-agent': 'patient-zero-build (fetch-fonts.mjs)' } });
+      if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status}`), { permanent: res.status < 500 });
+      return Buffer.from(await res.arrayBuffer()); // a body cut off mid-way throws here: retried like a refused connection
+    } catch (err) {
+      const why = err.cause?.code ?? err.message; // "ECONNREFUSED", "HTTP 503"
+      if (err.permanent || attempt === TRIES) throw new Error(`${url} → ${why}${attempt > 1 ? ` (after ${attempt} tries)` : ''}`);
+      const ms = Number(process.env.FONTS_RETRY_MS ?? 1000) * 2 ** (attempt - 1);
+      console.error(`fetch-fonts: ${slug}: ${why}; retrying in ${ms} ms (try ${attempt + 1} of ${TRIES})`);
+      await wait(ms);
+    }
+  }
 }
 
 async function main() {
@@ -109,5 +125,5 @@ async function main() {
 
 main().catch((err) => {
   console.error(`fetch-fonts: ${err.message}`);
-  process.exit(1);
+  process.exitCode = 1; // not process.exit(1): cutting off a fetch that is still closing crashes Node on Windows
 });
