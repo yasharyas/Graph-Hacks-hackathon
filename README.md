@@ -430,7 +430,7 @@ A public, unauthenticated demo, built to 13 written rules (`docs/decisions.md`):
 
 ## Limits
 
-Two incidents are ingested: qix (2025-09-08) and axios (2026-03-31). The scenario picker and the alert box know only those two. Paste-your-repo is general: any public GitHub repo with a `package-lock.json`, or a pasted lockfile, gets its own graph and is checked against either incident. npm `package-lock.json` v2/v3 only (no yarn/pnpm yet). `overrides`/`resolutions` are not modelled. `latest` is treated as "highest stable" rather than a moving dist-tag. Removal times are approximate (the registry keeps no removal timestamp).
+Two incidents are ingested: qix (2025-09-08) and axios (2026-03-31). The scenario picker and the alert box know only those two. Paste-your-repo is general: any public GitHub repo with a `package-lock.json`, or a pasted lockfile, gets its own graph and is checked against either incident. npm `package-lock.json` v2/v3 only (no yarn/pnpm yet). Only the repo's root `package-lock.json` is read: lockfiles in subfolders (monorepo packages, fixtures) are not, so a nested lockfile's exposure is missed. `overrides`/`resolutions` are not modelled. `latest` is treated as "highest stable" rather than a moving dist-tag. Removal times are approximate (the registry keeps no removal timestamp).
 
 ## Roadmap (not in v1)
 

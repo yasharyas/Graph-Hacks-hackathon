@@ -89,6 +89,12 @@ RETURN DISTINCT d.repo AS repo, v.id AS version, a.id AS advisory ORDER BY repo,
 
 Zero rows for the whole 74-minute window, and zero for 106 minutes on the axios day, until the campaign's first OSV record. Even then it flags only the synthetic repo that locks a malicious version. It never flags a `WOULD_PULL` repo, because those lockfiles pin safe versions. That is not a criticism of those tools. It is what advisory-based means.
 
+## The name grep, in the wild
+
+About four and a half hours after this repo was created, a stranger opened an issue on it. A GitHub code search for `plain-crypto-js` in committed `package-lock.json` files had turned it up. They were right that the string is there: it sits in `fixtures/synthetic/billing-api.package-lock.json`, the synthetic repo that exists to show what `LOCKED` looks like. That search is the contrast card's middle row, the name grep. It finds the string, but it cannot tell a test fixture from a real dependency, and it gives no path, no tier and no owner.
+
+So I pasted the repo into Patient Zero. It read the root lockfile, the one `npm ci` uses (193 entries), against both incidents: 0 `LOCKED`, 0 `WOULD_PULL`, and no declared range that would have fetched a malicious version in either window. I replied with that and closed the issue. It also showed me a limit: Patient Zero reads only the root `package-lock.json`. That was the right call here, but in a monorepo with lockfiles in subfolders it would miss them.
+
 ## Free tiers, measured
 
 The whole thing runs for $0: Render's free single container, Groq and Gemini free tiers, FalkorDB in the same image. Measured under `docker run --cpus=0.1 --memory=512m`:
@@ -100,6 +106,6 @@ Every tenant and scenario is its own graph via `GRAPH.COPY` of a registry templa
 
 ## What it is not
 
-Not a detector. Not proof that any of the 20 repos was compromised: `WOULD_PULL` is exposure surface on a fresh resolve, and `npm ci` was safe. Not yarn, pnpm or PyPI yet. `latest` is modelled as "highest stable", not a moving dist-tag, and removal times are approximate because the registry keeps none. Teams and channels are synthetic; the repos and lockfiles are real.
+Not a detector. Not proof that any of the 20 repos was compromised: `WOULD_PULL` is exposure surface on a fresh resolve, and `npm ci` was safe. Not yarn, pnpm or PyPI yet, and only the root `package-lock.json`. `latest` is modelled as "highest stable", not a moving dist-tag, and removal times are approximate because the registry keeps none. Teams and channels are synthetic; the repos and lockfiles are real.
 
 What it is: a graph that answers the on-call question before the advisory exists, with the query attached. Try it at `https://<render-url>`, and read every Cypher query at https://github.com/yasharyas/Graph-Hacks-hackathon.
