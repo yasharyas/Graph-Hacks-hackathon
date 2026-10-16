@@ -1,6 +1,7 @@
 ---
 title: "74 minutes before the advisory: graph triage for npm account hijacks"
-published: false
+published: true
+canonical_url: https://dev.to/yasharyas/74-minutes-before-the-advisory-graph-triage-for-npm-account-hijacks-20j9
 tags: falkordb, security, npm, graphdatabase
 ---
 

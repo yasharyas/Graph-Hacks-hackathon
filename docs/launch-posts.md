@@ -1,6 +1,6 @@
 # Launch posts
 
-Placeholders still to fill: `<render-url>` (live demo), `<video-url>`, `<blog-url>` (dev.to). No vote requests anywhere; the hackathon rules forbid canvassing judges.
+Placeholders still to fill: `<render-url>` (live demo), `<video-url>`. The blog is live on dev.to. No vote requests anywhere; the hackathon rules forbid canvassing judges.
 
 ## FalkorDB Discord, #showcase (3 lines)
 
@@ -31,7 +31,7 @@ Runs on free tiers, $0. MIT.
 
 Live: <render-url>
 Code: https://github.com/yasharyas/Graph-Hacks-hackathon
-Write-up: <blog-url>
+Write-up: https://dev.to/yasharyas/74-minutes-before-the-advisory-graph-triage-for-npm-account-hijacks-20j9
 
 ## X thread (5 posts)
 
@@ -46,7 +46,7 @@ Write-up: <blog-url>
 5/ Also an MCP server (same read-only tools in Claude Code), a paste-your-repo mode, and an Ask box where list questions are answered from the graph. $0 to run, MIT.
 Live: <render-url>
 Code: https://github.com/yasharyas/Graph-Hacks-hackathon
-Write-up: <blog-url>
+Write-up: https://dev.to/yasharyas/74-minutes-before-the-advisory-graph-triage-for-npm-account-hijacks-20j9
 
 ## falkordb.com community projects blurb
 

@@ -37,7 +37,7 @@ Built with Claude Code under the author's direction, with AI-run QA and security
 1. Video: `https://<video-url>`
 2. Live demo: `https://<render-url>`
 3. Repo: https://github.com/yasharyas/Graph-Hacks-hackathon
-4. Blog: `<blog-url>`
+4. Blog: https://dev.to/yasharyas/74-minutes-before-the-advisory-graph-triage-for-npm-account-hijacks-20j9
 
 ## Cover image
 
@@ -47,5 +47,5 @@ Built with Claude Code under the author's direction, with AI-run QA and security
 
 - [ ] `<video-url>`: `README.md` (links row), this file
 - [ ] `<render-url>`: `README.md` (links row), `blog/74-minutes-before-the-advisory.md` (twice), `video/script.md` (end card), `docs/launch-posts.md`, this file
-- [ ] `<blog-url>`: `docs/launch-posts.md`, this file
-- [ ] Blog: set `published: true` when it goes live on dev.to
+- [x] Blog URL: `docs/launch-posts.md`, this file
+- [x] Blog published on dev.to (2026-10-16, marked AI-assisted)
