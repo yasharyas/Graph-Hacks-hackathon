@@ -8,15 +8,23 @@
       name="description"
       content="Patient Zero turns an npm supply-chain alert into an answer in seconds: which repos are exposed, through which dependency path, and which team owns the fix."
     />
-    <!-- Link previews (Slack, LinkedIn, X): a title and a sentence instead of a bare URL. No image yet. -->
+    <!-- Link previews (Slack, LinkedIn, X): a title, a sentence and a 1200x630 card that is a screenshot of the app itself (the
+         1440px landing at the end of its autoplay, scaled: real counts, the brand fonts; re-render it if the landing changes).
+         The image path is relative until the deploy sets the absolute URL. -->
     <meta property="og:type" content="website" />
+    <meta property="og:image" content="/og-card.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="The Patient Zero war room for the qix npm compromise: 21 repos one install from malware, the first OSV record 74 minutes after the first exposure, and the dependency paths from the hijacked account to each repo." />
     <meta property="og:site_name" content="Patient Zero" />
     <meta property="og:title" content="Patient Zero: which repos are one install from a hijacked npm package" />
     <meta
       property="og:description"
       content="An npm supply-chain war room on FalkorDB: from an alert to the exposed repos, the dependency path to each, and who owns the fix, before the advisory exists."
     />
-    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="/og-card.png" />
+    <meta name="twitter:image:alt" content="The Patient Zero war room for the qix npm compromise: 21 repos one install from malware, the first OSV record 74 minutes after the first exposure, and the dependency paths from the hijacked account to each repo." />
     <meta name="twitter:title" content="Patient Zero: which repos are one install from a hijacked npm package" />
     <meta
       name="twitter:description"

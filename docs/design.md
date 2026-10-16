@@ -114,7 +114,7 @@ Banned, including as fallbacks that render: Inter, Roboto, Poppins, Helvetica/Ar
 | `text-2xl` | 28 / 32, −.02em | Cabinet Grotesk 800 (static) · Satoshi 700 tabular (live) | exec-summary figures |
 | `text-3xl` | 40 / 42, −.02em | Satoshi 700 tabular | the climbing counter, with the scenario clock beside it |
 | `text-4xl` | 56 / 56, −.02em | Cabinet Grotesk 800 | "74 min" |
-| `text-5xl` | 80 / 80, −.02em | Satoshi 700 tabular | hero counter at ≥ 1280 |
+| `text-5xl` | 80 / 80, −.02em | Satoshi 700 tabular | not used: the hero counter is `text-3xl` (40 px) at every width, so the band stays short |
 
 Rules: body line length ≤ `--measure` (68ch). Uppercase only at 11px with tracking; never uppercase a heading. Wordmark: "Patient Zero" in Satoshi 700, 16px, no icon, no gradient. `html { font-size: 100% }` so user font-size preferences apply.
 
@@ -159,12 +159,12 @@ Every absolute time is UTC `HH:MM` (seconds only in tool cards and exports), Mar
 | **Tabs** (below the table) | Concentration (PageRank bars) · All Cypher used (one `<pre>`, Copy all) · Triage history (`recall_triage` rows: when, by session, remediated) · Graph stats (`GRAPH.MEMORY USAGE`, node counts, EXPLAIN toggle per query) | per tab empty states | `text-sm` tabs with a 2px `fg-0` underline | `--dur-instant` | `role="tablist"`, arrow keys |
 | **Onboarding hint** (replaces coach marks) | one inline hint card under the scenario control after autoplay: "Click a row to see its path · Show Cypher on any card · Paste your own repo" with the `coach-hint` scribble; Dismiss | shown once (localStorage), dismissed | `bg-2`, `line-2` | enter 200ms | no focus stealing, no scrim, Esc not required; `role="note"` |
 | **Empty / error states** | `empty-lockfile` illustration (grey scribble, one red mark), one-line cause, one-line fix, primary action ("Try a sample repo") and secondary ("Paste a lockfile"); `requestId` line in Martian Mono when the server returned one | empty results, yarn/pnpm/v1 rejected, repo without lockfile, rate-limited (countdown), server waking (staged text, ≤ 60 s), network error (retry), SSE disconnected (auto-retry with a visible counter) | `fg-1` copy, `red-400` only on the cause line of real errors | illustration fades 120ms | `role="status"` for empty, `role="alert"` for errors; the action is a real button; copy states cause + fix |
-| **Toasts** | bottom-left (above the tab bar on mobile), 320px, icon + sentence + optional action (Undo) | info, success (`tier-clean` icon), error (`red-400`) | `bg-2`, `shadow-popover` | enter 200ms from below, exit 140ms; timers pause on hover and when the tab is hidden | `aria-live="polite"`, never steals focus, auto-dismiss 4s (Undo toasts 10s) |
+| **Toasts** | bottom-right from 1024px (bottom-left below it, above the tab bar and the Ask bar); it moves to the other bottom corner, then the top, only when it would cover a focused control (a script-focused pane does not count); one copy toast at a time (a new copy replaces it); 320px, icon + sentence + optional action (Undo) | info, success (`tier-clean` icon), error (`red-400`) | `bg-2`, `shadow-popover` | enter 200ms from below, exit 140ms; timers pause on hover and when the tab is hidden | `aria-live="polite"`, never steals focus, auto-dismiss 4s (Undo toasts 10s) |
 | **Buttons** | primary (`fg-0` fill, `bg-0` text) · secondary (`bg-2` + `line-3`) · ghost (`fg-1` → `fg-0`) · icon buttons always with `aria-label` and a tooltip (`--tooltip-delay` 400ms, siblings instant) | hover, active (pointer scale .97), loading (label stays, 14px spinner replaces the icon), disabled (`--opacity-disabled` + `aria-disabled`) | height `--control-h`, radius `sm`, padding 0 14px | 120ms press, 160ms hover colour | one primary per view; loading buttons keep their width |
 
 Copy rules (from the plan's honest semantics): WOULD_PULL rows always carry the line "A fresh install during the window would have fetched the malicious version. Lockfile-pinned `npm ci` builds were safe." — as a tooltip on fine pointers, printed in the row card on touch and in the drawer always. The footer disclaimer is permanent, `fg-2`, 12px, not collapsible. Errors show `requestId` when present (S12) in Martian Mono next to a plain-language cause and fix.
 
-**First-load autoplay composition.** Landing = header + scrubber + contrast card + graph; the table and feed are empty with their empty states. The scrubber plays 13:00→14:30 over 12 s; the counter (Satoshi 700 `text-3xl` tabular, the clock beside it) climbs as the graph fills; "OSV advisories: 0" holds until 14:26; the 74-min scribble draws when the thumb passes the OSV marker; at the end three buttons appear left-aligned under the contrast card: **Run triage** (primary) · Try axios 2026 · Paste your repo. The pause control is the first focusable element; a keyboard user can stop it immediately. Under reduced motion the final state renders at once with "Play the 90 minutes".
+**First-load autoplay composition.** Landing = header + scrubber + contrast card + graph; the table and feed are empty with their empty states. The scrubber plays 13:00→14:30 over 12 s; the counter (Satoshi 700 `text-3xl` tabular, the clock beside it) climbs as the graph fills; "OSV advisories: 0" holds until 14:26; the caption names the 74-minute gap from about 2 s in ("no advisory for 74 min, until 14:26"); the 74-min scribble draws when the thumb passes the OSV marker. The three buttons are there from the first paint, left-aligned under the contrast card: **Run triage** (primary) · Try axios 2026 · Paste your repo. The pause control is the first focusable element; a keyboard user can stop it immediately. Under reduced motion the final state renders at once with "Play the 90 minutes".
 
 ## 6. Motion
 
@@ -321,7 +321,7 @@ Builders re-run `/impeccable critique` on the rendered war room at the Phase 2 g
 6. **Share image.** The exec summary card doubles as the 1200×630 share card; no html-to-canvas dependency is installed. Decide client-side render vs a W13 pre-render.
 7. **Cabinet Grotesk has no `tnum`.** Counters are Satoshi; if you want the Cabinet look on the hero counter, it must only render the final value.
 
-## 12. Revisions after persona QA (rounds 2 to 5)
+## 12. Revisions after persona QA (rounds 2 to 6)
 
 These supersede the sections above where they differ.
 
@@ -347,3 +347,12 @@ These supersede the sections above where they differ.
   - Above Copy JSON sits a line naming any override or pin to skip.
 - **Table:** a long repo id gives way at the owner first (`ni…/nightwatch`), never at the name. Below 1366 px, Export is icon-only, with the same accessible name.
 - **Paste sheet:** progress and errors sit after the fields, sticky at the bottom (so nothing above them moves). A long error opens with one line, and its details sit behind "How to check it by hand".
+- **Round 6 QA (laptop, phone, keyboard):**
+  - At 1280x720 and 1024x768 (`tight`) the narrative keeps one Why sentence with its `[E1]`. The headline drops its "In hindsight: ..." sentence there instead: the band, the exec strip and the caption already give the 74 minutes. Below 1440 px the exec strip is one row, its hindsight half screen-reader text.
+  - The Notify roster is a list: one row per team (team, channel, then its repos as text), "Copy notice" at the end of the row, 24 px (44 px on touch). A copied notice ends with "Details:" and a link back to the run.
+  - On a coarse pointer the Why sentence's names are text, not 28 px chips on 28 px lines: a row of 44 px "Evidence E1" buttons sits under it. `[E1]` is named "Evidence E1: open the explain_path query". The chips of a narrative row are one Tab stop; the arrow keys move between them.
+  - Past the removal (15:15 for qix) the band and the exec strip are past tense: "1 repo was one install from malware until 15:15".
+  - Wall-clock stamps (triage history) are UTC like every other time. A pasted repo's Graph stats say why there are no node and edge counts.
+  - Strips keep their height from the first paint: the shared-repo note reserves its longest outcome, and the shared-result strip stays ("re-checked") instead of leaving when the analysis ends.
+  - A phone held sideways: Play is icon-only and the headline shares its row, so the track and the caption sit above the tab bar. The tier key sits beside its "?" when it fits neither above nor below it.
+  - Share card: `web/public/og-card.png` (1200x630) is a screenshot of the landing at the end of its autoplay; re-render it when the landing changes.
