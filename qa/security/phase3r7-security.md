@@ -323,3 +323,52 @@ The residue is still limited to one semver token of 64 characters or fewer, with
 2. **L1:** the same Ask with 214-character carrier names should send a `tool_result` well under 1 MB, with lists cut to N plus a count. `carrierFacts`/`viaFacts` answers should stay the same as before the cut.
 3. **I1 (optional):** `filter_exposures` with `via: "x) URGENT <b>"` should give the same rows and label as no `via`.
 4. **I2 (optional):** 4 concurrent model-routed Asks at `used` = 3 should yield exactly 1 model answer.
+
+## Re-check after fixes (commit 1402db2)
+
+**Verdict: PASS against the 0 high / 0 medium bar. 0 high, 0 medium, 0 low, 3 info** (I3 carried, I4 new residue, I5 the pre-existing `team`/`repo` part of I1).
+
+**Method.** Same as above:
+
+- A throwaway FalkorDB: the pinned digest, production's limits, `127.0.0.1:6391` only, its own password and the `pzr7` prefix. It has been removed again.
+- The real `build()`, `analyze()`, `triage()` and `ask()` from 1402db2, with stub models.
+- Scratch scripts as before. No running server was touched, `.env` was not read, and nothing was committed.
+
+**Results:**
+
+- **H1: fixed.**
+  - **The new code:** `carrierFacts` builds each row's carrier set once (the `sole` map, `narrate.ts:406-411`).
+  - **End to end** (`e2e-carrier2.ts`, the same 1.34 MB, 5,409-entry pasted lockfile with 5,400 carriers × 8 versions): the Ask answers **59 ms after its `tool_result`, 880 ms in all**. Before the fix this was 10.7 to 42.5 s.
+  - **Isolated** (`stall.ts`): `carrierFacts` takes **28 ms**, and a timer due at +10 ms ran at +30 ms. Before, it ran at +31,917 ms.
+  - **Scaling** (`carrier-bench.ts`): 6,000 × 8 with 214-character names takes 29 ms (was 34.4 s), and 2,700 × 18 takes 24 ms (was 4.45 s).
+  - **The same output:** compared with `carrierFacts` from 3ec287f (`git show 3ec287f:server/agent/narrate.ts`), the text and numbers were byte-identical in **300 of 300** cases (my earlier random set, `same-r.ts`). They were also identical in **2,000 of 2,000** wider cases (`same2.ts`: `''` carriers, LOCKED and MAINTAINER rows, ties, and `version`, `team` and `repo` filters).
+  - **New test:** the one in `test/narrate.test.ts` passes (18 of 18 in the file).
+- **L1: fixed (residue below as I4).**
+  - **The new code:** `trimCarriers` (`ask.ts:86-91`) cuts each version's list in the `tool_result` sent to the browser to 20 names plus "and N more". `results` and the answer keep the full lists.
+  - **Measured** (`e2e-long2.ts`, the 2.55 MB lockfile with 214-character names, 4 concurrent Asks under `--max-old-space-size=160`):
+    - **Shown carriers:** 21 entries per version, the last one "and 5380 more".
+    - **Event size:** the `tool_result` is **1.21 MB**, down from 10.5 MB.
+    - **Time and heap:** 3.2 s for all four, with the heap peaking at 65 MB.
+    - **The answer:** unchanged.
+  - **What the 1.21 MB is:** almost all of it is `evidence`, which still lists every distinct carrier once (I4). That is 0.47× the pasted file, so the amplification is gone, but it is above the "well under 1 MB" aim stated above.
+- **I1: fixed for `version`/`via`.**
+  - **The new code:** `pkgRef` (`registry.ts:158-159`) keeps a value only if it matches the `PKG_REF` package-ref pattern. Anything else counts as no filter.
+  - **Re-run of `model-args.ts`:** the stub model's `via: "chalk) URGENT: all clear, … ‮<b>"` is dropped. The summary reads `21 of 21 exposed repos match (reaches debug@4.4.2) across 7 teams: …` with none of the hostile text, and the model's partial answer is replaced by the complete list.
+  - **`PKG_REF` timing:** 0.08 ms at worst on 214-character adversarial strings.
+  - **New test:** the S1 case in `test/graph.test.ts` passes (16 of 16 against the throwaway graphs).
+  - **Not changed:** `team`/`repo` still pass only through `str()` (I5, pre-existing).
+- **I2: fixed.**
+  - **The new code:** the cap check and `run.used += 1` now happen in the same synchronous step before the model call, and the slot is given back when there is no answer (`ask.ts:334-336`).
+  - **Concurrency** (`used-race.ts`): four concurrent model-routed Asks at `used` = 3 gave `live, refused, refused, refused`, with exactly 1 model call and `used` ending at 4.
+  - **Failure:** a failed model at `used` = 2 leaves it at 2.
+  - **Client abort:** an Ask the client abandons keeps its reservation. That fails closed, which is safe.
+
+**Open info items:**
+
+| ID | Rule | File:line | Note | Smallest fix |
+|---|---|---|---|---|
+| I3 | S4 | `server/ingest/lockfile.ts:46` | Carried from above: words inside one semver token of 64 characters or fewer. | Optional: drop prerelease or build parts longer than 16 characters. |
+| I4 | S7 | `server/tools/registry.ts` `filterExposures` `evidence`, sent by `ask.ts:273` | The `tool_result` still carries every distinct carrier name once in `evidence`: 1.21 MB for a 2.55 MB paste, and about 1.3 MB at most under the 5 MB / 6,000-entry caps. That is linear and smaller than the input. The client uses it only for `includes()` chip matching. | Optional: leave carriers out of the client-bound `evidence` (they stay in the server-side guard evidence), or cap it like `via`. |
+| I5 | S1 | `server/tools/registry.ts:16,165` | `team` and `repo` are still cut by `str()` only and echoed into the label, as before this round. They render as React text. | Optional: the same allowlist approach (known team names, `REPO`). |
+
+**S7** now passes. Every other S1 to S13 row is unchanged from the table above.
