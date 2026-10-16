@@ -154,13 +154,16 @@ export async function incidentExposure(g: Graph, p: { incident: unknown; at: unk
 // `version` keeps repos that reach that malicious version (or any malicious version of that package); `via` keeps repos
 // where that package's declared range admits it; `carriers` (implied by `via`) adds each row's carriers per version.
 const FILTER_TIERS = new Set(['LOCKED', 'WOULD_PULL', 'MAINTAINER']);
+// S1: `version` / `via` are a package name, optionally with @version; anything else (a model's prose) is no filter.
+const PKG_REF = /^(@[a-z0-9._~-]+\/)?[a-z0-9._~*-]+(@[0-9a-z.+-]+)?$/;
+const pkgRef = (x: unknown) => { const s = str(x ?? '').toLowerCase(); return PKG_REF.test(s) ? s : ''; };
 export type Carried = Record<string, string[]>; // malicious version -> dependencies whose range admits it ('' = own package.json)
 export async function filterExposures(g: Graph, p: { incident: unknown; at: unknown; tier?: unknown; prod_only?: unknown; team?: unknown; repo?: unknown; version?: unknown; via?: unknown; carriers?: unknown }) {
   const all = await incidentExposure(g, { incident: p.incident, at: p.at });
   const tier = p.tier == null ? '' : str(p.tier, 20).toUpperCase();
   const f = {
     tier: FILTER_TIERS.has(tier) ? tier : '', prodOnly: p.prod_only === true || p.prod_only === 'true', team: str(p.team ?? '', 60).toLowerCase(), repo: str(p.repo ?? '', 140).toLowerCase(),
-    version: str(p.version ?? '').toLowerCase(), via: str(p.via ?? '').toLowerCase(),
+    version: pkgRef(p.version), via: pkgRef(p.via),
   };
   const reaches = (v: string) => !f.version || v.toLowerCase() === f.version || nameOf(v).toLowerCase() === f.version;
   const carry = new Map<string, Carried>();

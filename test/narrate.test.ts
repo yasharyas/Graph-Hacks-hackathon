@@ -7,6 +7,7 @@ import type { Exposure, Report } from '../shared/events.ts';
 import { guard } from '../server/agent/guard.ts';
 import { blastFacts, carrierFacts, compareFacts, directFacts, evidenceBlock, evidenceSet, explainFacts, observations, parsePick, PICK_SYSTEM, pickMessages, rotateFacts, teamFirstFacts, verdictText, versionFacts, viaFacts, whenFacts } from '../server/agent/narrate.ts';
 import { todayNotes } from '../server/agent/triage.ts';
+import { trimCarriers } from '../server/agent/ask.ts';
 import { todayCheck } from '../web/src/data/todayCheck.ts';
 
 const fixture = JSON.parse(readFileSync(new URL('../shared/fixtures/triage-qix.json', import.meta.url), 'utf8'));
@@ -212,6 +213,20 @@ test('Ask facts from tool rows: carriers, a via list and an account\'s reach say
     /^If `ljharb` were hijacked, 2 of the 17 repos would be in reach: their lockfiles hold its packages\. `mochajs\/mocha` \(dev\), `npm\/cli`\. `acme\/checkout-web` holds none of its packages\. The most: `mochajs\/mocha`, 3 packages\. For 1 of them only through devDependencies\./);
   assert.match(checked(versionFacts(r)), /^Exposed repos by malicious version, most first: `debug@4\.4\.2` 5 repos \(every exposed repo\)/);
   assert.match(checked(explainFacts(r)), /\nTiers in plain words: LOCKED = the committed lockfile pins a malicious version/);
+});
+test('S7: the carrier answer is one pass over the rows (a pasted lockfile can bring thousands of carriers); the card gets 20 per version', () => {
+  const r = report();
+  const many = Array.from({ length: 3000 }, (_, i) => ({ repo: `o/r${i}`, tier: 'WOULD_PULL', versions: ['debug@4.4.2'], via: { 'debug@4.4.2': [`c${i}a`, `c${i}b`, `c${i}c`] } }));
+  many.push({ repo: 'o/sole', tier: 'WOULD_PULL', versions: ['debug@4.4.2'], via: { 'debug@4.4.2': ['c0a'] } });
+  const t0 = performance.now();
+  const f = carrierFacts(r, { rows: many, params: { carriers: true } });
+  assert.ok(performance.now() - t0 < 1000, `took ${performance.now() - t0} ms`); // the quadratic version took minutes at this size
+  assert.match(f.text, /Upgrading or removing `c0a` alone clears 1 repo \(`o\/sole`\)/);
+  const res = { tool: 'filter_exposures' as const, summary: '', evidence: [], cypher: [], params: {}, ms: 0, rows: [{ repo: 'o/r', via: { 'debug@4.4.2': Array.from({ length: 45 }, (_, i) => `c${i}`) } }, { repo: 'o/s' }] };
+  const shown = trimCarriers(res).rows[0]!.via as Record<string, string[]>;
+  assert.equal(shown['debug@4.4.2']!.length, 21);
+  assert.equal(shown['debug@4.4.2']!.at(-1), 'and 25 more');
+  assert.equal((res.rows[0]!.via as Record<string, string[]>)['debug@4.4.2']!.length, 45, 'the answer keeps the full list');
 });
 
 test('today notes: a pin or override below what a fresh resolve gets today is a downgrade to skip (real semver); the Fix tab reads it as a skip', () => {

@@ -401,10 +401,14 @@ export function carrierFacts(r: Report, res: { rows: Record<string, unknown>[]; 
   }
   const top = [...groups].sort((a, b) => b[1].repos.size - a[1].repos.size || a[0].localeCompare(b[0]));
   const shown = top.slice(0, 5);
-  // Changing one carrier clears a repo only when every path to every malicious version (in the filter) goes through it.
-  const own = (x: CRow) => new Set(Object.values(x.via ?? {}).flat());
-  const [best, cleared = []] = top.map(([c]) => [c, rows.filter((x) => x.tier !== 'LOCKED' && own(x).size === 1 && own(x).has(c)).map((x) => x.repo)] as const)
-    .sort((a, b) => b[1].length - a[1].length)[0] ?? [];
+  // Changing one carrier clears a repo only when every path to every malicious version (in the filter) goes through it:
+  // the repos whose carriers are that one dependency. One pass over the rows (S7: a pasted lockfile can bring thousands).
+  const sole = new Map<string, string[]>();
+  for (const x of rows) {
+    const cs = new Set(Object.values(x.via ?? {}).flat());
+    if (x.tier !== 'LOCKED' && cs.size === 1) for (const c of cs) sole.set(c, [...(sole.get(c) ?? []), x.repo]);
+  }
+  const [best, cleared = []] = top.map(([c]) => [c, sole.get(c) ?? []] as const).sort((a, b) => b[1].length - a[1].length)[0] ?? [];
   const n = new Map<string, number>();
   for (const x of rows) for (const v of Object.keys(x.via ?? {})) n.set(v, (n.get(v) ?? 0) + 1);
   const [v, reached] = [...n].sort((a, b) => b[1] - a[1])[0] ?? [];

@@ -80,6 +80,16 @@ function compact(r: ToolResult, label = 'TOOL RESULT') {
 }
 
 // ponytail: keyword matching, not language understanding; the model can still call filter_exposures with other filters.
+// S7: a row's carriers per malicious version can run to thousands on a pasted lockfile. The answer is built from the full
+// lists; the card in the browser shows at most CARRIERS_SHOWN per version, the rest as a count.
+const CARRIERS_SHOWN = 20;
+export function trimCarriers(result: ToolResult): ToolResult {
+  if (!result.rows.some((r) => r.via)) return result;
+  const trim = (via: Record<string, string[]>) =>
+    Object.fromEntries(Object.entries(via).map(([v, cs]) => [v, cs.length > CARRIERS_SHOWN ? [...cs.slice(0, CARRIERS_SHOWN), `and ${cs.length - CARRIERS_SHOWN} more`] : cs]));
+  return { ...result, rows: result.rows.map((r) => (r.via ? { ...r, via: trim(r.via as Record<string, string[]>) } : r)) };
+}
+
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const mentions = (text: string, name: string) => new RegExp(`(^|[^\\w/.-])${esc(name)}($|[^\\w/-])`, 'i').test(text);
 const teamsOf = (r: Report) => [...new Set(r.exposures.map((e) => e.team).filter((t): t is string => !!t))];
@@ -260,7 +270,7 @@ export async function* ask({ run, question, marks = [], chatFn = pinned, signal 
       result = { tool, summary: 'the query did not run (check the arguments): no rows', rows: [], evidence: [], cypher: [], params, ms: 0 };
     }
     results.push(result);
-    yield { type: 'tool_result', id, result };
+    yield { type: 'tool_result', id, result: trimCarriers(result) };
     return result;
   }
 
@@ -321,8 +331,9 @@ export async function* ask({ run, question, marks = [], chatFn = pinned, signal 
     unanswered = true;
     text = `This triage has used its ${MAX_ANSWERS} model-written answers, so this question was not sent to a model. ${graphCan} Run the triage again for more model answers.`;
   } else {
+    run.used = (run.used ?? 0) + 1; // reserved before the call, so Asks in flight together cannot pass the cap
     text = yield* modelAnswer();
-    if (text && !unanswered) run.used = (run.used ?? 0) + 1; // only a model's answer uses up a follow-up
+    if (!text || unanswered) run.used -= 1; // only a model's answer uses up a follow-up
   }
 
   async function* modelAnswer(): AsyncGenerator<TriageEvent, string> {
