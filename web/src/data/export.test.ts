@@ -435,7 +435,7 @@ test('Copy steps carries the skip notes before the numbered steps, like the draw
 });
 
 test('a downgrade note (today\'s range resolves newer than the pin) skips the pin and the override, in the Notice and in the steps', () => {
-  const down = "debug ^4.3.5 resolves 4.4.3 today: skip the 4.4.1 pin and override.";
+  const down = "Today's package.json declares debug ^4.3.5, which resolves 4.4.3 today; the debug@4.4.2 override and the exact debug 4.4.1 pin would downgrade it to 4.4.1: skip the debug@4.4.2 override and its pin unless you are replaying the window.";
   const fix: Remediation = { ...mocha, steps: ['Rotate.', 'Fix the lockfile.', 'Rebuild.'], today: [down] }; // mocha: the only override is debug@4.4.2 -> 4.4.1
   assert.equal(readToday(fix).skipAll, true);
   const e = { ...report.exposures[0]!, tier: 'WOULD_PULL' as const, dev: false };
@@ -449,7 +449,7 @@ test('a downgrade note (today\'s range resolves newer than the pin) skips the pi
   // a second override today's file says nothing about: the pin and override named are skipped, the other stays
   const two: Remediation = { ...fix, overrides: { ...fix.overrides, 'ansi-styles@6.2.2': '6.2.1' } };
   assert.equal(readToday(two).skipAll, false);
-  assert.match(readToday(two).advice!, /^Before you paste: skip the debug@4\.4\.1 pin and override\./);
+  assert.match(readToday(two).advice!, /^Before you paste: skip the debug@4\.4\.2 override and skip the debug@4\.4\.1 pin\./);
   const rest = slackMessage({ exposure: e, paths: [], fix: two, incident: report.incident, link: null, anonymous: true, at: LIVE });
   assert.match(rest, /\nPin to: `ansi-styles@6\.2\.1`\n/, 'only the override the notes leave');
   assert.ok(!rest.includes('Also set in package.json'), 'the direct debug pin is the one the note skips');

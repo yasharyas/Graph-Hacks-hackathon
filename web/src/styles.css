@@ -230,6 +230,16 @@
     scrollbar-width: thin;
     scrollbar-color: var(--line-3) transparent;
   }
+  /* On a phone the page scrolls, not the table pane; but a scroll container that never scrolls would still catch the table's
+     sticky filter row. `clip` is not a scroll container (and still no sideways scroll); min-width 0 because a grid item that
+     is not a scroll container grows to its widest content. */
+  @media (max-width: 767px) {
+    #exposures.scroll-pane {
+      overflow-x: clip;
+      overflow-y: visible;
+      min-width: 0;
+    }
+  }
   .skeleton {
     background: var(--skeleton);
     border-radius: var(--radius-xs);

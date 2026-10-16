@@ -2,10 +2,11 @@
 // with today's package.json (server/agent/triage.ts todayNotes) and sends one sentence per difference, or one "still match"
 // sentence. The differences are of four kinds: an override today's declared range no longer needs ("skip the axios@0.30.4
 // override"), a pin for a package no longer declared ("skip its pin"), a pin declared in the other block ("move its pin"),
-// and a pin or override that would move a package BACKWARDS, because today's declared range already resolves a newer clean
-// release ("debug ^4.3.5 resolves 4.4.3 today: skip the 4.4.1 pin and override"). The tab shows the sentences as they are; this
-// only decides whether anything differs and what to do about it, so the line beside the Copy button can say "skip the
-// debug@4.4.1 pin and override" without a reader opening the check above.
+// and an override (with its exact pin) that would move a package BACKWARDS, because today's declared range already resolves
+// a newer clean release ("... the debug@4.4.2 override and the exact debug 4.4.1 pin would downgrade it to 4.4.1: skip the
+// debug@4.4.2 override and its pin ..."). The tab shows the sentences as they are; this only decides whether anything differs
+// and what to do about it, so the line beside the Copy button can say "skip the debug@4.4.2 override and skip the debug@4.4.1
+// pin" without a reader opening the check above. test/narrate.test.ts feeds it the server's real sentences.
 export interface TodayCheck {
   /** `match`: the fix still fits today's package.json. `differs`: at least one key of the snippet does not apply to it. */
   status: 'match' | 'differs';
@@ -25,9 +26,9 @@ const MATCH = /^Checked against today's package\.json: its direct dependencies s
 const SKIP_OVERRIDE = /: skip the (\S+) override\b/;
 const SKIP_PIN = /no longer declares (\S+): skip its pin\b/;
 const MOVE_PIN = /declares (\S+) in (\w+), not \w+: move its pin there\b/;
-// "debug ^4.3.5 resolves 4.4.3 today: skip the 4.4.1 pin and override", with or without a "Today's package.json declares" before it
-// and a ", which" in it: the package, the pinned version to skip and whether the override goes with the pin.
-const DOWNGRADE = /(@?[\w.-]+(?:\/[\w.-]+)?) \S+?,? (?:which )?resolves \S+?(?: today)?: skip the (\d\S*?) (pin and override|pin|override)\b/;
+// A downgrade note's exact pin, which goes with its override ("the debug@4.4.2 override and the exact debug 4.4.1 pin would
+// downgrade it"): the package and the pinned version to skip.
+const DOWNGRADE_PIN = /the \S+ override and the exact (\S+) (\S+) pin would downgrade\b/;
 
 const and = (xs: string[]) => (xs.length < 2 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
 
@@ -39,25 +40,25 @@ export function todayCheck(notes: readonly string[] | undefined): TodayCheck | n
   const overrides = new Set<string>();
   const pins = new Set<string>();
   const moves = new Map<string, string>();
-  const downs = new Map<string, string>(); // name@pin -> "pin and override" | "pin" | "override"
+  const downs = new Set<string>(); // name@pin
   for (const n of list) {
     if (MATCH.test(n)) continue;
     const override = SKIP_OVERRIDE.exec(n)?.[1];
     const pin = SKIP_PIN.exec(n)?.[1];
     const move = MOVE_PIN.exec(n);
-    const down = DOWNGRADE.exec(n);
-    if (down) downs.set(`${down[1]}@${down[2]}`, down[3]!); // first: "skip the 5.6.0 override" is a version, not an override key
-    else if (override) overrides.add(override);
+    const down = DOWNGRADE_PIN.exec(n);
+    if (down) downs.add(`${down[1]}@${down[2]}`);
+    if (override) overrides.add(override);
     else if (pin) pins.add(pin);
     else if (move) moves.set(move[1]!, move[2]!);
   }
+  const pinned = [...pins, ...downs];
   const actions = [
     ...(overrides.size ? [`skip the ${and([...overrides])} ${overrides.size === 1 ? 'override' : 'overrides'}`] : []),
-    ...(pins.size ? [`skip the ${and([...pins])} ${pins.size === 1 ? 'pin' : 'pins'}`] : []),
+    ...(pinned.length ? [`skip the ${and(pinned)} ${pinned.length === 1 ? 'pin' : 'pins'}`] : []),
     ...[...moves].map(([name, block]) => `move the ${name} pin to ${block}`),
-    ...[...downs].map(([key, kind]) => `skip the ${key} ${kind}`),
   ];
-  return { status: 'differs', notes: list, actions, skipped: [...overrides], skippedPins: [...downs.keys()], skippedNames: [...pins] };
+  return { status: 'differs', notes: list, actions, skipped: [...overrides], skippedPins: [...downs], skippedNames: [...pins] };
 }
 
 /**

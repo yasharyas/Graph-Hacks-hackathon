@@ -192,6 +192,7 @@ test('today notes: a pin or override below what a fresh resolve gets today is a 
   ]);
   assert.deepEqual(skip, ['debug', 'chalk']);
   assert.deepEqual(todayCheck(notes)!.skipped, ['debug@4.4.2', 'chalk@5.6.1']);
+  assert.deepEqual(todayCheck(notes)!.skippedPins, ['debug@4.4.1'], 'the exact pin goes with its override');
   // no release newer than the pins: nothing to skip
   assert.deepEqual(todayNotes(m, { deps: { debug: '^4.3.5' }, dev: {}, versions: { debug: ['4.4.0', '4.4.1'], chalk: ['5.6.0'] } }).notes, ["Checked against today's package.json: its direct dependencies still match this fix."]);
 });

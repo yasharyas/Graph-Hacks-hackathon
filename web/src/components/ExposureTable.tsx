@@ -338,24 +338,6 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
     };
     return filterRows(exposures, { prodOnly, tier, query }).sort(cmp);
   }, [exposures, prodOnly, tier, query, sort]);
-  // On a phone the page scrolls, not the pane, but the pane (`.scroll-pane`, overflow: auto) is still a scroll container that
-  // never scrolls, and a sticky filter row sticks to the nearest one: it would never stick. Below 768px the pane lets the page
-  // be the scroller: `overflow-x: clip` (not a scroll container, so still no sideways scrolling inside it) and `overflow-y:
-  // visible`, with `min-width: 0` because a grid item that is not a scroll container is as wide as its widest content
-  // (what App.tsx's `max-md:overflow-x-clip max-md:overflow-y-visible max-md:min-w-0` on the pane would say in classes; then this goes).
-  useEffect(() => {
-    const pane = root.current?.closest<HTMLElement>('.scroll-pane');
-    const phone = matchMedia('(max-width: 767px)');
-    if (!pane) return;
-    const apply = () => {
-      pane.style.overflowX = phone.matches ? 'clip' : '';
-      pane.style.overflowY = phone.matches ? 'visible' : '';
-      pane.style.minWidth = phone.matches ? '0' : '';
-    };
-    apply();
-    phone.addEventListener('change', apply);
-    return () => (phone.removeEventListener('change', apply), void (pane.style.overflowX = pane.style.overflowY = pane.style.minWidth = ''));
-  }, []);
   const chars = usePathChars(root, rows.length > 0);
   const { px: repoPx, width: textWidth } = useRepoColumn(root, rows.length > 0);
   // One clip shape for the column: a row whose id fits shows it whole (so `acme/checkout-web` keeps its owner wherever it fits);

@@ -72,19 +72,18 @@ test('the same instruction twice is said once', () => {
 });
 
 // A pin or override that would move a package backwards: today's declared range already resolves a newer clean release.
-const DOWN = "debug ^4.3.5 resolves 4.4.3 today: skip the 4.4.1 pin and override.";
+// The server's wording (server/agent/triage.ts todayNotes; test/narrate.test.ts checks the two agree).
+const DOWN = "Today's package.json declares debug ^4.3.5, which resolves 4.4.3 today; the debug@4.4.2 override and the exact debug 4.4.1 pin would downgrade it to 4.4.1: skip the debug@4.4.2 override and its pin unless you are replaying the window.";
 
-test('a pin or override that would move a package backwards is a skip, named by the pinned version', () => {
+test('an override and its exact pin that would move a package backwards are both skips', () => {
   const c = todayCheck([DOWN])!;
   assert.equal(c.status, 'differs');
-  assert.deepEqual(c.actions, ['skip the debug@4.4.1 pin and override']);
+  assert.deepEqual(c.actions, ['skip the debug@4.4.2 override', 'skip the debug@4.4.1 pin']);
   assert.deepEqual(c.skippedPins, ['debug@4.4.1']);
-  assert.deepEqual(c.skipped, []);
-  assert.match(todayAdvice(c)!, /^Before you paste: skip the debug@4\.4\.1 pin and override\. Today's package\.json differs/);
-  // with the server's longer wording around it, and the two shorter endings
-  assert.deepEqual(todayCheck(["Today's package.json declares debug ^4.3.5, which resolves 4.4.3: skip the 4.4.1 pin and override."])!.actions, ['skip the debug@4.4.1 pin and override']);
-  assert.deepEqual(todayCheck(['@types/node ^20 resolves 20.19.1 today: skip the 20.11.0 pin.'])!.actions, ['skip the @types/node@20.11.0 pin']);
-  assert.deepEqual(todayCheck(['chalk ^5.3.0 resolves 5.6.2 today: skip the 5.6.0 override.'])!.actions, ['skip the chalk@5.6.0 override']);
+  assert.deepEqual(c.skipped, ['debug@4.4.2']);
+  assert.match(todayAdvice(c)!, /^Before you paste: skip the debug@4\.4\.2 override and skip the debug@4\.4\.1 pin\. Today's package\.json differs/);
+  // a dependency's range (no direct pin): the override alone
+  assert.deepEqual(todayCheck(['chalk@5.6.1 is gone from npm, so ranges that admitted it now resolve chalk 5.6.2; the chalk@5.6.1 override would hold them at 5.6.0: skip the chalk@5.6.1 override unless you are replaying the window.'])!.actions, ['skip the chalk@5.6.1 override']);
 });
 
 test('every override of the fix skipped, by key or by the version it pins, is "skip all of it", with a reason that fits both kinds of note', () => {
