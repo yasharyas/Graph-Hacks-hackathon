@@ -9,6 +9,9 @@
 /* The war room on a laptop-height window (1024px wide or more, 900px tall or less): the triage narrative is set a step
    tighter so the first tool call stays on screen with the whole verdict above it. */
 @custom-variant fold (@media (min-width: 1024px) and (max-height: 900px));
+/* A 720px-tall laptop (1280x720), or the two-pane band up to 800px tall (1024x768, whose band takes two rows): the
+   narrative drops its Why sentence (NarrativePanel `tight`), so the reserved verdict space is shorter too. */
+@custom-variant tight (@media (min-width: 1024px) and (max-height: 720px), (min-width: 1024px) and (max-width: 1279px) and (max-height: 800px));
 
 /* Hover only where hovering exists (docs/design.md section 4): use `hov:bg-bg-3`, never plain `hover:`. */
 @custom-variant hov {
@@ -182,7 +185,7 @@
   }
 
   /* Hover popover for a short plain-language meaning (aria-hidden: the same words are real text elsewhere). Fine pointers
-     only, with the tooltip delay; the keyboard path is a real button (table Tier help). */
+     only, with the tooltip delay, dismissible with Esc; the keyboard path is a real button (table Tier help). */
   .tip-host {
     position: relative;
   }
@@ -213,6 +216,12 @@
       opacity: 1;
       visibility: visible;
       transition-delay: var(--tooltip-delay), var(--tooltip-delay);
+    }
+    /* Esc dismisses a hover tip without moving the pointer (WCAG 1.4.13); the next pointer move brings tips back (App) */
+    :root[data-tips-off] .tip-host:hover > .tip {
+      opacity: 0;
+      visibility: hidden;
+      transition: none;
     }
   }
 

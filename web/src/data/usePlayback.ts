@@ -1,6 +1,8 @@
 // Scrubber clock. Autoplays `from` to `to` over `durationMs` on first load (docs/design.md: the 12 s landing
 // autoplay). The position is floored to whole minutes, so a 12 s run is ~90 React updates, not 720.
 // Reduced motion: the final state renders at once; pressing Play then steps in 5-minute jumps.
+// Once the person (or the app on their behalf: a run, a sheet) has paused or moved the clock, a new track (another scenario)
+// does not autoplay over that choice (WCAG 2.2.2): it opens at its end state, as under reduced motion, until Play is pressed.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useReducedMotion } from 'motion/react';
 
@@ -15,11 +17,16 @@ export function usePlayback(from: number | null, to: number | null, durationMs =
   const raf = useRef(0);
   const startRef = useRef(startAt);
   startRef.current = startAt;
+  const held = useRef(false); // the clock was paused or moved on purpose: no autoplay on the next track
 
   const stop = useCallback(() => {
     cancelAnimationFrame(raf.current);
     setPlaying(false);
   }, []);
+  const pause = useCallback(() => {
+    held.current = true;
+    stop();
+  }, [stop]);
 
   const playFrom = useCallback(
     (origin: number) => {
@@ -43,23 +50,28 @@ export function usePlayback(from: number | null, to: number | null, durationMs =
 
   /** Play from the current position, or from the start when already at the end. */
   const play = useCallback(() => {
+    held.current = false;
     if (from !== null && to !== null) playFrom(at === null || at >= to ? from : at);
   }, [at, from, to, playFrom]);
 
   const seek = useCallback(
     (next: number) => {
+      held.current = true;
       stop();
       setAt(next);
     },
     [stop],
   );
 
-  // First load (and each scenario change): autoplay, or jump to the end under reduced motion.
+  // First load (and each scenario change): autoplay, or jump to the end under reduced motion or after a pause.
   useEffect(() => {
     if (from === null || to === null) return;
     if (startRef.current !== null && startRef.current >= from) setAt(floorMin(Math.min(startRef.current, to)));
-    else if (reduce) setAt(to);
-    else {
+    else if (reduce || held.current) {
+      cancelAnimationFrame(raf.current);
+      setPlaying(false);
+      setAt(to);
+    } else {
       setAt(from);
       playFrom(from);
     }
@@ -67,5 +79,5 @@ export function usePlayback(from: number | null, to: number | null, durationMs =
     // restart only when the track changes, not when playFrom's identity does
   }, [from, to]);
 
-  return { at, playing, play, pause: stop, seek };
+  return { at, playing, play, pause, seek };
 }

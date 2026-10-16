@@ -11,6 +11,7 @@
  *   clockAt      the scrubber's resting clock (epoch ms); passed to the narrative, which dims itself when it describes another clock
  *   guest        the run is about one pasted repo: no team routing to show (the narrative and route_owners say so instead)
  *   cypherHints  values a tool derived inside its run (the incident's maintainer), for the runnable Cypher's parameter prefix
+ *   notices      each team's notice (Report.notices): the narrative's Notify roster copies one per team
  *   footer       the AskBox, pinned: sticky at the bottom of the pane, fixed above the tab bar below 1024px
  *
  * Proof: every claim chip, [E#] tag and claim-map entry calls trace(entity). The tool call that returned it (data/
@@ -35,13 +36,13 @@ import { Fragment, useEffect, useRef, useState, type MouseEvent, type ReactNode 
 import { plainError } from '../data/errors.ts';
 import { nextStep, requestIdFor } from '../data/failure.ts';
 import { answerLabel, proofFor, spokenAnswer } from '../data/narration.ts';
-import type { ScenarioId } from '../data/types.ts';
+import type { Notice, ScenarioId } from '../data/types.ts';
 import type { FollowUp, Guard, Narration, ToolCardState, TriageError, TriageState } from '../data/useTriage.ts';
 import { Button } from './Button.tsx';
 import { EmptyState } from './EmptyState.tsx';
 import { CircleAlert } from './icons/Glyphs.tsx';
 import { NarrationBlock, NarrativePanel } from './NarrativePanel.tsx';
-import { reveal } from './scrollPane.ts';
+import { reveal, revealKeepingFocus } from './scrollPane.ts';
 import { cardDomId, subject, ToolCard, type Trace } from './ToolCard.tsx';
 
 export interface ToolFeedProps {
@@ -57,6 +58,7 @@ export interface ToolFeedProps {
   clockAt?: number;
   guest?: boolean;
   cypherHints?: Record<string, unknown>;
+  notices?: Notice[];
   footer?: ReactNode;
 }
 
@@ -93,7 +95,7 @@ function useCalm(text: string, calm: boolean, ms: number): string {
   return out;
 }
 
-export function ToolFeed({ cards, followUps, narration, guard, status, error, scenario, onRun, onSelectEntity, clockAt, guest = false, cypherHints, footer }: ToolFeedProps) {
+export function ToolFeed({ cards, followUps, narration, guard, status, error, scenario, onRun, onSelectEntity, clockAt, guest = false, cypherHints, notices, footer }: ToolFeedProps) {
   const lastRef = useRef<HTMLElement>(null);
   const nonce = useRef(0);
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
@@ -107,7 +109,8 @@ export function ToolFeed({ cards, followUps, narration, guard, status, error, sc
   useEffect(() => {
     const el = lastRef.current;
     if (!followUps.length || !el) return;
-    const raf = requestAnimationFrame(() => reveal(el, answered ? 'top' : 'nearest'));
+    // the Ask field keeps the focus while the answer lands: on a short or zoomed window it stays on screen, the answer gives way
+    const raf = requestAnimationFrame(() => revealKeepingFocus(el, answered ? 'top' : 'nearest'));
     return () => cancelAnimationFrame(raf);
   }, [followUps.length, answered]);
   useEffect(() => {
@@ -166,17 +169,28 @@ export function ToolFeed({ cards, followUps, narration, guard, status, error, sc
     setSaid(`Opened ${hit.card.tool}${sub ? `, ${sub}` : ''}, the call that returned ${entity}. Its Cypher is shown${hit.row !== null ? ' and the matching row is highlighted' : ''}.`);
   };
 
-  /** "Skip to tool calls": past the narrative's chips to the first tool call (the FalkorDB proof). */
+  /**
+   * "Skip to tool calls": past the narrative's chips to the first tool call (the FalkorDB proof). Focus moves FIRST: the skip
+   * links take room only while one has focus, so the moment the link loses it everything below moves up by their height, and
+   * a scroll measured before that would leave the card above the visible area.
+   */
   const toCalls = (e: MouseEvent) => {
     e.preventDefault();
     const target = document.querySelector<HTMLElement>('#tool-calls-list article h3 button') ?? document.getElementById('tool-calls');
     if (!target) return;
-    reveal(target.closest('article') ?? target, 'top');
     target.focus({ preventScroll: true });
+    reveal(target.closest('article') ?? target, 'top');
   };
   const toAsk = (e: MouseEvent) => {
     e.preventDefault();
-    document.getElementById('ask-question')?.focus();
+    const field = document.getElementById('ask-question');
+    field?.focus({ preventScroll: true });
+    if (field) reveal(field, 'nearest');
+  };
+  /** Below 1024px: the Feed / Graph / Table bar is last in the page, after every card. */
+  const toPanels = (e: MouseEvent) => {
+    e.preventDefault();
+    document.querySelector<HTMLButtonElement>('nav[aria-label="Panels"] button[aria-pressed="true"]')?.focus();
   };
   const toTable = (e: MouseEvent) => {
     e.preventDefault();
@@ -200,7 +214,7 @@ export function ToolFeed({ cards, followUps, narration, guard, status, error, sc
           {cs.some((c) => c.status === 'done') && (
             <button
               type="button"
-              className="rounded-xs text-xs text-fg-1 underline underline-offset-2 pointer-coarse:min-h-11 hov:text-fg-0"
+              className="inline-flex min-h-6 items-center rounded-xs text-xs text-fg-1 underline underline-offset-2 pointer-coarse:min-h-11 hov:text-fg-0"
               onClick={() => setOpen((s) => (every ? new Set([...s].filter((id) => !cs.some((c) => c.id === id))) : new Set([...s, ...cs.filter((c) => c.status === 'done').map((c) => c.id)])))}
             >
               {every ? 'Collapse all' : 'Expand all'}
@@ -232,7 +246,7 @@ export function ToolFeed({ cards, followUps, narration, guard, status, error, sc
                 <button
                   type="button"
                   aria-expanded={full}
-                  className="self-start rounded-xs text-xs text-fg-1 underline underline-offset-2 pointer-coarse:min-h-11 hov:text-fg-0"
+                  className="inline-flex min-h-6 items-center self-start rounded-xs text-xs text-fg-1 underline underline-offset-2 pointer-coarse:min-h-11 hov:text-fg-0"
                   onClick={() => {
                     if (!full) {
                       revealed.current = hidden[0]?.id ?? null;
@@ -305,15 +319,29 @@ export function ToolFeed({ cards, followUps, narration, guard, status, error, sc
           <a href="#exposures" onClick={toTable} className={skip}>
             Skip to exposure table
           </a>
+          <a href="#panels" onClick={toPanels} className={`${skip} lg:hidden`}>
+            Skip to the Feed, Graph and Table bar
+          </a>
         </nav>
         {/* The verdict streams in after the tool calls: its place is held from the start of the run (about its usual height),
             so the cards below do not jump down when it lands. */}
+        {/* Shaped like the narrative it stands for (headline, two tier lines, the Why sentences, the disclosure) and about its
+            height on each layout, so the reserved space reads as a verdict loading, not as a gap. */}
         {status === 'running' && !narration && (
-          <div aria-hidden className="flex min-h-[26rem] flex-col gap-2 lg:min-h-96">
+          <div aria-hidden className="flex min-h-[34rem] flex-col gap-2 max-[359px]:min-h-[42rem] sm:min-h-[26rem] short:min-h-[17.5rem] lg:min-h-96 tight:min-h-80">
             <p className="label-caps text-xs">Verdict</p>
             <p className="text-sm text-fg-1">{cards.length === 0 ? 'Connecting to the graph…' : 'Writing the verdict from the graph…'}</p>
-            {['w-11/12', 'w-4/5', 'w-5/6', 'w-2/3'].map((w) => (
-              <div key={w} className={`skeleton h-4 ${w}`} />
+            {[
+              ['w-11/12', 'w-full', 'w-full', 'w-3/5'], // the headline
+              ['w-full', 'w-5/6', 'w-full', 'w-4/5'], // LOCKED and WOULD_PULL lines
+              ['w-full', 'w-11/12', 'w-full', 'w-5/6', 'w-full', 'w-2/3'], // Why: all of it on a phone, one sentence on a laptop
+              ['w-1/2'], // the disclosure
+            ].map((group, g) => (
+              <div key={g} className={`flex flex-col short:[&>:nth-child(n+3)]:hidden ${g === 0 ? 'gap-2.5' : 'mt-2 gap-2 max-lg:gap-4 short:gap-2'} ${g === 0 || g === 1 ? 'lg:[&>:nth-child(n+3)]:hidden' : g === 2 ? 'lg:[&>:nth-child(n+4)]:hidden tight:hidden' : ''}`}>
+                {group.map((w, i) => (
+                  <div key={i} className={`skeleton ${g === 0 ? 'h-4' : 'h-3'} ${w}`} />
+                ))}
+              </div>
             ))}
           </div>
         )}
@@ -327,6 +355,7 @@ export function ToolFeed({ cards, followUps, narration, guard, status, error, sc
           drafting={drafting}
           awaitingGuard={status === 'running' && guard === null}
           guest={guest}
+          notices={notices}
         />
         {list(0)}
         {status === 'error' && error && cards.length > 0 && (

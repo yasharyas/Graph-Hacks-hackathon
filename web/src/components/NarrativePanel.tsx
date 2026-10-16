@@ -15,7 +15,7 @@
  * and (except on a tall desktop window) the analyst pick sit behind ONE disclosure that says what it reveals ("Show 2 more
  * evidence paths, the analyst pick, who to notify and the steps"). An Ask answer shows every line it has (`fold` is off).
  * A pasted repo has no team to notify (its Notify line, if any, is not shown); the demo org's Notify says its teams are demo
- * teams. A narration for another clock is marked by a bar at its left edge and the "as of" stamp, never by dimming its text
+ * teams, and each team in it has a "Copy notice" (that team's message, Report.notices: the drawer copies it one repo at a time). A narration for another clock is marked by a bar at its left edge and the "as of" stamp, never by dimming its text
  * (dimmed text fell under 4.5:1).
  *
  * Every verified claim leads to proof: a chip, an [E1] tag, or an entry in the claim map calls onTrace(entity); the feed
@@ -39,10 +39,12 @@
 import { Fragment, useEffect, useId, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { plural, utcLabel } from '../data/format.ts';
 import { citeCount, claimMap, crowded, guardLine, lines, splitCoverage, teamStarts, verdictLines, whyParts, type ProofCard, type Segment } from '../data/narration.ts';
+import type { Notice } from '../data/types.ts';
 import type { Guard, Narration } from '../data/useTriage.ts';
 import { Button } from './Button.tsx';
 import { CheckDrawIcon } from './icons/CheckDrawIcon.tsx';
-import { ChevronDown } from './icons/Glyphs.tsx';
+import { ChevronDown, Copy } from './icons/Glyphs.tsx';
+import { copyText } from './copy.ts';
 import { subject } from './ToolCard.tsx';
 
 /** A narration as the server may send it: the contract adds `note`, `at` and `draft`, which older servers omit. */
@@ -68,12 +70,14 @@ interface BlockProps {
   modelWords?: boolean;
   /** A pasted repo: no team routing to show. */
   guest?: boolean;
+  /** Each team's notice (Report.notices): the Notify roster offers "Copy notice" per team. */
+  notices?: Notice[];
 }
 
 const NOT_RETURNED = 'not returned by any graph query';
 const chip = 'rounded-xs border px-1.5 py-0.5 font-mono text-xs';
-// A 44px hit area on touch (a pseudo-element reaching into the line gaps), with no change to the chip's size or the text's density.
-const HIT = 'relative pointer-coarse:after:absolute pointer-coarse:after:-inset-x-0.5 pointer-coarse:after:-inset-y-[7px]';
+// A 44px hit area on touch: a pseudo-element reaching 11px into the line gaps (10px past the 1px border), with no change to the chip's size; lines are 28px on touch.
+const HIT = 'relative pointer-coarse:after:absolute pointer-coarse:after:-inset-x-0.5 pointer-coarse:after:-inset-y-[11px]';
 const LABEL = 'label-caps text-xs';
 const PICK_EXPLAINED = 'The model chose this observation; the words come from the graph.';
 const TRACE_TITLE = 'Verified against a graph query. Click to open the tool call that returned it.';
@@ -85,9 +89,29 @@ const TIER_TEXT: Record<string, string> = { LOCKED: 'text-tier-locked', WOULD_PU
 /** "a, b and c" */
 const sayList = (xs: string[]) => (xs.length < 2 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
 
-function Spans({ segs, onTrace, hint, checking = false }: { segs: Segment[]; onTrace: (e: string) => void; hint: string; checking?: boolean }) {
+/** The roster's per-team copy: that team's notice text (Report.notices), the same words the drawer's Notice tab copies. */
+function CopyNotice({ team, text }: { team: string; text: string }) {
+  return (
+    <button
+      type="button"
+      onClick={() => void copyText(text, `${team} notice`)}
+      aria-label={`Copy notice for ${team}`}
+      title={`Copy the message for ${team}'s channel (plain text, every repo of theirs with its fix)`}
+      className="relative mx-1 inline-flex min-h-6 items-center gap-1 rounded-xs align-baseline text-xs text-fg-1 underline underline-offset-2 hov:text-fg-0 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0"
+    >
+      <Copy size={12} />
+      Copy notice
+    </button>
+  );
+}
+
+function Spans({ segs, onTrace, hint, checking = false, notice }: { segs: Segment[]; onTrace: (e: string) => void; hint: string; checking?: boolean; notice?: (team: string) => string | undefined }) {
   const list = crowded(segs); // a list of names: no boxes
-  const teams = list ? teamStarts(segs) : new Set<number>(); // a roster: one line per team
+  const teams = list || notice ? teamStarts(segs) : new Set<number>(); // a roster: one line per team (in a list), each with its notice
+  const copy = (i: number, text: string) => {
+    const t = notice && teams.has(i) ? notice(text) : undefined;
+    return t ? <CopyNotice team={text} text={t} /> : null;
+  };
   return (
     <>
       {segs.map((s, i) => {
@@ -175,20 +199,23 @@ function Spans({ segs, onTrace, hint, checking = false }: { segs: Segment[]; onT
               >
                 {s.text}
               </button>
+              {copy(i, s.text)}
             </Fragment>
           );
         }
         return (
-          <button
-            key={i}
-            type="button"
-            aria-describedby={hint}
-            onClick={() => onTrace(s.text)}
-            title={TRACE_TITLE}
-            className={`${chip} -my-0.5 inline-flex fold:py-0 items-center pointer-coarse:min-h-6 ${HIT} border-line-2 bg-bg-2 text-fg-0 transition-transform duration-(--dur-press) ease-out active:scale-(--press-scale) hov:border-line-3 hov:bg-bg-3`}
-          >
-            {s.text}
-          </button>
+          <Fragment key={i}>
+            <button
+              type="button"
+              aria-describedby={hint}
+              onClick={() => onTrace(s.text)}
+              title={TRACE_TITLE}
+              className={`${chip} -my-0.5 inline-flex fold:py-0 items-center pointer-coarse:min-h-6 ${HIT} border-line-2 bg-bg-2 text-fg-0 transition-transform duration-(--dur-press) ease-out active:scale-(--press-scale) hov:border-line-3 hov:bg-bg-3`}
+            >
+              {s.text}
+            </button>
+            {copy(i, s.text)}
+          </Fragment>
         );
       })}
     </>
@@ -258,18 +285,21 @@ type Row = ReturnType<typeof lines>[number];
 
 // How much room the triage narrative has. From 1024px wide the feed is a 320 to 360px column beside the graph: on a window up
 // to 900px tall (a laptop) it shows the Verdict, one whole Why sentence and the disclosure, so the first tool call stays on
-// screen; on a taller one, two Why sentences and the analyst pick. Below 1024px the feed is the page: all of Why.
-type Room = 'phone' | 'short' | 'tall';
+// screen; on a taller one, two Why sentences and the analyst pick; on one 720px tall or less, or 800px in the two-pane band
+// where the band takes two rows (`tight`: 1280x720, 1024x768), no Why sentence, so the first tool call clears the pinned Ask
+// bar ("Show why (3 evidence paths), ..."). Below 1024px the feed is the page: all of Why.
+type Room = 'phone' | 'tight' | 'short' | 'tall';
 const WIDE = '(min-width: 1024px)';
 const SHORT = '(min-width: 1024px) and (max-height: 900px)';
+const TIGHT = '(min-width: 1024px) and (max-height: 720px), (min-width: 1024px) and (max-width: 1279px) and (max-height: 800px)';
 const subscribe = (cb: () => void) => {
-  const qs = [matchMedia(WIDE), matchMedia(SHORT)];
+  const qs = [matchMedia(WIDE), matchMedia(SHORT), matchMedia(TIGHT)];
   qs.forEach((q) => q.addEventListener('change', cb));
   return () => qs.forEach((q) => q.removeEventListener('change', cb));
 };
-const room = (): Room => (!matchMedia(WIDE).matches ? 'phone' : matchMedia(SHORT).matches ? 'short' : 'tall');
+const room = (): Room => (!matchMedia(WIDE).matches ? 'phone' : matchMedia(TIGHT).matches ? 'tight' : matchMedia(SHORT).matches ? 'short' : 'tall');
 const useRoom = () => useSyncExternalStore(subscribe, room, () => 'tall' as Room);
-const WHY_SHOWN: Record<Room, number> = { phone: Infinity, short: 1, tall: 2 };
+const WHY_SHOWN: Record<Room, number> = { phone: Infinity, tight: 0, short: 1, tall: 2 };
 
 /** "Show 2 more evidence paths, the analyst pick, who to notify and the steps": what the one disclosure reveals. */
 const revealLabel = (parts: (string | null | false)[]) => {
@@ -278,7 +308,7 @@ const revealLabel = (parts: (string | null | false)[]) => {
 };
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
-export function NarrationBlock({ narration, guard, onTrace, cards = [], idSuffix = '', stale = false, fold = false, drafting = false, awaitingGuard = false, stamp, modelWords = false, guest = false }: BlockProps) {
+export function NarrationBlock({ narration, guard, onTrace, cards = [], idSuffix = '', stale = false, fold = false, drafting = false, awaitingGuard = false, stamp, modelWords = false, guest = false, notices }: BlockProps) {
   const hint = useId();
   const more = useId();
   const space = useRoom();
@@ -304,15 +334,16 @@ export function NarrationBlock({ narration, guard, onTrace, cards = [], idSuffix
   const hasPick = note !== null || pending;
   // The claim map ("62 of 62 claims traced", which the header badge also counts) folds with the rest, except on a tall window.
   const claimsFolded = fold && !full && space !== 'tall' && (checking || (guard !== null && guard.total > 0));
+  const evidence = `${cites} ${whyShown === 0 ? '' : 'more '}evidence ${cites === 1 ? 'path' : 'paths'}`;
   const reveals = revealLabel([
-    whyHidden.length > 0 && (cites > 0 ? `${cites} more evidence ${cites === 1 ? 'path' : 'paths'}` : 'the rest of why'),
+    whyHidden.length > 0 && (whyShown === 0 ? (cites > 0 ? `why (${evidence})` : 'why') : cites > 0 ? evidence : 'the rest of why'),
     !pickInline && hasPick && 'the analyst pick',
     folded.some((r) => r.label === 'Notify') && 'who to notify',
     folded.some((r) => r.label === 'Do') && 'the steps',
     claimsFolded && 'the claim map',
   ]);
   const expandable = fold && (full || folded.length > 0 || whyHidden.length > 0 || (!pickInline && hasPick) || claimsFolded);
-  const tight = fold ? 'fold:leading-[18px]' : ''; // a laptop-height window: 13px lines a step closer
+  const tight = `pointer-coarse:leading-7 ${fold ? 'fold:leading-[18px]' : ''}`; // a laptop-height window: 13px lines a step closer
 
   // A labelled line runs the label into the text (the 320px feed has no width for a label column), with a real space after
   // it. The Verdict's label has its own row, shared with the "as of" stamp, so the stamp never sits mid-sentence.
@@ -325,6 +356,7 @@ export function NarrationBlock({ narration, guard, onTrace, cards = [], idSuffix
         </span>{' '}
       </>
     );
+  const noticeFor = (team: string) => notices?.find((n) => n.team === team)?.text;
   const row = (r: Row, i: number) => {
     const head = r.label === 'Verdict' || (i === 0 && stamp);
     const verdict = r.label === 'Verdict' ? verdictLines(r.segs) : null;
@@ -357,7 +389,7 @@ export function NarrationBlock({ narration, guard, onTrace, cards = [], idSuffix
               </Fragment>
             ))
           ) : (
-            <Spans segs={r.segs} onTrace={onTrace} hint={hint} checking={checking} />
+            <Spans segs={r.segs} onTrace={onTrace} hint={hint} checking={checking} notice={r.label === 'Notify' && !guest && notices?.length ? noticeFor : undefined} />
           )}
         </p>
       </Fragment>
@@ -396,7 +428,7 @@ export function NarrationBlock({ narration, guard, onTrace, cards = [], idSuffix
             : `${guard.verified} of ${plural(guard.total, 'claim')} verified against the graph. Verified names and evidence ids open the tool call and query that returned them.`
           : 'Not checked against the graph.'}
       </span>
-      {shown.map((r, i) => row(r, i))}
+      {shown.map((r, i) => (r === why && whyShown === 0 ? null : row(r, i)))}
       {pickInline && pick}
 
       {coverage && (
@@ -460,6 +492,7 @@ export function NarrativePanel({
   drafting,
   awaitingGuard,
   guest,
+  notices,
 }: Omit<BlockProps, 'narration' | 'idSuffix' | 'stale' | 'fold' | 'stamp' | 'modelWords'> & { narration: NarrationView | null; clockAt?: number; onRerun?: () => void }) {
   // `clockAt` is the scrubber's resting clock (App: it follows a scrub once it stops, and a run's own clock at once), so this
   // line changes once per scrub and never claims the clock moved while a run is aligning it. Not a live region: the report
@@ -491,6 +524,7 @@ export function NarrativePanel({
         drafting={drafting ?? narration.draft ?? false}
         awaitingGuard={awaitingGuard}
         guest={guest}
+        notices={notices}
         stamp={narration.at !== undefined ? <span className={`font-mono text-xs tabular-nums ${stale ? 'text-fg-0' : 'text-fg-1'}`}>as of {utcLabel(narration.at)}</span> : undefined}
       />
     </section>

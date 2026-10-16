@@ -2,8 +2,8 @@
  * Props: report (Report), cards (all ToolCardState of the run), graph (graph name from the start event or null),
  *        totalMs (server-reported run time or null), remediated (repo -> epoch ms of every mark, the server's and this
  *        screen's, so a mark made a second ago is listed).
- * Tabs: Concentration (bars; for one pasted repo it is collapsed behind a button: "the next compromised account" is an org
- * question), All Cypher used (one <pre>, unwrapped, Copy all: one example per distinct statement with the FalkorDB parameter
+ * Tabs: Concentration (bars, an account that is not a person glossed: "types"; for one pasted repo it is collapsed behind a button: "the next compromised account" is an org
+ * question), All Cypher used (one <pre>, wrapped, scrolling down only, Copy all: one example per distinct statement with the FalkorDB parameter
  * prefix it ran with, each ";"-terminated and labelled, since FalkorDB runs one statement per query; data/cypherParams.ts
  * cypherScript), Triage history (two lists: "Marked remediated",
  * each repo with the time in the person's own zone, first; and "Assessed in earlier runs": how many repos, the latest time
@@ -26,6 +26,7 @@ import { copyText } from './copy.ts';
 import { EmptyState } from './EmptyState.tsx';
 import { influenceShares } from './ExecSummary.tsx';
 import { Copy } from './icons/Glyphs.tsx';
+import { Wrapped } from './ToolCard.tsx';
 
 const TABS = ['Concentration', 'All Cypher used', 'Triage history', 'Graph stats'] as const;
 
@@ -38,6 +39,8 @@ export interface InsightTabsProps {
 }
 
 const count = (n: number) => n.toLocaleString('en-US');
+/** npm accounts that are not a person: a bare name would read as one (the Ask answer uses the same gloss). */
+const ACCOUNT_NOTE: Record<string, string> = { types: 'The account that publishes DefinitelyTyped’s @types packages.' };
 
 export function InsightTabs({ report, cards, graph, totalMs, remediated }: InsightTabsProps) {
   const [tab, setTab] = useState(0);
@@ -81,7 +84,7 @@ export function InsightTabs({ report, cards, graph, totalMs, remediated }: Insig
             role="tab"
             type="button"
             aria-selected={tab === i}
-            aria-controls={tab === i ? `${base}-panel` : undefined} // only the selected tab has a panel in the DOM
+            aria-controls={`${base}-panel${i}`} // every tab's panel is in the DOM (hidden unless selected), so the id always resolves
             tabIndex={tab === i ? 0 : -1}
             onClick={() => setTab(i)}
             onKeyDown={(e) => onKey(e, i)}
@@ -93,9 +96,13 @@ export function InsightTabs({ report, cards, graph, totalMs, remediated }: Insig
         ))}
       </div>
 
+      {/* the three unselected panels are empty and hidden: their ids exist for aria-controls, their content is built on selection */}
+      {TABS.map((t, i) =>
+        i === tab ? null : <div key={t} role="tabpanel" id={`${base}-panel${i}`} aria-labelledby={`${base}-t${i}`} hidden />,
+      )}
       <div
         role="tabpanel"
-        id={`${base}-panel`}
+        id={`${base}-panel${tab}`}
         aria-labelledby={`${base}-t${tab}`}
         tabIndex={tab === 1 ? undefined : 0} // panels without a focusable child are reachable by keyboard themselves
         className="p-3 text-sm"
@@ -124,6 +131,7 @@ export function InsightTabs({ report, cards, graph, totalMs, remediated }: Insig
                     </span>
                     <span className="text-right font-sans font-bold text-fg-0 tabular-nums">{c.share}</span>
                     <span className="col-span-3 text-xs text-fg-1 tabular-nums">
+                      {ACCOUNT_NOTE[c.maintainer] && <span className="block text-fg-0">{ACCOUNT_NOTE[c.maintainer]}</span>}
                       {plural(c.packages, 'package')} · reaches {c.reposReached} of {plural(repos, 'repo')}
                     </span>
                   </li>
@@ -146,8 +154,11 @@ export function InsightTabs({ report, cards, graph, totalMs, remediated }: Insig
               <p className="text-xs text-fg-1">One example per distinct statement. FalkorDB runs one statement per query: paste and run each on its own.</p>
             </div>
             {cypher ? (
-              <pre tabIndex={0} role="region" aria-label="Cypher queries" className="max-h-72 w-full overflow-auto rounded-xs bg-bg-3 p-2 text-xs leading-[18px] whitespace-pre text-fg-0">
-                <code>{cypher}</code>
+              // wrapped like the cards' Cypher (nothing clipped sideways); it scrolls down only, so it keeps one tab stop
+              <pre tabIndex={0} role="region" aria-label="Cypher queries" className="max-h-72 w-full overflow-y-auto rounded-xs bg-bg-3 p-2 text-xs leading-[18px] whitespace-pre-wrap text-fg-0 [overflow-wrap:anywhere]">
+                <code>
+                  <Wrapped text={cypher} />
+                </code>
               </pre>
             ) : (
               <p className="text-fg-1">No queries have run yet.</p>

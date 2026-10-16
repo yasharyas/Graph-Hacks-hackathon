@@ -17,9 +17,11 @@
  * at=1757338200000 MATCH ...`, data/cypherParams.ts) and has its own Copy, which copies that one statement, runnable as pasted
  * in FalkorDB Browser or redis-cli. FalkorDB takes one statement per query, so a call with several offers "Copy all N" as a
  * script that says so (data/cypherParams.ts cypherScript: ";" per statement, a comment naming each). A value the page cannot
- * know ($session, an httpOnly cookie) is a marked placeholder. The code never wraps (a 335px column broke it every ~28
- * characters): each statement is a horizontally scrolling block, focusable and labelled, so a keyboard can scroll it too.
- * A traced card, an opened plan and the "Show all rows" toggle are scrolled clear of the pinned Ask bar (components/scrollPane.ts reveal).
+ * know ($session, an httpOnly cookie) is a marked placeholder. The code wraps at spaces and at the joints of a pattern (never
+ * every ~28 characters mid-word, never a clipped sideways-scrolling box), across the card's full width; so nothing in it needs
+ * scrolling, and it is not a tab stop or a landmark (21 to 75 of them flooded the landmark list). Every small control is 24px tall.
+ * A traced card, an opened plan and the "Show all rows" toggle are scrolled clear of the pinned Ask bar, and whatever holds the
+ * focus stays on screen (components/scrollPane.ts reveal, revealKeepingFocus).
  * A pasted repo's cards show no team column (its "team" is a placeholder), and a tier cell carries its plain meaning as a title.
  * States: pending (radar + 3 skeleton rows; after 3 s "waiting for FalkorDB... 4 s"), done (collapsed line; open:
  * table, Cypher), error (neutral alert block: red means infected on this screen), cancelled. Radar only while pending.
@@ -41,7 +43,8 @@ import { copyText } from './copy.ts';
 import { ChevronDown, CircleAlert, Copy } from './icons/Glyphs.tsx';
 import { RadarIcon } from './icons/RadarIcon.tsx';
 import { PathChain } from './PathChip.tsx';
-import { reveal } from './scrollPane.ts';
+import { reveal, revealKeepingFocus } from './scrollPane.ts';
+import { cypherPieces } from '../data/cypherWrap.ts';
 import { TIER_SUBTITLE } from './TierChip.tsx';
 import { realTeam } from '../data/repoLabel.ts';
 
@@ -110,6 +113,20 @@ function Cell({ k, v }: { k: string; v: unknown }) {
 }
 
 const rowFlash = 'bg-bg-3 outline-2 -outline-offset-2 outline-fg-0';
+
+/** Cypher with a line-break opportunity at each joint of a pattern (`)-[:R]->(`, a list's commas); the text itself is unchanged. */
+export function Wrapped({ text }: { text: string }) {
+  return (
+    <>
+      {cypherPieces(text).map((p, i) => (
+        <Fragment key={i}>
+          {i > 0 && <wbr />}
+          {p}
+        </Fragment>
+      ))}
+    </>
+  );
+}
 
 function RowsTable({ tool, rows, flash, showAll, onToggleAll, guest }: { tool: string; rows: Record<string, unknown>[]; flash: number | null; showAll: boolean; onToggleAll: () => void; guest: boolean }) {
   const shown = showAll ? rows : rows.slice(0, MAX_ROWS);
@@ -290,16 +307,17 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
     // The card's top goes to the top of the visible area (clear of the pinned Ask bar), so its Cypher is below it on screen;
     // again once the body has finished opening (the pane may not have had the room to scroll that far before). The row that
     // holds the claim is then brought into view only if it is further down than that.
+    // The header takes the focus first, so the row's scroll can keep it on screen (a short or zoomed window cannot show both).
     const place = () => {
       const el = cardRef.current;
       if (!el) return;
       reveal(el, 'top');
       const row = trace.row !== null ? el.querySelector(`[data-row="${trace.row}"]`) : null;
-      if (row) reveal(row, 'nearest');
+      if (row) revealKeepingFocus(row, 'nearest');
     };
     const raf = requestAnimationFrame(() => {
-      place();
       headRef.current?.focus({ preventScroll: true });
+      place();
     });
     const settle = setTimeout(place, 260); // the body's grid-rows transition is --dur-base (200 ms)
     return () => {
@@ -314,7 +332,7 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
     planWanted.current = null;
     const raf = requestAnimationFrame(() => {
       const el = document.getElementById(`${bodyId}-s${i}`);
-      if (el) reveal(el, 'nearest');
+      if (el) revealKeepingFocus(el, 'nearest'); // "Hide plan" keeps the focus above it: it stays on screen
     });
     return () => cancelAnimationFrame(raf);
   }, [plan, planOpen]);
@@ -383,7 +401,7 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
         <h3 className="flex items-start gap-2 text-base">
           {collapsible ? (
             // on touch the button grows into the card's own padding (negative margin) to a 44px target without moving anything
-            <button ref={headRef} type="button" aria-expanded={open} aria-controls={bodyId} className="flex min-w-0 flex-1 items-start gap-1.5 rounded-xs text-left break-words [overflow-wrap:anywhere] pointer-coarse:-my-3 pointer-coarse:min-h-11 pointer-coarse:py-3">
+            <button ref={headRef} type="button" aria-expanded={open} aria-controls={bodyId} className="flex min-h-6 min-w-0 flex-1 items-start gap-1.5 rounded-xs text-left break-words [overflow-wrap:anywhere] pointer-coarse:-my-3 pointer-coarse:min-h-11 pointer-coarse:py-3">
               <ChevronDown size={16} className={`mt-0.5 shrink-0 text-fg-1 transition-transform duration-(--dur-base) ease-out ${open ? '' : '-rotate-90'}`} />
               <span className="min-w-0">{title}</span>
             </button>
@@ -478,7 +496,7 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
                   type="button"
                   aria-expanded={cypherOpen}
                   onClick={() => setCypherOpen((o) => !o)}
-                  className="inline-flex items-center gap-1 rounded-xs px-1 text-xs text-fg-1 pointer-coarse:min-h-11 hov:text-fg-0"
+                  className="inline-flex min-h-6 items-center gap-1 rounded-xs px-1 text-xs text-fg-1 pointer-coarse:min-h-11 hov:text-fg-0"
                 >
                   <ChevronDown size={14} className={`transition-transform duration-(--dur-base) ease-out ${cypherOpen ? 'rotate-180' : ''}`} />
                   Cypher{stmts.length > 1 ? ` (${stmts.length} queries)` : ''}
@@ -487,7 +505,7 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
                   type="button"
                   onClick={copyCypher}
                   title={stmts.length > 1 ? 'One text, one statement after another: FalkorDB runs one statement per query, so paste and run each on its own' : undefined}
-                  className="inline-flex items-center gap-1 rounded-xs px-1 text-xs text-fg-1 pointer-coarse:min-h-11 hov:text-fg-0"
+                  className="inline-flex min-h-6 items-center gap-1 rounded-xs px-1 text-xs text-fg-1 pointer-coarse:min-h-11 hov:text-fg-0"
                 >
                   <Copy size={14} />
                   {stmts.length > 1 ? `Copy all ${stmts.length}` : 'Copy Cypher'}
@@ -511,7 +529,7 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
                                   type="button"
                                   onClick={() => void copyOne(i)}
                                   aria-label={`Copy query ${s.n} of ${s.of}`}
-                                  className="inline-flex items-center gap-1 rounded-xs px-1 text-xs text-fg-1 pointer-coarse:min-h-11 hov:text-fg-0"
+                                  className="inline-flex min-h-6 items-center gap-1 rounded-xs px-1 text-xs text-fg-1 pointer-coarse:min-h-11 hov:text-fg-0"
                                 >
                                   <Copy size={14} />
                                   Copy
@@ -524,28 +542,27 @@ export function ToolCard({ card, scenario, index, open: openProp, onOpenChange, 
                                   aria-controls={id}
                                   aria-label={stmts.length > 1 ? `${wanted ? 'Hide' : 'Show'} plan for query ${s.n} of ${s.of}` : undefined}
                                   onClick={() => void togglePlan(i)}
-                                  className="shrink-0 rounded-xs px-1 text-xs text-fg-1 underline underline-offset-2 pointer-coarse:min-h-11 hov:text-fg-0"
+                                  className="inline-flex min-h-6 shrink-0 items-center rounded-xs px-1 text-xs text-fg-1 underline underline-offset-2 pointer-coarse:min-h-11 hov:text-fg-0"
                                 >
                                   {wanted ? 'Hide plan' : 'Show plan'}
                                 </button>
                               )}
                             </span>
                           </div>
-                          {/* Never wrapped: a long line scrolls sideways inside its own block (keyboard: focus it, then the arrow keys). */}
-                          <pre
-                            tabIndex={0}
-                            role="region"
-                            aria-label={`Cypher, ${stmts.length > 1 ? `query ${s.n} of ${s.of}` : 'the query'} of ${named}`}
-                            className="overflow-x-auto rounded-xs bg-bg-3 p-2 text-xs leading-[18px] whitespace-pre text-fg-0 [scrollbar-width:thin] focus-visible:-outline-offset-2"
-                          >
+                          {/* Wrapped at spaces, then at the pattern's own joints (data/cypherWrap.ts: <wbr>, so a selection copies the
+                              exact text), across the card's full width: nothing is clipped and nothing scrolls sideways, so the block
+                              needs no tab stop of its own. The group above names it. */}
+                          <pre className="-mx-3 bg-bg-3 px-3 py-2 text-xs leading-[18px] whitespace-pre-wrap text-fg-0 [overflow-wrap:anywhere]">
                             {/* the parameters it ran with, as FalkorDB's CYPHER prefix: the block is runnable as selected */}
                             {prefix && (
                               <code className="text-xs text-fg-1" title="The parameters this query ran with, in FalkorDB's CYPHER prefix form">
-                                {prefix}
+                                <Wrapped text={prefix} />
                                 {'\n'}
                               </code>
                             )}
-                            <code className="text-xs">{s.text}</code>
+                            <code className="text-xs">
+                              <Wrapped text={s.text} />
+                            </code>
                           </pre>
                           <div id={id}>
                             {wanted && (
