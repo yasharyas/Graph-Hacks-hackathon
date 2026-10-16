@@ -35,7 +35,7 @@ Built with Claude Code under the author's direction, with AI-run QA and security
 ## Links (in judge order)
 
 1. Video: `https://<video-url>`
-2. Live demo: `https://<render-url>`
+2. Live demo: https://patient-zero-rayp.onrender.com
 3. Repo: https://github.com/yasharyas/Graph-Hacks-hackathon
 4. Blog: https://dev.to/yasharyas/74-minutes-before-the-advisory-graph-triage-for-npm-account-hijacks-20j9
 
@@ -46,6 +46,6 @@ Built with Claude Code under the author's direction, with AI-run QA and security
 ## Placeholders to fill before submitting
 
 - [ ] `<video-url>`: `README.md` (links row), this file
-- [ ] `<render-url>`: `README.md` (links row), `blog/74-minutes-before-the-advisory.md` (twice), `video/script.md` (end card), `docs/launch-posts.md`, this file
+- [x] Live URL (https://patient-zero-rayp.onrender.com): `README.md` (links row), `blog/74-minutes-before-the-advisory.md` (twice), `video/script.md` (end card), `docs/launch-posts.md`, this file
 - [x] Blog URL: `docs/launch-posts.md`, this file
 - [x] Blog published on dev.to (2026-10-16, marked AI-assisted)
