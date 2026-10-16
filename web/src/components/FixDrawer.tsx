@@ -15,10 +15,13 @@
  * Header: the repo as words (data/repoLabel.ts: "owner/name (today's lockfile)", "your pasted lockfile (name)"), its tier and,
  * for the demo org only, its team (tagged demo). A pasted repo has no team: the server's placeholder is never shown.
  * Fix tab: which lockfile the repo was judged on (Report.scope.source), what that lockfile pins ("your lockfile pins
- * chalk@5.4.1: safe"; the first 3, malicious ones first, then "+N more"), then, before the snippet can be copied, what the
- * fix is (data/export.ts fixScopeNote / fixTodayNote): made for the lockfile that was judged, as it stood at the incident, so
- * it is checked against today's package.json before it is merged; and that npm has since removed the malicious versions, so
- * npm ci needs no change today (a LOCKED lockfile pins a removed version and has to be re-resolved). Then the package.json
+ * chalk@5.4.1: safe"; the first 3, malicious ones first, then "+N more"), then the Fix tab leads with what is true TODAY
+ * (data/export.ts fixTodayNote: npm has removed the malicious versions, so npm ci needs no change; a LOCKED lockfile pins a
+ * removed version and has to be re-resolved), in the largest text of the tab. For a pasted repo judged on a pre-incident
+ * snapshot, right under it comes the check against today's package.json (Remediation.today, data/todayCheck.ts): "still
+ * matches", or each override or pin today's file does not need, as the server wrote it. Only then what the fix was made for
+ * (fixScopeNote: the lockfile that was judged, as it stood at the incident). When the check says to skip a key, the footer
+ * says so in a line right above the Copy button (todayAdvice, also the button's description). Then the package.json
  * snippet: the overrides AND each direct pin in the block it is declared in (dependencies / devDependencies), because npm
  * rejects an override that conflicts with a direct dependency. The snippet is valid JSON on its own and is what "Copy JSON"
  * copies (one copy button: the bar's); DIRECT_NOTE sits next to it always, because package.json usually has these blocks
@@ -27,8 +30,9 @@
  * reorders or rewrites them); "More actions" copies those two. Notice tab: one Slack message for THIS repo, complete on its
  * own (data/export.ts slackMessage), whose Details link is a shareUrl (none for a dropped lockfile). Every untrusted string
  * renders as text. What the tier means is printed once, beside the chip in the header.
- * Footer, one row that never grows: Copy (the active tab), Mark remediated (or "Remediated" + Undo) and a "More actions" menu
- * (copy steps, copy the PR description, whole-report .md / .json, share link). The dialog is modal, so page toasts would sit
+ * Footer, one row that never grows (plus the todayAdvice line on the Fix tab of a repo whose check says to skip a key): Copy (the
+ * active tab), Mark remediated (or "Remediated" + Undo) and a "More actions" menu (copy steps, copy the PR description, copy the
+ * whole team's notice for a demo-org repo, whole-report .md / .json, share link). The dialog is modal, so page toasts would sit
  * dimmed and inert under its scrim: every outcome (copied, exported, marked, undone) is reported by the polite status line
  * inside it, a pill over the foot of the body that goes after a few seconds.
  * Focus: Mark remediated hands focus to Undo, Undo hands it back to Mark remediated (the button that replaces it), so it
@@ -39,10 +43,11 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { detailsLink, DIRECT_NOTE, fixJson, fixPinsNote, fixScopeNote, fixTodayNote, lockedOf, pinTargets, slackMessage } from '../data/export.ts';
 import { localStamp } from '../data/clock.ts';
 import { lockNote, realTeam, repoLabel } from '../data/repoLabel.ts';
+import { todayAdvice, todayCheck } from '../data/todayCheck.ts';
 import type { Report } from '../data/types.ts';
 import { Button, IconButton } from './Button.tsx';
 import { copyText } from './copy.ts';
-import { Check, Close, Copy, Download, LinkIcon } from './icons/Glyphs.tsx';
+import { Check, CircleAlert, Close, Copy, Download, LinkIcon } from './icons/Glyphs.tsx';
 import { IconFrame } from './icons/IconFrame.tsx';
 import { PathChain, PathChip } from './PathChip.tsx';
 import { TIER_SUBTITLE, TierChip } from './TierChip.tsx';
@@ -155,6 +160,8 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
   // What the snippet was made for, what it pins and what is true today: said before the snippet can be copied (data/export.ts)
   const scopeNote = fix ? fixScopeNote(fix) : '';
   const todayNote = fix && exposure ? fixTodayNote(report.incident, exposure.tier) : '';
+  const check = fix ? todayCheck(fix.today) : null; // a pasted repo's fix, read against today's package.json
+  const advice = todayAdvice(check, fix); // beside the Copy button: what to leave out of the snippet
   const pinsNote = fix ? fixPinsNote(fix.overrides) : null;
   const stepsText = fix ? fix.steps.map((s, i) => `${i + 1}. ${s}`).join('\n') : '';
   const slack = exposure ? slackMessage({ exposure, paths, fix, incident: report.incident, at: report.at, anonymous: guest, source: report.scope?.source, link: detailsLink(location.href, report, exposure.repo, 'notice') }) : '';
@@ -251,7 +258,7 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
                   type="button"
                   id={`${id}-${t}`}
                   aria-selected={tab === t}
-                  aria-controls={`${id}-panel`}
+                  aria-controls={tab === t ? `${id}-panel` : undefined} // one panel, labelled by the selected tab: the other tab controls nothing yet
                   tabIndex={tab === t ? 0 : -1}
                   onClick={() => pickTab(t)}
                   onKeyDown={(e) => {
@@ -274,11 +281,31 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
               {tab === 'fix' &&
                 (fix ? (
                   <>
-                    {/* read before the snippet can be copied: what it was made for, and what is true today */}
-                    <div className="flex flex-col gap-2 rounded-xs border border-line-2 bg-bg-2 p-3 text-sm text-fg-0">
-                      <p>{scopeNote}</p>
-                      <p>{todayNote}</p>
+                    {/* The tab opens with what is true today (is there anything to do now?), then how today's package.json compares
+                        with the fix (Remediation.today, pasted repos only), and only then what the snippet was made for. */}
+                    <div className="flex flex-col gap-3 rounded-xs border border-line-2 bg-bg-2 p-3 text-fg-0">
+                      <p className="text-base leading-6 font-medium">{todayNote}</p>
+                      {check?.status === 'match' && (
+                        <p className="flex items-start gap-2 text-sm">
+                          <Check size={16} className="mt-0.5 shrink-0 text-tier-clean" />
+                          {check.notes.join(' ')}
+                        </p>
+                      )}
+                      {check?.status === 'differs' && (
+                        <div className="flex flex-col gap-1.5 border-t border-line-2 pt-3">
+                          <h3 className="label-caps text-xs">Checked against today's package.json</h3>
+                          <ul className="flex flex-col gap-1.5 text-sm">
+                            {check.notes.map((n) => (
+                              <li key={n} className="flex items-start gap-2">
+                                <CircleAlert size={16} className="mt-0.5 shrink-0 text-warn" />
+                                {n}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
                     </div>
+                    <p className="text-sm text-fg-1">{scopeNote}</p>
                     <h3 className="label-caps text-xs">
                       package.json: <span className="normal-case">{blocks}</span>
                     </h3>
@@ -333,11 +360,18 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
             >
               {note.text}
             </p>
+            {/* right above the button: a key the snippet holds that today's package.json does not need (Remediation.today) */}
+            {tab === 'fix' && advice && (
+              <p id={`${id}-advice`} className="text-xs leading-4 text-fg-0">
+                {advice}
+              </p>
+            )}
             <div className="relative flex flex-wrap items-center gap-2">
               <Button
                 variant="primary"
                 className="px-3"
                 icon={<Copy size={16} />}
+                aria-describedby={tab === 'fix' && advice ? `${id}-advice` : undefined}
                 disabled={tab === 'fix' ? !fix : !slack}
                 onClick={() => void (tab === 'fix' ? copyWhat(snippet, 'package.json snippet') : copyWhat(slack, 'Slack message'))}
               >
@@ -388,6 +422,12 @@ export function FixDrawer({ repo, report, tab, onTab, onClose, remediatedAt, can
                         <Copy size={16} /> Copy PR description
                       </button>
                     </>
+                  )}
+                  {/* the whole team's message (every repo the team owns), where the Notice tab above is this repo's alone */}
+                  {notice && (
+                    <button type="button" className={menuItem} onClick={() => (void copyWhat(notice.text, `${notice.team} notice`), setMenu(false), moreRef.current?.focus())}>
+                      <Copy size={16} /> Copy the team's notice
+                    </button>
                   )}
                   <button type="button" className={menuItem} onClick={() => (say(`Exported ${onExport('md')}`), setMenu(false), moreRef.current?.focus())}>
                     <Download size={16} /> Whole report (.md)

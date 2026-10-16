@@ -146,6 +146,19 @@ test('a pasted repo has no team in its notice and says which lockfile it was jud
   assert.ok(org.startsWith(`${report.exposures[0]!.team}: npm incident`));
 });
 
+test("a pasted repo's server-made id never reaches the Markdown: it is worded as repoLabel does, and a path starts at the short name", () => {
+  const e = { ...report.exposures[0]!, repo: 'mochajs/mocha@HEAD', team: 'Your team', tier: 'WOULD_PULL' as const };
+  const p = { ...report.paths[0]!, repo: 'mochajs/mocha@HEAD', chain: ['mochajs/mocha@HEAD', 'debug@4.4.2'], version: 'debug@4.4.2' };
+  const f = { ...mocha, repo: 'mochajs/mocha@HEAD' };
+  const md = reportToMarkdown({ ...report, exposures: [e], paths: [p], remediations: [f], owners: [], notices: [], scope: { kind: 'guest', label: 'mochajs/mocha@HEAD', repos: 1, source: { kind: 'head' } } });
+  assert.ok(md.includes("- `mochajs/mocha (today's lockfile)` WOULD_PULL"), 'the exposure line');
+  assert.ok(md.includes("### `mochajs/mocha (today's lockfile)`"), 'the fix heading');
+  assert.ok(md.includes('`mochajs/mocha` → `debug@4.4.2`'), 'the path starts at the short name');
+  assert.ok(!md.includes('@HEAD'), 'no server-made suffix anywhere');
+  const pasted = reportToMarkdown({ ...report, exposures: [{ ...e, repo: 'pasted/patient-zero' }], paths: [], remediations: [], owners: [], notices: [], scope: { kind: 'guest', label: 'pasted/patient-zero', repos: 1, source: { kind: 'pasted' } } });
+  assert.ok(pasted.includes('`your pasted lockfile (patient-zero)`') && !pasted.includes('pasted/patient-zero'));
+});
+
 test('the Markdown header names the lockfile a pasted repo was judged on', () => {
   const guest = { ...report, scope: { kind: 'guest' as const, label: 'mochajs/mocha', repos: 1, source: { kind: 'pasted' as const } } };
   assert.ok(reportToMarkdown(guest).includes('Lockfile: Judged on your pasted lockfile (counterfactual)'));
@@ -193,6 +206,16 @@ test('the Markdown export carries the same honesty and no "replaces only" claim'
   assert.ok(md.includes('npm removed the malicious versions around'));
   assert.ok(!/replaces only|only the (exact )?(malicious|bad) version/i.test(md));
   assert.ok(!reportToMarkdown({ ...report, remediations: [] }).includes('not for today'), 'no fixes, no fix note');
+});
+
+test("a pasted repo's fix, read against today's package.json, says what to skip in the export (and an org repo's says nothing of the kind)", () => {
+  const skip = "Today's package.json declares debug ~4.4.3, which no longer admits 4.4.2: skip the debug@4.4.2 override (it would hold debug at 4.4.1).";
+  const md = reportToMarkdown({ ...report, remediations: [{ ...mocha, today: [skip] }] });
+  assert.ok(md.includes("Checked against today's package.json:\n- " + skip));
+  assert.ok(md.indexOf("Checked against today's package.json:") < md.indexOf(fixJson(mocha)), 'said before the snippet');
+  assert.ok(!reportToMarkdown({ ...report, remediations: [mocha] }).includes("Checked against today's package.json"), 'no notes: no check');
+  const hostile = reportToMarkdown({ ...report, remediations: [{ ...mocha, today: ['x [a](javascript:alert(1)) <b>y</b>'] }] });
+  assert.ok(!hostile.includes('[a](javascript') && !hostile.includes('<b>'), 'the server\'s notes are escaped like its steps');
 });
 
 test('a message sent after the versions are gone says the window is closed, in the Notice and in "Do"', () => {

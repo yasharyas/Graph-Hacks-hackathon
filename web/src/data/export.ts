@@ -15,7 +15,7 @@ const prose = (s: string) => s.replace(/[\r\n]+/g, ' ').split('`').map((x, i) =>
 const fence = (s: string) => `\`\`\`\n${s.replaceAll('```', "'''")}\n\`\`\``;
 const oneLine = (s: string) => s.replace(/\s+/g, ' ');
 const word = (s: string) => (/^[A-Z_]{1,16}$/.test(s) ? s : code(s));
-const chain = (p: ExposurePath) => `${p.chain.map(code).join(' → ')}${p.chain.at(-1) === p.version ? '' : ` → ${code(p.version)}`}${p.range ? ` (range ${code(p.range)})` : ''}`;
+const chain = (p: ExposurePath) => `${p.chain.map((c, n) => code(n === 0 ? repoShort(c) : c)).join(' → ')}${p.chain.at(-1) === p.version ? '' : ` → ${code(p.version)}`}${p.range ? ` (range ${code(p.range)})` : ''}`;
 const depKind = (e: Exposure) => (e.dev ? 'dev only' : 'prod');
 
 /** What the lockfile pins for the affected packages (Exposure.locked; absent on older servers). */
@@ -135,9 +135,9 @@ function summaryLines(whole: Report, r: Report, now?: number): string[] {
   out.push(r === whole
     ? `${exposed.length} of ${plural(total, 'repo')} ${exposed.length === 1 ? 'is' : 'are'} exposed to ${who} ${when}.${ahead}`
     : `${plural(exposed.length, 'repo')} in this filter ${exposed.length === 1 ? 'is' : 'are'} exposed to ${who} ${when}.${ahead}`);
-  if (locked.length) out.push(`LOCKED, ${plural(locked.length, 'repo')} (${and(locked.map((e) => code(e.repo)))}): the lockfile itself pins the malicious version, so rotate secrets and rebuild.`);
+  if (locked.length) out.push(`LOCKED, ${plural(locked.length, 'repo')} (${and(locked.map((e) => code(repoLabel(e.repo))))}): the lockfile itself pins the malicious version, so rotate secrets and rebuild.`);
   if (pull.length) out.push(`WOULD_PULL, ${plural(pull.length, 'repo')} (${prod} prod, ${pull.length - prod} dev-only): exposed only on a fresh install; installing from the committed lockfile (npm ci) was safe.`);
-  if (fixed.length) out.push(`Marked remediated: ${and(fixed.map((e) => code(e.repo)))}.`);
+  if (fixed.length) out.push(`Marked remediated: ${and(fixed.map((e) => code(repoLabel(e.repo))))}.`);
   if (counts.MAINTAINER) out.push(`${counts.MAINTAINER} more ${counts.MAINTAINER === 1 ? 'repo depends' : 'repos depend'} on packages from the compromised account, with no malicious version live for ${counts.MAINTAINER === 1 ? 'it' : 'them'}.`);
   out.push(windowLine(inc, whole.at, now));
 
@@ -181,7 +181,7 @@ export function reportToMarkdown(whole: Report, view?: ReportView, now?: number)
     '## Exposures',
     '',
     ...r.exposures.flatMap((e) => [
-      `- ${code(e.repo)} ${word(e.tier)}, ${depKind(e)}${realTeam(e.team) ? `, team ${code(e.team!)}` : ''}`,
+      `- ${code(repoLabel(e.repo))} ${word(e.tier)}, ${depKind(e)}${realTeam(e.team) ? `, team ${code(e.team!)}` : ''}`,
       ...(e.versions.length ? [`  - bad versions reached: ${e.versions.map(code).join(', ')}`] : []),
       ...(lockedOf(e).length ? [`  - lockfile pins: ${lockedOf(e).map(code).join(', ')}`] : []),
       ...r.paths.filter((p) => p.repo === e.repo).map((p) => `  - path ${p.id ? `${code(p.id)}: ` : ''}${chain(p)}`),
@@ -191,7 +191,18 @@ export function reportToMarkdown(whole: Report, view?: ReportView, now?: number)
     '## Fixes',
     '',
     ...(r.remediations.length ? [fixScopeNote(undefined, 'the lockfile each repo was judged on'), '', fixTodayNote(r.incident, null), '', 'Each override key names a bad version and pins every dependent whose range admits it to the clean release, other majors untouched.', ''] : []),
-    ...r.remediations.flatMap((f) => [`### ${code(f.repo)}`, '', DIRECT_NOTE, '', fence(fixJson(f)), '', ...f.steps.map((s, i) => `${i + 1}. ${prose(s)}`), '']),
+    ...r.remediations.flatMap((f) => [
+      `### ${code(repoLabel(f.repo))}`,
+      '',
+      // a pasted repo's fix, read against today's package.json: what to leave out is said before the snippet, as in the Fix tab
+      ...(f.today?.length ? ["Checked against today's package.json:", ...f.today.map((n) => `- ${prose(n)}`), ''] : []),
+      DIRECT_NOTE,
+      '',
+      fence(fixJson(f)),
+      '',
+      ...f.steps.map((s, i) => `${i + 1}. ${prose(s)}`),
+      '',
+    ]),
     '## Notices',
     '',
     ...r.notices.flatMap((n) => [realTeam(n.team) ? `${code(n.team)} (${code(n.channel)})` : 'Draft for your own team (a pasted repo has no team on record)', '', fence(n.text), '']),
