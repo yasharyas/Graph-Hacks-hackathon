@@ -53,6 +53,23 @@
     U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
+/* Metric-matched swap-window face for the mono. Before the woff2 arrives, mono text is laid out in a local monospace scaled
+   to Martian Mono's advance (0.70em: it is a wide face) and vertical metrics, so the swap does not re-wrap the band's tier
+   labels and push the panes down (CLS 0.134 at 1366x768: in Cascadia Mono the labels were ~20% narrower). Measured with canvas
+   measureText at 100px: Cascadia Mono 119.5%, Menlo / DejaVu Sans Mono (0.602em) 116.3%, Courier New 116.7%; one face takes
+   the middle. The last src is the web font itself: if no local face exists the face still loads (the graph canvas awaits
+   document.fonts.load of the whole stack, which rejects on a face that fails), and it is never drawn scaled, because it
+   arrives with Martian Mono, which comes first. Satoshi needs none: system-ui (Segoe UI) is within 0.5% of its advance. */
+@font-face {
+  font-family: 'Martian Mono Fallback';
+  src: local('Cascadia Mono'), local('CascadiaMono-Regular'), local('Menlo'), local('Menlo-Regular'), local('DejaVu Sans Mono'), local('Courier New'),
+    url('/fonts/MartianMono-latin.woff2') format('woff2');
+  size-adjust: 118.5%;
+  ascent-override: 84.4%;
+  descent-override: 16.9%;
+  line-gap-override: 0%;
+}
+
 /* ───────────────────────────── 2. Colour, motion, density, layers ─────────────────────────────── */
 
 :root {
@@ -193,7 +210,7 @@
 
   --font-sans: 'Satoshi', ui-sans-serif, system-ui, sans-serif;
   --font-display: 'Cabinet Grotesk', 'Satoshi', ui-sans-serif, system-ui, sans-serif;
-  --font-mono: 'Martian Mono', ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
+  --font-mono: 'Martian Mono', 'Martian Mono Fallback', ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
 
   /* Type scale (dense). Live numbers use font-sans + tabular-nums: Cabinet Grotesk has no tnum. */
   --text-2xs: 0.75rem;   --text-2xs--line-height: 1rem;        /* 12px uppercase labels, badges (the floor: nothing is set smaller) */
@@ -328,8 +345,8 @@
      interactive-boundary grey (3.4:1 on the panels): a pane-wide fg-0 ring read as a selection. Controls keep fg-0. */
   [tabindex='-1']:focus-visible { outline-offset: -2px; outline-color: var(--line-3); }
   button, [role='button'], a, summary { touch-action: manipulation; }
-  code, kbd, pre, samp { font-family: var(--font-mono); font-size: 0.92em; }
-  @media (pointer: coarse), (max-width: 767px) { code, kbd, pre, samp { font-size: max(0.92em, 12px); } } /* 12px type floor on touch */
+  /* the 12px type floor holds for code everywhere (inside a 12px block, .92em was 11.04px: the drawer's JSON) */
+  code, kbd, pre, samp { font-family: var(--font-mono); font-size: max(0.92em, 12px); }
   .tabular, td[data-num], time { font-variant-numeric: tabular-nums; }
   [aria-disabled='true'], :disabled { opacity: var(--opacity-disabled); cursor: not-allowed; }
 }

@@ -16,7 +16,7 @@
  *   onShowFlagged  opens the flagged-claims list
  *   onOpenStats    the "Built on FalkorDB" pill: opens the graph stats (the tab under the table after a triage, the graph's own
  *                  node and edge counts before one)
- *   onOpenPaste    the "Paste your repo" button (opens the paste sheet)
+ *   onOpenPaste    the "Paste your repo" button (opens the paste sheet); "Paste" in words on a phone, never a bare glyph
  *   mock           true in ?mock mode: adds a "mock data" tag so fixture replays are never mistaken for results
  * Landmarks: <header>. The skip link and the autoplay pause live in App, before this header, in that tab order.
  */
@@ -133,13 +133,19 @@ export function Header(p: HeaderProps) {
             {p.queryTotal ? `, ${fmtMs(p.queryTotal.ms)} in FalkorDB across ${queries}` : ''}. Opens the graph stats.
           </span>
         </button>
+        {/* A phone (and a phone held sideways) gets the word, not the glyph alone: the upload tray read as Share there. Between
+            1024 and 1279px the glyph alone, with its name as a tooltip (a pointer device), so the header stays one row. */}
         <Button
           variant="secondary"
-          icon={<Upload size={16} />}
+          icon={<Upload size={16} className="max-md:hidden short:hidden" />}
           aria-haspopup="dialog"
           onClick={p.onOpenPaste}
-          className="whitespace-nowrap max-md:w-(--control-h) max-md:px-0 short:w-(--control-h) short:px-0 lg:max-xl:w-(--control-h) lg:max-xl:px-0"
+          title="Paste your repo"
+          className="whitespace-nowrap max-md:px-3 short:px-3 lg:max-xl:w-(--control-h) lg:max-xl:px-0"
         >
+          <span className="lg:hidden [@media(min-width:768px)_and_(min-height:501px)]:hidden" aria-hidden>
+            Paste
+          </span>
           <span className="max-md:sr-only short:sr-only lg:max-xl:sr-only">Paste your repo</span>
         </Button>
       </div>

@@ -5,7 +5,9 @@
  * and the three actions. Report mode (from the click on Run triage, not from the report landing, so the layout change
  * happens inside the click and nothing shifts later): one compact row, so a laptop sees the table's header and its first
  * rows without scrolling. >= 1280px three panes in one viewport (panes scroll, the page does not); 1024-1279 feed left,
- * graph over table right; below 1024 one column with a bottom tab bar (Feed / Graph / Table) and the page scrolls.
+ * graph over table right, also one viewport once the band is compact (the graph row is bounded, the feed and the table scroll
+ * inside: a page that scrolled 3,000px left the table under the fold and the focus logic measuring a pane taller than the
+ * window); below 1024 one column with a bottom tab bar (Feed / Graph / Table) and the page scrolls.
  * "Paste your repo" and the graph stats open in a Sheet (a modal drawer; a full-height sheet on a phone), never in the flow:
  * the panes keep their size, Esc and Back close it, and the autoplay pauses while it is open.
  *
@@ -36,8 +38,9 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-import { isMock } from './data/api.ts';
-import { DEFAULT_AT, hasClock } from './data/clock.ts';
+import { alertNotes } from './data/alertNote.ts';
+import { getScenarios, isMock } from './data/api.ts';
+import { DEFAULT_AT } from './data/clock.ts';
 import { downloadReport } from './data/export.ts';
 import { minutesBetween } from './data/markers.ts';
 import { nextStep, requestIdFor } from './data/failure.ts';
@@ -66,7 +69,7 @@ import { InsightTabs } from './components/InsightTabs.tsx';
 import { OnboardingHint } from './components/OnboardingHint.tsx';
 import { PasteBox, type PasteRequest } from './components/PasteBox.tsx';
 import { PathGraph } from './components/PathGraph.tsx';
-import { ReportClock } from './components/ReportClock.tsx';
+import { clockSaid, ReportClock } from './components/ReportClock.tsx';
 import { reveal as revealEl, scrollPaneTo } from './components/scrollPane.ts';
 import { AlertBanner, AlertField, type ScenarioChoice } from './components/ScenarioControl.tsx';
 import { SharedPrompt, SharedRepoNote } from './components/SharedPrompt.tsx';
@@ -158,8 +161,17 @@ export function App() {
   const running = triage.status === 'running';
   // The band collapses to one row from the click that starts a run, an analysis included (behind the sheet): a collapse when the
   // analysis ends, seconds later, would be a layout shift nobody asked for. It expands again when the sheet is closed.
+  // Below 768px the sheet covers the whole page: the page behind it stays as it is (nothing moves under a sheet the person is
+  // reading), and the band collapses when the sheet closes on the result, the moment the page changes anyway.
   // A share link that names an org repo runs its triage on load: it is laid out compact from the first paint, not collapsed after it.
-  const compact = triage.status !== 'idle' || orgRepo !== null || (analyze.status !== 'idle' && (panel === 'paste' || shared !== null));
+  const [covered, setCovered] = useState(() => matchMedia('(max-width: 767px)').matches); // a sheet is full-screen here
+  useEffect(() => {
+    const mq = matchMedia('(max-width: 767px)');
+    const on = () => setCovered(mq.matches);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+  const compact = triage.status !== 'idle' || orgRepo !== null || (analyze.status !== 'idle' && ((panel === 'paste' && !covered) || shared !== null));
   const landing = useExposureAt(scenario, report || stale ? null : rawSnapshot); // after a report the table has its own query
 
   const remediation = useRemediation(
@@ -288,14 +300,24 @@ export function App() {
   useEffect(() => {
     if (sheet) playback.pause(); // the autoplay would keep ticking behind a sheet nobody can see it through
   }, [sheet]);
+  // Hover tips (.tip) can be dismissed without moving the pointer (WCAG 1.4.13): Esc hides them until the pointer moves again.
+  useEffect(() => {
+    const root = document.documentElement;
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && root.setAttribute('data-tips-off', '');
+    const move = () => root.hasAttribute('data-tips-off') && root.removeAttribute('data-tips-off');
+    addEventListener('keydown', key);
+    addEventListener('pointermove', move);
+    return () => (removeEventListener('keydown', key), removeEventListener('pointermove', move));
+  }, []);
 
-  /** Switch the visible pane (single-column layouts), bring it to the top of the screen, and (from a tab press) move focus into it. */
-  const showPane = (p: Pane, focus = false) => {
+  /** Switch the visible pane (single-column layouts), bring it to the top of the screen (unless `scroll` is false: a share
+   * link's strip must stay in view), and (from a tab press) move focus into it. */
+  const showPane = (p: Pane, focus = false, scroll = true) => {
     if (focus) flushSync(() => setPane(p));
     else setPane(p);
     const target = p === 'feed' ? feedRef : p === 'table' ? tableRef : graphRef;
     if (!desktop()) {
-      requestAnimationFrame(() => requestAnimationFrame(() => (panesRef.current?.scrollIntoView(), focus && target.current?.focus({ preventScroll: true }))));
+      requestAnimationFrame(() => requestAnimationFrame(() => (scroll && panesRef.current?.scrollIntoView(), focus && target.current?.focus({ preventScroll: true }))));
     } else if (focus) target.current?.focus({ preventScroll: true });
   };
 
@@ -307,10 +329,12 @@ export function App() {
       /* blocked storage: dismissed for this load only */
     }
   };
-  /** A repo picked by a person (table row, claim chip): select it, retire the hint, say so for screen readers. */
-  const pick = (repo: string) => {
+  /** A repo picked by a person (table row, claim chip): select it, retire the hint, say so for screen readers (`say`: a claim
+   * chip's own status line already says what it opened, so it picks quietly: one click, one sentence). */
+  const pick = (repo: string, say = true) => {
     setSelected(repo);
     dismissHint();
+    if (!say) return;
     const p = report?.paths.find((x) => x.repo === repo);
     const e = report?.exposures.find((x) => x.repo === repo);
     setAnnounce(
@@ -331,9 +355,14 @@ export function App() {
     setDrawer((d) => ({ ...d, repo: null }));
     setSelected(null);
     setTurnKey((k) => k + 1);
-    showPane('feed');
+    // A share link's own run keeps the page where it is, so its strip ("Shared link: ... is not one of the 21 repos") is seen.
+    showPane('feed', false, !restoreRepo.current);
     runStarted.current = performance.now();
     if (!restoreRepo.current) setLinked(null); // a run of its own: the share link's note no longer describes the screen
+    // A new run starts a fresh set of follow-ups: the old answers go, and the screen says so instead of dropping them silently.
+    const asked = triage.followUps.filter((f) => f.narration !== null).length;
+    if (asked > 0 && triage.at !== null)
+      toast({ message: `${plural(asked, 'follow-up')} from the ${utcLabel(triage.at)} run cleared: this run starts a fresh set of 4.`, ms: 6000 });
     if (clock === undefined) playback.pause();
     else {
       playback.seek(clock);
@@ -432,7 +461,7 @@ export function App() {
       report.paths.find((p) => p.chain.includes(entity) || p.version === entity)?.repo ??
       report.exposures.find((e) => e.versions.includes(entity) || e.ranges.includes(entity))?.repo;
     if (repo) {
-      pick(repo);
+      pick(repo, false);
       showPane('graph');
     }
   };
@@ -466,9 +495,12 @@ export function App() {
   };
 
   // Phones: when the verdict arrives, bring it into view once the layout has settled (the band collapsed, the cards streamed).
+  // Not under a share link's strip: it says what the link is about (or that its repo is not here), and it must be seen first.
   const hasNarration = triage.narration !== null;
+  const linkedRef = useRef(linked);
+  linkedRef.current = linked;
   useEffect(() => {
-    if (!hasNarration || desktop() || paneRef.current !== 'feed') return;
+    if (!hasNarration || desktop() || paneRef.current !== 'feed' || linkedRef.current) return;
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
         const el = document.querySelector('section[aria-label="Narrative"]');
@@ -490,10 +522,16 @@ export function App() {
   const exported = report && { ...report, exposures: report.exposures.map((e) => (remediation.remediated[e.repo] ? { ...e, remediated: { at: remediation.remediated[e.repo]!, action: 'remediated' } } : e)) };
   const showHint = report !== null && !hintDismissed;
   const reveal = !stale && incident !== null && at !== null && at >= incident.advisoryAt; // the figure waits for the playhead to pass the OSV record
-  const alertNote =
-    alertText !== null && triage.at !== null && !hasClock(alertText, DEFAULT_AT[triage.incident?.id ?? scenario])
-      ? `No time in the alert: using ${utcLabel(triage.at)}, the scenario default. Add one, like 13:16 UTC.`
-      : null;
+  // How the alert was read, never silently: the clock it used and how, that a zoneless time is UTC, which incident ran when
+  // it names two (data/alertNote.ts). Every incident's names come from /api/scenarios, fetched once an alert has run.
+  const [incidents, setIncidents] = useState<IncidentMeta[]>([]);
+  useEffect(() => {
+    if (alertText === null || incidents.length) return;
+    const ctrl = new AbortController();
+    getScenarios(ctrl.signal).then(setIncidents, () => {}); // without them the two-incident note is skipped, nothing else
+    return () => ctrl.abort();
+  }, [alertText]);
+  const alertNote = alertText !== null && triage.incident && triage.at !== null ? alertNotes(alertText, { incident: triage.incident, at: triage.at }, incidents).join(' ') || null : null;
 
   /**
    * Share = the state: scenario, the minute on screen, the selected repo (and the drawer tab when one is open). A pasted
@@ -535,7 +573,7 @@ export function App() {
   // `clockAt` is the resting clock: that line must not change on every step of a scrub or the autoplay, nor while a run aligns it.
   // `cypherHints`: what a tool derived inside its run (incident_exposure looks up the maintainer), for the runnable Cypher.
   const maintainer = (report?.incident ?? triage.incident)?.maintainer;
-  const feedExtra = { clockAt: settledAt ?? undefined, onRerun: run, onShowFlagged: showFlagged, guest: isGuest, cypherHints: maintainer ? { maintainer } : undefined };
+  const feedExtra = { clockAt: settledAt ?? undefined, onRerun: run, onShowFlagged: showFlagged, guest: isGuest, cypherHints: maintainer ? { maintainer } : undefined, notices: report?.notices };
   // What the mode badge means for this run: the badge's title and screen-reader text, not a line above the verdict.
   const modeNote =
     triage.narration === null
@@ -551,7 +589,7 @@ export function App() {
         }${results.some((r) => r.cached) ? '. “cached” on a call: it reused an earlier read-only query' : ''}`;
 
   return (
-    <div className="relative flex min-h-dvh flex-col pb-(--tabbar-h) lg:pb-0 xl:h-dvh xl:overflow-clip">
+    <div className={`relative flex min-h-dvh flex-col pb-(--tabbar-h) lg:pb-0 xl:h-dvh xl:overflow-clip ${compact ? 'lg:h-dvh lg:overflow-clip' : ''}`}>
       {/* Tab order: skip link first, then (WCAG 2.2.2) the autoplay can be stopped before anything else. */}
       <a href="#results" className={skipLink}>
         Skip to results
@@ -600,8 +638,15 @@ export function App() {
       <p role="status" className="sr-only">
         {announce}
       </p>
+      {/* what the report clock strip says when the clock moves: here, outside every pane, so it is spoken on a phone too
+          (the strip itself sits in the Table pane, which is not rendered while the Feed is shown) */}
+      <p role="status" className="sr-only">
+        {report && view ? clockSaid({ runAt: report.at, viewAt: stripViewAt ?? view.at, wantAt: settledWant, loading: stripLoading, error: liveError, guest: isGuest, other }) : ''}
+      </p>
 
-      <main id="results" tabIndex={-1} className="flex min-h-0 flex-1 flex-col">
+      {/* Below 768px main is rebuilt, not collapsed in place, when the band changes mode (a run starts, or a pasted repo's sheet
+          closes on its result: see `compact`): the page is laid out anew instead of everything on it jumping up. */}
+      <main key={covered ? (compact ? 'report' : 'landing') : 'main'} id="results" tabIndex={-1} className="flex min-h-0 flex-1 flex-col">
         <div className="shrink-0 border-b border-line-1">
           {!compact && <p className="px-(--gutter) pt-3 text-base text-fg-1 max-sm:text-sm short:hidden">{PURPOSE}</p>}
           <div className={compact ? '' : 'grid short:grid-cols-2 xl:grid-cols-[4fr_6fr] min-[1440px]:grid-cols-[5fr_6fr]'}>
@@ -628,8 +673,8 @@ export function App() {
                   landingEnd={autoplayEnd}
                   compact={compact}
                   scope={scope}
-                  scopeNote={isGuest ? null : DEMO_NOTE}
-                  scopeNoteShort={isGuest ? null : DEMO_NOTE_SHORT}
+                  scopeNote={isGuest ? null : shared ? `${DEMO_NOTE} Not the shared ${shared}: re-check it above.` : DEMO_NOTE}
+                  scopeNoteShort={isGuest ? null : shared ? `demo org, not ${shared}` : DEMO_NOTE_SHORT}
                   scopeSource={scopeSource}
                   failed={failed}
                   remediated={marked}
@@ -669,7 +714,10 @@ export function App() {
           </div>
         </div>
 
-        <div ref={panesRef} className="grid min-h-0 flex-1 lg:grid-cols-[var(--pane-left)_minmax(0,1fr)] lg:grid-rows-[minmax(340px,auto)_auto] xl:grid-cols-[var(--pane-left)_minmax(0,1fr)_var(--pane-right)] xl:grid-rows-[minmax(0,1fr)]">
+        <div
+          ref={panesRef}
+          className={`grid min-h-0 flex-1 lg:grid-cols-[var(--pane-left)_minmax(0,1fr)] xl:grid-cols-[var(--pane-left)_minmax(0,1fr)_var(--pane-right)] xl:grid-rows-[minmax(0,1fr)] ${compact ? 'lg:grid-rows-[minmax(13rem,40%)_minmax(0,1fr)]' : 'lg:grid-rows-[minmax(340px,auto)_auto]'}`}
+        >
           <section
             ref={feedRef}
             tabIndex={-1}
@@ -680,7 +728,7 @@ export function App() {
             }}
             // Below 1024px the Ask box is fixed above the tab bar: keep the last cards clear of it. From the click that starts a run
             // the feed holds at least one screen, so the page never collapses (and jumps back) while the run streams in.
-            className={`scroll-pane border-line-1 bg-bg-1 p-3 fold:pt-2 lg:row-span-2 lg:h-0 lg:min-h-full lg:border-r xl:row-span-1 xl:h-auto xl:min-h-0 ${report ? 'max-lg:pb-36' : ''} ${compact ? 'max-lg:min-h-dvh' : ''} ${paneClass('feed')}`}
+            className={`scroll-pane border-line-1 bg-bg-1 p-3 fold:pt-2 lg:row-span-2 lg:border-r xl:row-span-1 xl:h-auto xl:min-h-0 ${report ? 'max-lg:pb-36' : ''} ${compact ? 'max-lg:min-h-dvh lg:min-h-0' : 'lg:h-0 lg:min-h-full'} ${paneClass('feed')}`}
           >
             <ToolFeed
               {...feedExtra}
@@ -707,8 +755,9 @@ export function App() {
             />
           </section>
 
-          <div ref={graphRef} tabIndex={-1} className={`md:min-h-[420px] lg:min-h-[340px] lg:col-start-2 lg:row-start-1 xl:h-full xl:min-h-0 ${paneClass('graph')}`}>
-            <PathGraph exposures={graphExposures} paths={view?.paths ?? []} incident={incident} selectedRepo={selected} playing={playback.playing} onSelectRepo={pick} ran={report !== null} subject={isGuest ? repoLabel(guestName) : null} />
+          <div ref={graphRef} tabIndex={-1} className={`md:min-h-[420px] lg:col-start-2 lg:row-start-1 xl:h-full xl:min-h-0 ${compact ? 'lg:h-full lg:min-h-0' : 'lg:min-h-[340px]'} ${paneClass('graph')}`}>
+            {/* a run that failed has no graph to show: the previous run's (or the scrubber's) would look like its result */}
+            <PathGraph exposures={failed ? [] : graphExposures} paths={view?.paths ?? []} incident={incident} selectedRepo={selected} playing={playback.playing} onSelectRepo={pick} ran={report !== null} subject={isGuest ? repoLabel(guestName) : null} />
           </div>
 
           <section
@@ -716,7 +765,7 @@ export function App() {
             id="exposures"
             tabIndex={-1}
             aria-label="Exposure results"
-            className={`scroll-pane border-line-1 bg-bg-1 lg:col-start-2 lg:row-start-2 lg:border-t xl:col-start-3 xl:row-start-1 xl:border-t-0 xl:border-l ${paneClass('table')}`}
+            className={`scroll-pane border-line-1 bg-bg-1 lg:col-start-2 lg:row-start-2 lg:border-t xl:col-start-3 xl:row-start-1 xl:border-t-0 xl:border-l ${compact ? 'lg:min-h-0' : ''} ${paneClass('table')}`}
           >
             {!report && <h2 className="sr-only">Exposure results</h2>}
             {report && view ? (
@@ -768,7 +817,7 @@ export function App() {
         {isMock && ' Mock mode: fixture replay, not live results.'}
       </footer>
 
-      <nav aria-label="Panels" className="fixed inset-x-0 bottom-0 z-(--z-drawer) flex h-(--tabbar-h) border-t border-line-1 bg-bg-1 lg:hidden">
+      <nav id="panels" aria-label="Panels" className="fixed inset-x-0 bottom-0 z-(--z-drawer) flex h-(--tabbar-h) border-t border-line-1 bg-bg-1 lg:hidden">
         {(['feed', 'graph', 'table'] as const).map((p) => (
           <button
             key={p}

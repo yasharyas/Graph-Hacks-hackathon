@@ -1,8 +1,8 @@
 /* ExecSummary: a one-line strip at the top of the results (docs/design.md section 5), so the table is what a laptop
  * sees first. Props: report (Report), onShare (copies a link; wiring lives in App), marked (repos marked remediated: said
  * beside the exposed count, with the one line that marks are kept for this browser session only).
- * Reads: a stacked tier bar, "N of M exposed", "+N min ahead of the advisory" (only when something is exposed) and an
- * icon Share button. The incident, scope and clock are the band above and the header chip (named here for screen
+ * Reads: a stacked tier bar, "N of M exposed", "+N min ahead of the advisory" (only when something is exposed; at a clock
+ * before the advisory: "No advisory yet · in hindsight, it came N min after the first exposure") and an icon Share button. The incident, scope and clock are the band above and the header chip (named here for screen
  * readers only); tier counts by name live in the band (one place, not three); the top maintainers are the
  * Concentration tab. Figures are Satoshi bold with tabular figures.
  * Also exports influenceShares(), shared with InsightTabs so both views print the same percentages.
@@ -33,6 +33,9 @@ export function ExecSummary({ report, onShare, marked = 0 }: { report: Report; o
   const exposed = report.counts.LOCKED + report.counts.WOULD_PULL;
   const total = report.scope?.repos ?? exposed + report.counts.MAINTAINER + report.counts.CLEAN; // repos analysed: the org's, or 1 for a pasted repo
   const ahead = exposed > 0 && report.minutesAhead > 0;
+  // As of the clock (docs/decisions.md, rounds 4 and 5): before the advisory there is no advisory to be ahead of; the lead
+  // time is a later fact, so it is said as hindsight.
+  const before = report.at < report.incident.advisoryAt;
   return (
     <section aria-label="Executive summary" className="animate-enter flex items-center gap-x-3 border-b border-line-1 py-0.5 pr-1 pl-3">
       <h2 className="sr-only">
@@ -62,15 +65,27 @@ export function ExecSummary({ report, onShare, marked = 0 }: { report: Report; o
             </dd>
           </div>
         )}
-        {ahead && (
-          <div className="flex items-baseline">
-            <dt className="sr-only">Ahead of the advisory</dt>
-            <dd className="text-sm whitespace-nowrap">
-              <b className="font-bold text-fg-0 tabular-nums">{signedMin(report.minutesAhead)}</b>
-              <span className="text-fg-1"> ahead of the advisory</span>
-            </dd>
-          </div>
-        )}
+        {ahead &&
+          (before ? (
+            <div className="flex min-w-0 items-baseline">
+              <dt className="sr-only">Advisory</dt>
+              <dd className="text-sm">
+                <b className="font-bold whitespace-nowrap text-fg-0">No advisory yet</b>
+                <span className="text-fg-1">
+                  {' '}
+                  · in hindsight, it came <span className="tabular-nums">{report.minutesAhead}</span> min after the first exposure
+                </span>
+              </dd>
+            </div>
+          ) : (
+            <div className="flex items-baseline">
+              <dt className="sr-only">Ahead of the advisory</dt>
+              <dd className="text-sm whitespace-nowrap">
+                <b className="font-bold text-fg-0 tabular-nums">{signedMin(report.minutesAhead)}</b>
+                <span className="text-fg-1"> ahead of the advisory</span>
+              </dd>
+            </div>
+          ))}
       </dl>
       <IconButton label="Copy share link" icon={<LinkIcon size={16} />} onClick={onShare} className="shrink-0" />
     </section>

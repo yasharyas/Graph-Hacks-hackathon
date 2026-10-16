@@ -102,7 +102,15 @@ export function ContrastCard({ snapshot, grepCount, grepName, minutesAhead, reve
             <div className={ROW}>
               <dt className="label-caps">Name grep</dt>
               <dd className={`flex flex-wrap items-baseline gap-x-2 text-sm text-fg-1 ${VAL}`}>
-                {grepName ? <span className="font-mono text-xs text-fg-0">{grepName}</span> : <span className="text-fg-0">a bad package name</span>} in
+                {/* until the names land, a bar about their width ("ansi-styles, debug +17"), so the row wraps the same way before and after */}
+                {grepName ? (
+                  <span className="font-mono text-xs text-fg-0">{grepName}</span>
+                ) : (
+                  <span className="skeleton inline-block h-3 w-[11.5rem]">
+                    <span className="sr-only">a bad package name</span>
+                  </span>
+                )}{' '}
+                in
                 <Num n={grepCount} cls="text-fg-0" /> {grepCount === 1 ? 'repo' : 'repos'}
                 <span className={NOTE}>A plain text search for the bad package names: no version, no path, no owner.</span>
               </dd>

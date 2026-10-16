@@ -4,11 +4,25 @@
  * focus here. The words are TierChip's own (TIER_SUBTITLE), so the band, the table and the drawer never define a tier two ways.
  * Props (optional, to control it from outside: the band opens it when a count is tapped): open, onOpenChange(open).
  * Elements marked data-legend-trigger (the counts) do not count as "outside".
+ * The popover opens below the "?" where it fits, above it where it does not (the phone's fixed tab bar at 320x640, a phone
+ * held sideways), and is capped and scrollable only when neither side has the room.
  */
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { TIER_SUBTITLE, TierChip } from './TierChip.tsx';
 
 export const OSV_MEANING = 'The open vulnerability database. A scanner can only flag what already has an OSV record.';
+
+/** Where the popover goes: below the "?" when it fits above the phone's fixed tab bar (and the window's edge), else above it,
+ * else on the roomier side, capped to that room and scrollable. */
+function placement(button: DOMRect, height: number): { up: boolean; max: number | null } {
+  const bar = document.querySelector<HTMLElement>('nav[aria-label="Panels"]');
+  const barTop = bar && getComputedStyle(bar).display !== 'none' && getComputedStyle(bar).position === 'fixed' ? bar.getBoundingClientRect().top : innerHeight;
+  const below = Math.min(innerHeight, barTop) - button.bottom - 8;
+  const above = button.top - 8;
+  if (height <= below) return { up: false, max: null };
+  if (height <= above) return { up: true, max: null };
+  return above > below ? { up: true, max: Math.max(120, above) } : { up: false, max: Math.max(120, below) };
+}
 
 export function TierLegend({ open: openProp, onOpenChange }: { open?: boolean; onOpenChange?: (open: boolean) => void }) {
   const [inner, setInner] = useState(false);
@@ -17,6 +31,13 @@ export function TierLegend({ open: openProp, onOpenChange }: { open?: boolean; o
   const id = useId();
   const button = useRef<HTMLButtonElement>(null);
   const root = useRef<HTMLSpanElement>(null);
+  const pop = useRef<HTMLDListElement>(null);
+  const [place, setPlace] = useState<{ up: boolean; max: number | null }>({ up: false, max: null });
+  // Measured before paint, so it never shows under the tab bar first (320x640, a phone held sideways).
+  useLayoutEffect(() => {
+    if (!open || !button.current || !pop.current) return setPlace({ up: false, max: null });
+    setPlace(placement(button.current.getBoundingClientRect(), pop.current.scrollHeight));
+  }, [open]);
   // a tap outside closes it (iOS does not blur a button on a tap elsewhere)
   useEffect(() => {
     if (!open) return;
@@ -57,7 +78,13 @@ export function TierLegend({ open: openProp, onOpenChange }: { open?: boolean; o
         <span className="sr-only">What the tiers and OSV mean</span>
       </button>
       {open && (
-        <dl id={id} className="absolute top-full right-0 z-(--z-dropdown) mt-1 flex w-72 max-w-[calc(100vw-2rem)] flex-col gap-2 rounded-sm bg-bg-2 p-3 text-left text-xs shadow-popover">
+        <dl
+          ref={pop}
+          id={id}
+          tabIndex={place.max !== null ? 0 : undefined} // capped and scrollable: the keyboard can scroll it too
+          style={place.max !== null ? { maxHeight: place.max } : undefined}
+          className={`absolute right-0 z-(--z-dropdown) flex w-72 max-w-[calc(100vw-2rem)] flex-col gap-2 overflow-y-auto rounded-sm bg-bg-2 p-3 text-left text-xs shadow-popover ${place.up ? 'bottom-full mb-1' : 'top-full mt-1'}`}
+        >
           {(['LOCKED', 'WOULD_PULL', 'MAINTAINER'] as const).map((t) => (
             <div key={t} className="flex flex-col items-start gap-1">
               <dt>

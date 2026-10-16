@@ -23,16 +23,35 @@ const H12 = /(?<![\d:.])([01]?\d|2[0-3]):([0-5]\d)(?![\d:])\s*([ap])\.?\s?m\b\.?
 const H24 = /(?<![\d:.])([01]?\d|2[0-3]):([0-5]\d)(?![\d:])/;
 const DAY = 86_400_000;
 
-/** The clock an alert text names for the incident around `near` (epoch ms), or null: then the run uses the scenario default. */
-export function clockIn(text: string, near: number): number | null {
+/** How an alert's time was written: the matched text, its form, the 24-hour time it means, and whether it names a zone. */
+export interface ClockRead {
+  raw: string;
+  kind: 'iso' | '12h' | '24h';
+  h: number; // 0-23, after AM/PM
+  m: number;
+  date: string | null; // the ISO form's own day
+  zoned: boolean; // "Z", "UTC" or "GMT" next to the time
+}
+
+export function clockRead(text: string): ClockRead | null {
   const iso = ISO.exec(text);
   const m = iso ? null : (H12.exec(text) ?? H24.exec(text));
   if (!iso && !m) return null;
+  const hit = (iso ?? m)!;
   let h = Number(iso ? iso[2] : m![1]);
   const ap = m?.[3]?.toLowerCase();
   if (ap === 'p' && h < 12) h += 12;
   if (ap === 'a' && h === 12) h = 0;
-  const t = Date.parse(`${iso ? iso[1] : new Date(near).toISOString().slice(0, 10)}T${String(h).padStart(2, '0')}:${iso ? iso[3] : m![2]}:00Z`);
+  const after = text.slice(hit.index + hit[0].length);
+  const zoned = (iso !== null && /z$/i.test(iso[0])) || /^\s*(?:utc|gmt|z)\b/i.test(after);
+  return { raw: hit[0].trim(), kind: iso ? 'iso' : ap ? '12h' : '24h', h, m: Number(iso ? iso[3] : m![2]), date: iso ? iso[1]! : null, zoned };
+}
+
+/** The clock an alert text names for the incident around `near` (epoch ms), or null: then the run uses the scenario default. */
+export function clockIn(text: string, near: number): number | null {
+  const c = clockRead(text);
+  if (!c) return null;
+  const t = Date.parse(`${c.date ?? new Date(near).toISOString().slice(0, 10)}T${String(c.h).padStart(2, '0')}:${String(c.m).padStart(2, '0')}:00Z`);
   return Math.abs(t - near) <= 30 * DAY ? t : null;
 }
 

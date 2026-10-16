@@ -12,10 +12,10 @@
  *                      strip carries a plain sublabel under each count (from 640px). Both carry the tier "?" legend right
  *                      after the counts, and a tap or click on the counts opens it too (a phone reader taps "WOULD_PULL 20")
  *   scope, scopeNote, scopeNoteShort   what the numbers are about ("Acme demo org · 21 repos") and what is real in it: the sentence
- *                      in the landing band, a few words on the compact row's second line
+ *                      in the landing band, a few words after the scope on the compact row's one label line
  *   scopeSource        a pasted repo: which lockfile it was judged on ("lockfile at commit 5f8e8a8 from 2025-09-01", or a
- *                      counterfactual). The compact row's second line, in place of scopeNoteShort. Both compact lines are
- *                      one line each (truncated, full text in the title), so the band keeps its height when a pasted
+ *                      counterfactual), in place of scopeNoteShort. The compact label is ONE line ("Acme demo org · 21 repos ·
+ *                      teams synthetic", truncated, full text in the title), so the band keeps its height when a pasted
  *                      repo's report replaces the demo org's labels: nothing below it shifts
  *   failed             the triage did not run: no counter, no counts (a stale number beside "did not run" reads as a result)
  *   remediated         repos marked remediated: printed beside the exposed count ("· 2 marked remediated")
@@ -47,6 +47,7 @@ import { TierLegend } from './TierLegend.tsx';
 
 const MIN = 60_000;
 const ROW = 16; // px per label row
+const SAFE_TITLE = 'Installing from the committed lockfile (npm ci) is safe for these repos: only a fresh install in the window would fetch the malicious version.';
 
 export interface TimelineScrubberProps {
   incident: IncidentMeta | null;
@@ -130,7 +131,9 @@ export function TimelineScrubber({ incident, points, at, snapshot, playing, onPl
     }
   };
 
-  const num = (n: number | undefined) => (n === undefined || !snapshot || failed ? '–' : n);
+  // The placeholder dash takes one digit's width: a wider dash wrapped the landing strip to two rows until the timeline
+  // landed, then back to one (CLS 0.134 at 1366x768).
+  const num = (n: number | undefined) => (n === undefined || !snapshot || failed ? <span className="inline-block w-[1ch] text-center">–</span> : n);
   const stats: { label: string; value: number | undefined; cls: string; sub: string }[] = [
     { label: 'LOCKED', value: snapshot?.counts.LOCKED, cls: 'text-tier-locked', sub: 'lockfile pins it' },
     { label: 'WOULD_PULL', value: snapshot?.counts.WOULD_PULL, cls: 'text-tier-would-pull', sub: 'a fresh install fetches it' },
@@ -164,15 +167,17 @@ export function TimelineScrubber({ incident, points, at, snapshot, playing, onPl
       <p className="flex flex-wrap items-baseline gap-x-2">
         <span className={`inline-block min-w-[2ch] text-right font-bold text-fg-0 tabular-nums ${compact ? 'text-2xl' : 'text-3xl'}`}>{exposed ?? '–'}</span>
         <span className="text-sm text-fg-1">{failed ? 'no result: the triage did not run' : `${exposed === 1 ? 'repo' : 'repos'} one install from malware${safe > 0 ? ',' : ''}`}</span>
-        {/* the number is not the whole story: WOULD_PULL repos are safe as long as they install from their lockfile */}
-        {/* compact: the slot is always laid out (invisible when it does not apply), so a narrow band never gains or loses a
-            line when a pasted repo's numbers land */}
+        {/* the number is not the whole story: WOULD_PULL repos are safe as long as they install from their lockfile. One repo
+            (a pasted one) says it plainly: a bare "safe" read as a missing word, or as "the repo is safe". */}
+        {/* the slot is always laid out (invisible when it does not apply), so a narrow band never gains or loses a line when
+            the first exposure lands (the autoplay at 13:12) or a pasted repo's numbers do */}
         {safe > 0 ? (
-          <span className="text-sm whitespace-nowrap text-fg-1">{safe === exposed ? (exposed === 1 ? 'safe' : 'all safe') : `${safe} safe`} with npm ci</span>
+          <span className={`text-sm whitespace-nowrap text-fg-1 ${compact ? '' : 'max-sm:basis-full'}`} title={SAFE_TITLE}>
+            {safe === exposed ? (exposed === 1 ? 'npm ci is safe' : 'all safe with npm ci') : `${safe} safe with npm ci`}
+          </span>
         ) : (
-          compact &&
           !failed && (
-            <span aria-hidden className="invisible text-sm whitespace-nowrap">
+            <span aria-hidden className={`invisible text-sm whitespace-nowrap ${compact ? '' : 'max-sm:basis-full'}`}>
               20 safe with npm ci
             </span>
           )
@@ -181,14 +186,11 @@ export function TimelineScrubber({ incident, points, at, snapshot, playing, onPl
       </p>
       {scope &&
         (compact ? (
-          <>
-            <p className="truncate text-xs text-fg-1" title={scope}>
-              {scope}
-            </p>
-            <p className="truncate text-xs text-fg-1" title={scopeSource ?? scopeNoteShort ?? undefined}>
-              {scopeSource ?? scopeNoteShort ?? ' '}
-            </p>
-          </>
+          // one line: "Acme demo org · 21 repos · teams synthetic" (truncated, the whole of it in the title)
+          <p className="truncate text-xs text-fg-1" title={[scope, scopeSource ?? scopeNoteShort].filter(Boolean).join(' · ')}>
+            {scope}
+            {(scopeSource ?? scopeNoteShort) && <span className="text-fg-2"> · {scopeSource ?? scopeNoteShort}</span>}
+          </p>
         ) : (
           <p className="text-xs text-fg-1">
             {scope}
@@ -246,9 +248,10 @@ export function TimelineScrubber({ incident, points, at, snapshot, playing, onPl
       <div ref={setTrackEl} className={`pointer-events-none absolute inset-x-2 ${compact ? 'top-4 h-4' : 'top-5 h-6'}`}>
         <div data-scrub-track="" className="absolute inset-x-0 top-1/2 h-0.5 -translate-y-1/2 rounded-full bg-line-3" />
         {ready && <div data-scrub-fill="" className="absolute top-1/2 left-0 h-0.5 -translate-y-1/2 rounded-full bg-fg-1" style={{ width: `${pct(at)}%` }} />}
+        {/* while loading, the placeholder sits at the track's start, whole (centred on x = 0, half of it was cut off) */}
         <span
           ref={bubbleRef}
-          className={`absolute -translate-x-1/2 rounded-xs bg-bg-2 px-1.5 font-mono text-2xs text-fg-0 tabular-nums ${compact ? '-top-4' : '-top-5'}`}
+          className={`absolute rounded-xs bg-bg-2 px-1.5 font-mono text-2xs text-fg-0 tabular-nums ${ready ? '-translate-x-1/2' : ''} ${compact ? '-top-4' : '-top-5'}`}
           style={{ left: ready ? bubbleX : 0 }}
           aria-hidden
         >
@@ -307,12 +310,13 @@ export function TimelineScrubber({ incident, points, at, snapshot, playing, onPl
           </div>
           {counts}
           {track}
-          {/* One line, reserved from the first paint (each state is written to fit it): what the autoplay is showing. */}
+          {/* One line, reserved from the first paint (each state is written to fit it): what the autoplay is showing. The short
+              wording on a phone and in the half-width column of a phone held sideways, where the long one took two lines. */}
           <p aria-live={playing ? 'polite' : 'off'} className="-mt-1 min-h-[18px] text-xs text-fg-1 max-sm:-mt-2">
             {incident && ready && (
               <>
-                <span className="sm:hidden">{autoplayCaption(incident, at, true)}</span>
-                <span className="max-sm:hidden">{autoplayCaption(incident, at)}</span>
+                <span className="lg:hidden [@media(min-width:640px)_and_(min-height:501px)]:hidden">{autoplayCaption(incident, at, true)}</span>
+                <span className="max-sm:hidden short:hidden">{autoplayCaption(incident, at)}</span>
               </>
             )}
           </p>
