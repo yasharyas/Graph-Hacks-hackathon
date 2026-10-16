@@ -28,7 +28,7 @@ const both = [qix, axios];
 const at = (s: string) => ({ incident: qix, at: T(`2025-09-08T${s}:00Z`) });
 
 test('a time read is reported: its form, its meaning, and whether it named a zone', () => {
-  assert.deepEqual(clockRead('qix at 1:16 PM'), { raw: '1:16 PM', kind: '12h', h: 13, m: 16, date: null, zoned: false });
+  assert.deepEqual(clockRead('qix at 1:16 PM'), { raw: '1:16 PM', kind: '12h', h: 13, m: 16, date: null, zoned: false, zone: null, offset: 0 });
   assert.equal(clockRead('qix 13:16UTC')?.zoned, true);
   assert.equal(clockRead('qix 13:16 utc')?.zoned, true);
   assert.equal(clockRead('qix 2025-09-08T13:16:00Z')?.zoned, true);
@@ -39,6 +39,13 @@ test('a time read is reported: its form, its meaning, and whether it named a zon
 test('a 12-hour time says how it was read, and that it was taken as UTC', () => {
   assert.deepEqual(alertNotes('qix compromised at 1:16 PM', at('13:16'), both), ['Read “1:16 PM” as 13:16 UTC: no time zone given, so UTC.']);
   assert.deepEqual(alertNotes('qix compromised at 1:16 PM UTC', at('13:16'), both), ['Read “1:16 PM” as 13:16 UTC.']);
+});
+
+test('a zone other than UTC says what it became; "no time zone given" only when there was none', () => {
+  assert.deepEqual(alertNotes('qix compromised 6:46 PM IST', at('13:16'), both), ['Read “6:46 PM IST” as 13:16 UTC.']);
+  assert.deepEqual(alertNotes('qix compromised 15:16 CEST', at('13:16'), both), ['Read “15:16 CEST” as 13:16 UTC.']);
+  assert.deepEqual(alertNotes('qix 2025-09-08T18:46:00+05:30', at('13:16'), both), ['Read “2025-09-08T18:46:00+05:30” as 13:16 UTC.']);
+  for (const s of ['qix 9:16 AM EDT', 'qix 14:16 BST', 'qix 13:16 GMT']) assert.ok(alertNotes(s, at('13:16'), both).every((n) => !/no time zone given/.test(n)), s);
 });
 
 test('an hour that could be either is read on the 24-hour clock, and the other reading is named', () => {

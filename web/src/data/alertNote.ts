@@ -1,6 +1,6 @@
 // What the alert banner says about how a free-text alert was read, so nothing about it is silent (secops round 5):
-// the clock it used and how ("1:16 PM" read as 13:16 UTC; "1:16" with no AM/PM read as 01:16, with the other reading named),
-// that a time with no zone is taken as UTC, and which incident ran when the alert names two. A missing time names the
+// the clock it used and how ("1:16 PM" read as 13:16 UTC; "6:46 PM IST" read as 13:16 UTC; "1:16" with no AM/PM read as 01:16,
+// with the other reading named), that a time with no zone is taken as UTC, and which incident ran when the alert names two. A missing time names the
 // scenario default and an example from the incident that ran (axios' own alert time, never qix's). Pure: node --test covers it.
 import { clockIn, clockRead, DEFAULT_AT } from './clock.ts';
 import type { IncidentMeta } from './types.ts';
@@ -33,6 +33,7 @@ export function alertNotes(text: string, ran: { incident: IncidentMeta; at: numb
   const example = utcLabel(ran.incident.alertAt);
   if (!read) notes.push(`No time in the alert: using ${utcLabel(ran.at)}, the scenario default. Add one, like ${example}.`);
   else if (!used) notes.push(`“${read.raw}” is more than 30 days from this incident: using ${utcLabel(ran.at)}, the scenario default.`);
+  else if (read.offset) notes.push(`Read “${read.raw}${read.kind === 'iso' ? '' : ' '}${read.zone}” as ${utcLabel(ran.at)}.`); // a zone other than UTC: say what it became
   else if (read.kind === '12h') notes.push(`Read “${read.raw}” as ${utcLabel(ran.at)}${read.zoned ? '' : ': no time zone given, so UTC'}.`);
   else if (read.kind === '24h' && read.h >= 1 && read.h <= 11 && !/^0/.test(read.raw))
     notes.push(`Read “${read.raw}” as ${utcLabel(ran.at)}, on the 24-hour clock${read.zoned ? '' : ' in UTC'}. Add PM if you meant ${hhmm(read.h + 12, read.m)}.`);

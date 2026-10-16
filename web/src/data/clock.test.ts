@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { clockIn, DEFAULT_AT, hasClock, localStamp, utcDate } from './clock.ts';
+import { clockIn, clockRead, DEFAULT_AT, hasClock, localStamp, utcDate } from './clock.ts';
 import { utc } from './format.ts';
 
 test('each incident has its own default clock: qix 13:30, axios 01:30 (the server\'s DEFAULT_AT)', () => {
@@ -28,6 +28,21 @@ test('the alert clock is read the way the server reads it: ISO, 12-hour as UTC, 
   assert.equal(clockIn('qix compromised 2024-01-01T13:16:00Z', qix), null); // more than 30 days away: ignored
   assert.equal(clockIn('axios 1.14.1 at 00:21', DEFAULT_AT['axios-2026-03-31']), Date.parse('2026-03-31T00:21:00Z'));
   assert.equal(clockIn('version 1.2:30', qix), null); // part of a longer number
+});
+
+test('a zone or offset after the time is converted: every one of these is 13:16 UTC on the incident day', () => {
+  const qix = DEFAULT_AT['qix-2025-09-08'];
+  const t = Date.parse('2025-09-08T13:16:00Z');
+  for (const s of [
+    'qix compromised 6:46 PM IST', 'qix compromised 9:16 AM EDT', 'qix 8:16 am EST', 'qix 6:16 AM PDT', 'qix 5:16 AM PST', 'qix 14:16 CET',
+    'qix compromised 15:16 CEST', 'qix 14:16 BST', 'qix 13:16 GMT', 'qix 13:16 UTC', 'qix 13:16Z', 'qix 2025-09-08T18:46:00+05:30',
+    'qix 2025-09-08T09:16:00-04:00', 'qix 2025-09-08T13:16:00Z', 'qix 13:16 UTC+0', 'qix 18:46 UTC+5:30', 'qix 18:46 +0530', 'qix 22:16 JST',
+  ]) assert.equal(clockIn(s, qix), t, s);
+  assert.equal(clockIn('qix compromised 13:16', qix), t); // no zone: UTC, as before
+  assert.equal(clockIn('qix compromised at 13:16 on Sept 8', qix), t); // a word after the time is not a zone
+  // the incident's day in the alert's own zone: 8:21 PM EDT on the evening before is 00:21 UTC on the axios day
+  assert.equal(clockIn('axios compromised 8:21 PM EDT', DEFAULT_AT['axios-2026-03-31']), Date.parse('2026-03-31T00:21:00Z'));
+  assert.deepEqual([clockRead('qix 6:46 PM IST')!.zone, clockRead('qix 6:46 PM IST')!.offset, clockRead('qix 6:46 PM')!.zoned], ['IST', 330, false]);
 });
 
 test('the header date is the UTC day of the scenario clock, in every locale and zone', () => {
