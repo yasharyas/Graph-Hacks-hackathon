@@ -61,3 +61,47 @@ test('rate limits show the server sentence only, with a wait that fits it, and n
   assert.equal(limit.wait, 20);
   assert.ok(!/20 seconds/.test(busy.message + limit.message), 'one rate-limit sentence, the server\'s');
 });
+
+// The three long messages the server writes (server/ingest/guest.ts noLockfile).
+const YARN =
+  "facebook/react uses yarn (yarn.lock), and Patient Zero reads only npm's package-lock.json (v2 or v3); yarn lockfiles are on the roadmap. To check it by hand, search yarn.lock at a commit from before the incident for the malicious versions: ansi-styles 6.2.2, debug 4.4.2, chalk 5.6.1, supports-color 10.2.1, strip-ansi 7.1.1, ansi-regex 6.2.1 and 13 more (the timeline lists them all). If the project also installs with npm (no workspace: dependencies), run npm install --package-lock-only in a checkout and drop the generated file here.";
+const NONE = 'No package-lock.json at the root of lodash/lodash. In a checkout, run npm install --package-lock-only (it writes the lockfile without installing anything) and drop the generated package-lock.json here.';
+
+test('a short message is its own lead, with nothing behind a disclosure', () => {
+  for (const message of ['Only package-lock.json with lockfileVersion 2 or 3 is supported. Run npm install with npm 7 or newer to upgrade it.', 'github.com/foo/bar is not a public repo.']) {
+    const p = pasteProblem({ message });
+    assert.equal(p.lead, message);
+    assert.equal(p.details, null);
+  }
+});
+
+test('a yarn or pnpm message opens with one line; the versions to search for and the command wait behind a disclosure', () => {
+  const p = pasteProblem({ message: YARN });
+  assert.equal(p.message, YARN, 'the server sentence stays whole for anything that wants it');
+  assert.equal(p.lead, "facebook/react uses yarn (yarn.lock). Only npm's package-lock.json can be read so far.");
+  assert.ok(p.lead.length < 100, 'two or three lines at 320 px');
+  assert.match(p.details!, /^To check it by hand, search yarn\.lock/);
+  assert.match(p.details!, /ansi-styles 6\.2\.2, debug 4\.4\.2/, 'the versions are in the details');
+  assert.match(p.details!, /run npm install --package-lock-only in a checkout/);
+  assert.equal(p.detailsLabel, 'How to check it by hand');
+  assert.equal(p.command, 'npm install --package-lock-only', 'the Copy command button stays');
+  assert.equal(`${p.lead} ${p.details}`.includes('roadmap'), false, 'the roadmap clause moved into "so far"');
+  assert.match(pasteProblem({ message: YARN.replace('facebook/react uses yarn (yarn.lock)', 'vuejs/core uses pnpm (pnpm-lock.yaml)') }).lead, /^vuejs\/core uses pnpm \(pnpm-lock\.yaml\)\./);
+});
+
+test('no lockfile: one line, with the longer instruction behind a disclosure and the command still copyable', () => {
+  const p = pasteProblem({ message: NONE });
+  assert.equal(p.lead, 'No package-lock.json at the root of lodash/lodash. Generate one and drop it here.');
+  assert.match(p.details!, /^In a checkout, run npm install --package-lock-only \(it writes the lockfile without installing anything\)/);
+  assert.equal(p.detailsLabel, 'How to generate it');
+  assert.equal(p.command, 'npm install --package-lock-only');
+});
+
+test('any other long message is cut at its first sentence', () => {
+  const message = 'The lockfile could not be read because the file is not valid JSON at line 3. Open it in an editor, find the line the parser stopped at, and compare it with the same file in a fresh checkout before you try again; a merge conflict marker is the usual cause.';
+  const p = pasteProblem({ message });
+  assert.equal(p.lead, 'The lockfile could not be read because the file is not valid JSON at line 3.');
+  assert.match(p.details!, /^Open it in an editor/);
+  assert.equal(p.detailsLabel, 'More detail');
+  assert.equal(pasteProblem({ message: 'x'.repeat(200) }).details, null, 'no sentence to cut at: shown whole');
+});

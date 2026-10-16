@@ -15,6 +15,7 @@ import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import type { Exposure, ExposurePath, IncidentMeta } from '../data/types.ts';
 import { EmptyState } from './EmptyState.tsx';
 import { chainVar } from '../data/graphTone.ts';
+import { incidentName } from '../data/incidentName.ts';
 import { realTeam, repoLabel, repoShort } from '../data/repoLabel.ts';
 import { PathChip } from './PathChip.tsx';
 
@@ -81,7 +82,7 @@ function useWide() {
 function CompactPath({ path, badVersions, team }: { path: ExposurePath; badVersions: ReadonlySet<string>; team: string | null }) {
   const nodes = path.chain.at(-1) === path.version ? path.chain : [...path.chain, path.version];
   return (
-    <ol className="flex w-full flex-col" aria-label={`Path for ${path.repo}`}>
+    <ol className="flex w-full flex-col" aria-label={`Path for ${repoLabel(path.repo)}`}>
       {nodes.map((item, i) => {
         const last = i === nodes.length - 1;
         const isBad = badVersions.has(item);
@@ -160,7 +161,7 @@ export function PathGraph({ exposures, paths, incident, selectedRepo, playing, o
         ran ? (
           <EmptyState
             title="No path to a malicious version"
-            cause={`${subject ? `${subject.replace(/@HEAD$/, '')} does not reach` : 'No repo in this run reaches'} a malicious version of ${incident ? incident.title : 'this incident'} at this clock, so there is no chain to draw.`}
+            cause={`${subject ? `Nothing in ${repoLabel(subject)} reaches` : 'No repo in this run reaches'} a malicious version from ${incidentName(incident)} at this clock, so there is no chain to draw.`}
             fix="Try the other incident, or paste another repo."
           />
         ) : (

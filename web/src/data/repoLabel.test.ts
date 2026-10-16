@@ -1,12 +1,22 @@
 // Run: node --test web/src/data/repoLabel.test.ts
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { GUEST_TEAM, lockNote, lockSourceLabel, realTeam, repoLabel, repoShort } from './repoLabel.ts';
+import { GUEST_TEAM, lockNote, lockSourceLabel, realTeam, repoLabel, repoParts, repoShort } from './repoLabel.ts';
 
 test('server-made ids read as words', () => {
   assert.equal(repoLabel('mochajs/mocha@HEAD'), "mochajs/mocha (today's lockfile)");
   assert.equal(repoLabel('pasted/patient-zero'), 'your pasted lockfile (patient-zero)');
   assert.equal(repoLabel('acme/checkout-web'), 'acme/checkout-web');
+});
+
+test('a repo id splits into owner, name and tail without losing a character of repoLabel', () => {
+  for (const repo of ['acme/checkout-web', 'nightwatchjs/nightwatch', 'mochajs/mocha@HEAD', 'pasted/patient-zero', 'lonely']) {
+    const p = repoParts(repo);
+    assert.equal(`${p.owner === null ? '' : `${p.owner}/`}${p.name}${p.tail}`, repoLabel(repo), repo);
+  }
+  assert.deepEqual(repoParts('nightwatchjs/nightwatch'), { owner: 'nightwatchjs', name: 'nightwatch', tail: '' });
+  assert.deepEqual(repoParts('mochajs/mocha@HEAD'), { owner: 'mochajs', name: 'mocha', tail: " (today's lockfile)" });
+  assert.deepEqual(repoParts('pasted/patient-zero'), { owner: null, name: 'your pasted lockfile (patient-zero)', tail: '' });
 });
 
 test('a path chain names its root repo plainly', () => {

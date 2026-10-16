@@ -1,7 +1,10 @@
 /* PasteBox: analyze a public GitHub repo, or a package-lock.json pasted, dropped or chosen (docs/design.md section 5).
  * It opens in a Sheet (a modal right drawer; a full-height sheet on a phone): the working panes never move for it, Esc and
- * Back close it, focus is trapped and returned. Progress and errors sit directly under the heading, outside the scrolling
- * form, so they are on screen whichever field was used, and nothing outside the sheet changes size when the analysis ends.
+ * Back close it, focus is trapped and returned. Progress and errors come AFTER both fields (sticky to the foot of the
+ * scrolling area: right under the fields when there is room, on screen at the bottom when there is not), so no field moves
+ * when they appear: the repo field keeps its place from the tap to the verdict, and a dead end costs no layout shift. A
+ * long server message (yarn, pnpm, no lockfile) opens with one line (data/pasteError.ts lead); the versions to check by hand
+ * and the longer instruction sit behind a disclosure, and the Copy-command button stays outside it.
  * Props:
  *   open      whether the sheet is showing (it stays mounted, so typed text survives closing)
  *   analyze   AnalyzeState from useAnalyze() (status, stage, repo, error), drives progress and errors
@@ -24,7 +27,7 @@ import { pasteProblem } from '../data/pasteError.ts';
 import type { AnalyzeState } from '../data/useAnalyze.ts';
 import { Button, IconButton } from './Button.tsx';
 import { copyText } from './copy.ts';
-import { Check, CircleAlert, Close, Copy, Upload } from './icons/Glyphs.tsx';
+import { Check, ChevronDown, CircleAlert, Close, Copy, Upload } from './icons/Glyphs.tsx';
 import { Sheet } from './Sheet.tsx';
 
 const STAGES = [
@@ -187,77 +190,6 @@ export function PasteBox({
           <IconButton label="Close" icon={<Close size={20} />} onClick={onClose} />
         </div>
 
-        {(problem || busy) && (
-          <div className="min-w-0 border-b border-line-1 bg-bg-2 p-4">
-            {problem && (
-              <div role="alert" className="flex flex-col gap-1.5 text-sm">
-                {/* the server's own sentence, whole: it already says what is wrong and what to run */}
-                <p className="flex items-start gap-2 text-fg-0">
-                  <CircleAlert size={16} className="mt-0.5 shrink-0 text-fg-1" />
-                  {problem.message}
-                </p>
-                {problem.hint && <p className="pl-6 text-fg-1">{problem.hint}</p>}
-                {problem.command && (
-                  <p className="flex flex-wrap items-center gap-2">
-                    <code className="rounded-xs bg-bg-3 px-2 py-1 font-mono text-xs text-fg-0 select-all">{problem.command}</code>
-                    <Button className="px-2.5" icon={<Copy size={14} />} aria-label="Copy command" onClick={() => void copyCommand(problem.command!)}>
-                      Copy
-                    </Button>
-                    <span role="status" className="text-xs text-fg-1">
-                      {copied ? 'Copied' : ''}
-                    </span>
-                  </p>
-                )}
-                {problem.requestId && (
-                  <p className="font-mono text-xs text-fg-2">
-                    request <span className="select-all text-fg-1">{problem.requestId}</span>
-                  </p>
-                )}
-                <p className="flex flex-wrap items-center gap-2 text-fg-1">
-                  Try a sample repo:
-                  {SAMPLES.map((s) => (
-                    <button
-                      key={s}
-                      type="button"
-                      disabled={blocked}
-                      className="min-h-(--control-h) rounded-xs bg-bg-3 px-2 font-mono text-xs text-link disabled:opacity-(--opacity-disabled)"
-                      onClick={() => trySample(s)}
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </p>
-              </div>
-            )}
-            {busy && (
-              <div>
-                <div className="h-1 overflow-hidden rounded-xs bg-bg-3" aria-hidden>
-                  <div className="h-full origin-left bg-fg-0 transition-transform duration-(--dur-base) ease-out" style={{ transform: `scaleX(${done ? 1 : progress})` }} />
-                </div>
-                {/* every mark is the same width, so a finished stage never re-wraps the row */}
-                <ol className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
-                  {stages.map((s) => {
-                    const state = done ? 'done' : at < 0 ? 'todo' : stages.indexOf(s) < at ? 'done' : stages.indexOf(s) === at ? 'now' : 'todo';
-                    return (
-                      <li key={s.id} aria-current={state === 'now' ? 'step' : undefined} className={`inline-flex items-center gap-1 ${state === 'now' ? 'text-fg-0' : state === 'done' ? 'text-tier-clean' : 'text-fg-2'}`}>
-                        <span aria-hidden className="grid size-3 shrink-0 place-items-center">
-                          {state === 'done' ? <Check size={12} /> : <span className={`size-1.5 rounded-full ${state === 'now' ? 'bg-fg-0' : 'bg-line-3'}`} />}
-                        </span>
-                        {s.label}
-                      </li>
-                    );
-                  })}
-                </ol>
-                {/* announced on stage changes only: the counter is aria-hidden. Two lines are kept for it, so a longer step never moves the form. */}
-                <p role="status" className="mt-1 min-h-9 font-mono text-xs text-fg-1">
-                  {taken && kind === 'lockfile' ? `Parsed ${taken.packages.toLocaleString('en-US')} packages. ` : ''}
-                  {done ? 'Done. Opening the result' : step < 0 ? 'Starting' : `Step ${at + 1} of ${stages.length}: ${STAGES[step]!.label.toLowerCase()}`}
-                </p>
-              </div>
-            )}
-          </div>
-        )}
-
         <div className="scroll-pane min-h-0 flex-1 p-4">
           <div className="flex flex-col gap-6">
             <form
@@ -360,6 +292,89 @@ export function PasteBox({
               {shownLockError && <Problem id={`${id}-lock-err`}>{shownLockError}</Problem>}
             </div>
           </div>
+
+          {/* Progress and errors come AFTER both fields, so nothing the person is looking at moves when they appear: the repo
+              field keeps its place from the tap to the verdict (it used to jump 125px down, then up to 480px). Sticky to the
+              foot of the scrolling area: right under the fields when there is room, on screen at the bottom when there is not. */}
+          {(problem || busy) && (
+            <div className="sticky bottom-0 z-10 -mx-4 -mb-4 mt-6 max-h-[45dvh] min-w-0 overflow-y-auto border-t border-line-1 bg-bg-2 p-4">
+              {problem && (
+                <div role="alert" className="flex flex-col gap-2 text-sm">
+                  {/* a short opening; the server's longer words (versions to search for, why the command) are in the disclosure */}
+                  <p className="flex items-start gap-2 text-fg-0">
+                    <CircleAlert size={16} className="mt-0.5 shrink-0 text-fg-1" />
+                    {problem.lead}
+                  </p>
+                  {problem.hint && <p className="pl-6 text-fg-1">{problem.hint}</p>}
+                  {problem.command && (
+                    <p className="flex flex-wrap items-center gap-2 pl-6 max-sm:pl-0">
+                      <code className="rounded-xs bg-bg-3 px-2 py-1 font-mono text-xs text-fg-0 select-all">{problem.command}</code>
+                      <Button className="px-2.5" icon={<Copy size={14} />} aria-label="Copy command" onClick={() => void copyCommand(problem.command!)}>
+                        Copy
+                      </Button>
+                      <span role="status" className="text-xs text-fg-1">
+                        {copied ? 'Copied' : ''}
+                      </span>
+                    </p>
+                  )}
+                  {problem.details && (
+                    <details key={problem.message} className="group pl-6">
+                      <summary className="inline-flex min-h-(--control-h) cursor-pointer list-none items-center gap-1.5 rounded-xs text-link underline underline-offset-2 [&::-webkit-details-marker]:hidden">
+                        {problem.detailsLabel}
+                        <ChevronDown size={14} className="transition-transform duration-(--dur-fast) group-open:rotate-180" />
+                      </summary>
+                      <p className="pb-1 text-fg-1">{problem.details}</p>
+                    </details>
+                  )}
+                  {problem.requestId && (
+                    <p className="pl-6 font-mono text-xs text-fg-2">
+                      request <span className="select-all text-fg-1">{problem.requestId}</span>
+                    </p>
+                  )}
+                  <p className="flex flex-wrap items-center gap-2 pl-6 text-fg-1">
+                    Try a sample repo:
+                    {SAMPLES.map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        disabled={blocked}
+                        className="min-h-(--control-h) rounded-xs bg-bg-3 px-2 font-mono text-xs text-link disabled:opacity-(--opacity-disabled)"
+                        onClick={() => trySample(s)}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </p>
+                </div>
+              )}
+              {busy && (
+                <div>
+                  <div className="h-1 overflow-hidden rounded-xs bg-bg-3" aria-hidden>
+                    <div className="h-full origin-left bg-fg-0 transition-transform duration-(--dur-base) ease-out" style={{ transform: `scaleX(${done ? 1 : progress})` }} />
+                  </div>
+                  {/* every mark is the same width, so a finished stage never re-wraps the row */}
+                  <ol className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                    {stages.map((s) => {
+                      const state = done ? 'done' : at < 0 ? 'todo' : stages.indexOf(s) < at ? 'done' : stages.indexOf(s) === at ? 'now' : 'todo';
+                      return (
+                        <li key={s.id} aria-current={state === 'now' ? 'step' : undefined} className={`inline-flex items-center gap-1 ${state === 'now' ? 'text-fg-0' : state === 'done' ? 'text-tier-clean' : 'text-fg-2'}`}>
+                          <span aria-hidden className="grid size-3 shrink-0 place-items-center">
+                            {state === 'done' ? <Check size={12} /> : <span className={`size-1.5 rounded-full ${state === 'now' ? 'bg-fg-0' : 'bg-line-3'}`} />}
+                          </span>
+                          {s.label}
+                        </li>
+                      );
+                    })}
+                  </ol>
+                  {/* announced on stage changes only: the counter is aria-hidden. Two lines are kept for it, so a longer step never moves the form. */}
+                  <p role="status" className="mt-1 min-h-9 font-mono text-xs text-fg-1">
+                    {taken && kind === 'lockfile' ? `Parsed ${taken.packages.toLocaleString('en-US')} packages. ` : ''}
+                    {done ? 'Done. Opening the result' : step < 0 ? 'Starting' : `Step ${at + 1} of ${stages.length}: ${STAGES[step]!.label.toLowerCase()}`}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </Sheet>

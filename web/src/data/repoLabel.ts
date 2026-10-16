@@ -45,6 +45,20 @@ export function lockNote(source: LockSource | undefined, repo: string): LockNote
   return null;
 }
 
+/**
+ * A repo id as three parts for a table cell that has to clip something: the `owner` (null for a pasted lockfile, which has none),
+ * the `name`, and the `tail` that says which lockfile it is (" (today's lockfile)"). `owner/` + name + tail is repoLabel(repo)
+ * exactly, so the owner can give way to the width and everything after it stays whole.
+ */
+export function repoParts(repo: string): { owner: string | null; name: string; tail: string } {
+  if (repo.startsWith('pasted/')) return { owner: null, name: repoLabel(repo), tail: '' };
+  const head = repo.endsWith('@HEAD');
+  const bare = head ? repo.slice(0, -'@HEAD'.length) : repo;
+  const slash = bare.indexOf('/');
+  const tail = head ? " (today's lockfile)" : '';
+  return slash > 0 ? { owner: bare.slice(0, slash), name: bare.slice(slash + 1), tail } : { owner: null, name: bare, tail };
+}
+
 /** The same, as a phrase for the hero's scope line: "lockfile at commit abc1234 from 2025-09-01", or a counterfactual. */
 export function lockSourceLabel(s: LockSource | undefined): string | null {
   if (!s) return null;
