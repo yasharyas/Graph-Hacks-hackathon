@@ -1,6 +1,6 @@
 # Patient Zero demo video: "The Record and the Moment"
 
-**Runtime:** 2:27.5 (147.5 s, 4,425 frames at 30 fps), hard cap 2:30. The output is 1920x1080 at 30 fps, with captions burned in and exported as an `.srt` file.
+**Runtime:** 2:22.4 (142.4 s, 4,273 frames at 30 fps), hard cap 2:30. The output is 1920x1080 at 30 fps, with captions burned in and exported as an `.srt` file.
 
 **The idea.** One time axis travels through three looks: 74 pixel cells in the hook, a hand-drawn rail in the explanation, and the real scrubber in the product. The resolution rises as the video goes: blocks, then pen, then the working app. Two voices split what can be known:
 
@@ -13,13 +13,13 @@ The model never speaks.
 
 | Stage | Time | Look | What the viewer gets |
 |---|---|---|---|
-| Animate (hook) | 0:00–0:14 | Pixel art | A number, a hijacked package, an alarm, and advisory-based scanners with nothing |
-| Explain | 0:14–0:45.5 | p5.brush | The on-call question, one repo's range against its lockfile, and the graph model (one node per lockfile location, a time window on an edge) |
-| Show | 0:45.5–2:10.5 | Real UI | Triage, path and plan, fix and write-back, PageRank and Ask, axios, MCP, paste a repo |
-| Land | 2:10.5–2:27.5 | UI + brush, then the end card | 14:26 against the alarm, links, disclosures |
+| Animate (hook) | 0:00–0:15.2 | Pixel art | A number, a hijacked package, an alarm, and advisory-based scanners with nothing |
+| Explain | 0:15.2–0:45 | p5.brush | The on-call question, one repo's range against its lockfile, and the graph model (one node per lockfile location, a time window on an edge) |
+| Show | 0:45–2:09.2 | Real UI | Triage, path and plan, fix and write-back, PageRank and Ask, axios, MCP, paste a repo |
+| Land | 2:09.2–2:22.4 | UI + brush, then the end card | 14:26 against the alarm, links, disclosures |
 
-- **Problem understood by:** 0:12 (the end of LG-03).
-- **Real UI first seen at:** 0:45.5. It fills about 60% of the runtime.
+- **Problem understood by:** 0:13.5 (the end of LG-03).
+- **Real UI first seen at:** 0:45. It fills about 62% of the runtime.
 
 This was settled by an arena of three candidate scripts (Opus, Sonnet and Fable) and a cross-judge on 2026-10-16; see `docs/decisions.md`. Every number below is in `docs/proof-points.md`, or is a string measured on the production build (the strings and steps in "Recording notes" at the end).
 
@@ -49,13 +49,13 @@ Tags in use: `[deadpan]`, `[calm]`, `[warm]`. **Never `[clear]`** (it produced "
 
 | Segment | Time | Look | Why this look carries this meaning |
 |---|---|---|---|
-| H1–H2: the record | 0:00–0:14 | **Pixel art** (480x270 logical, x4, the product's own token palette) | The registry moves in whole minutes and does not care: 74 minutes become 74 cells you can count. No human and no UI: the world as it ran. |
-| E1–E3: the notebook | 0:14–0:45.5 | **p5.brush** sheets (pen and marker strokes, typeset words) | Judgement is a human act. The app's scribbles are "an analyst's marker on a printout", and routes and time windows are things you draw. |
-| U1–U4 | 0:45.5–1:41.5 | **Real UI** (production build, replay mode) | The proof |
-| U5a: the axios card | 1:41.5–1:45 | **Pixel art** (same engine, new data) | The record replaying. A 106-cell bar against 74 says it without a sentence. |
-| U5b–U7 | 1:45–2:10.5 | **Real UI** (terminal for U6) | The proof: second incident, MCP, paste |
-| P1: payoff | 2:10.5–2:18 | **Real UI + one brush arrow** | The analyst's last mark, on the real thing |
-| END | 2:18–2:27.5 | Typeset card + one brush underline | The signature |
+| H1–H2: the record | 0:00–0:15.2 | **Pixel art** (480x270 logical, x4, the product's own token palette) | The registry moves in whole minutes and does not care: 74 minutes become 74 cells you can count. No human and no UI: the world as it ran. |
+| E1–E3: the notebook | 0:15.2–0:45 | **p5.brush** sheets (pen and marker strokes, typeset words) | Judgement is a human act. The app's scribbles are "an analyst's marker on a printout", and routes and time windows are things you draw. |
+| U1–U4 | 0:45–1:39.6 | **Real UI** (production build, replay mode) | The proof |
+| U5a: the axios card | 1:39.6–1:43.1 | **Pixel art** (same engine, new data) | The record replaying. A 106-cell bar against 74 says it without a sentence. |
+| U5b–U7 | 1:43.1–2:09.2 | **Real UI** (terminal for U6) | The proof: second incident, MCP, paste |
+| P1: payoff | 2:09.2–2:16.4 | **Real UI + one brush arrow** | The analyst's last mark, on the real thing |
+| END | 2:16.4–2:22.4 | Typeset card + one brush underline | The signature |
 
 **Brush over the UI** is limited to four named marks, and never more than two scribbles in view (counting the app's own):
 - A1, U2: an amber underline under `^4.3.5`
@@ -85,14 +85,14 @@ Tags in use: `[deadpan]`, `[calm]`, `[warm]`. **Never `[clear]`** (it produced "
 
 | Seam | At | From → to | Move | Hero (same direction on both sides) |
 |---|---|---|---|---|
-| S1 | 0:14 | pixel → brush | cut-the-curve **leftward**, plus a **mosaic resolve**: the entering sheet is drawn through 12 → 6 → 3 → 2 → 1 px blocks over its 0.3 s deceleration | The time axis. The 74-cell bar exits left, and the brush rail enters at the same y. Resolution rises across the cut. |
-| S1a, S1b | 0:24.5, 0:36 | sheet → sheet | cut-the-curve **leftward** | The rail |
-| S2 | 0:45.5 | brush → UI | cut-the-curve **leftward** | The hand-drawn 13:30 tick exits left. The UI enters with the scrubber handle at 14:30, then Shift+Left ×6 steps it left onto 13:30, so the handle keeps moving the same way after the cut. |
-| S3 | 1:41.5 | UI → pixel | cut-the-curve **leftward** | The scrubber track becomes the 106-cell bar at the same y |
-| S4 | 1:45 | pixel → UI | cut-the-curve **leftward**, plus the same mosaic resolve (block 8 → 1) | The bar becomes the axios scrubber track |
-| S5, S6 | 1:54, 2:01 | UI → terminal → UI | cut-the-curve **leftward** | The tool-card column becomes the tool-call lines, then the paste sheet's input row |
-| S7 | 2:10.5 | paste result → landing | cut-the-curve **upward** (a new axis for "back to the start") | The result headline rises out and the landing hero rises in |
-| S8 | 2:18 | landing → end card | **inverse zoom-through** (arrival) | The UI recedes 1.0 → 0.8 while blur goes 0 → 18 px and opacity falls to 0.15 (0.2 s, `power3.in`); hard cut; the card arrives from 1.25 with 18 px blur, settling to 1.0, no blur and full opacity over 0.5 s on `expo.out`. Same peak blur on both sides. |
+| S1 | 0:15.2 | pixel → brush | cut-the-curve **leftward**, plus a **mosaic resolve**: the entering sheet is drawn through 12 → 6 → 3 → 2 → 1 px blocks over its 0.3 s deceleration | The time axis. The 74-cell bar exits left, and the brush rail enters at the same y. Resolution rises across the cut. |
+| S1a, S1b | 0:24.8, 0:34.8 | sheet → sheet | cut-the-curve **leftward** | The rail |
+| S2 | 0:45 | brush → UI | cut-the-curve **leftward** | The hand-drawn 13:30 tick exits left. The UI enters with the scrubber handle at 14:30, then Shift+Left ×6 steps it left onto 13:30, so the handle keeps moving the same way after the cut. |
+| S3 | 1:39.6 | UI → pixel | cut-the-curve **leftward** | The scrubber track becomes the 106-cell bar at the same y |
+| S4 | 1:43.1 | pixel → UI | cut-the-curve **leftward**, plus the same mosaic resolve (block 8 → 1) | The bar becomes the axios scrubber track |
+| S5, S6 | 1:52.9, 1:59.7 | UI → terminal → UI | cut-the-curve **leftward** | The tool-card column becomes the tool-call lines, then the paste sheet's input row |
+| S7 | 2:09.2 | paste result → landing | cut-the-curve **upward** (a new axis for "back to the start") | The result headline rises out and the landing hero rises in |
+| S8 | 2:16.4 | landing → end card | **inverse zoom-through** (arrival) | The UI recedes 1.0 → 0.8 while blur goes 0 → 18 px and opacity falls to 0.15 (0.2 s, `power3.in`); hard cut; the card arrives from 1.25 with 18 px blur, settling to 1.0, no blur and full opacity over 0.5 s on `expo.out`. Same peak blur on both sides. |
 
 **Inside the UI:**
 - U1–U4 is one continuous take with no seams. Hidden waits (a re-run, the paste fetch, Claude Code thinking) are cursor-matched cuts with a 4-frame crossfade, never sped up.
@@ -106,24 +106,24 @@ Each beat gives the screen, the clicks and the lines. The lines themselves (text
 
 | # | Time | Dur | Look | Lines | Out |
 |---|---|---|---|---|---|
-| H1 | 0:00.0–0:07.0 | 7.0 | Pixel | LG-01, LG-02 | continuous |
-| H2 | 0:07.0–0:14.0 | 7.0 | Pixel | LG-03 | S1 |
-| E1 | 0:14.0–0:24.5 | 10.5 | Brush | OC-01, OC-02 | S1a |
-| E2 | 0:24.5–0:36.0 | 11.5 | Brush | OC-03 | S1b |
-| E3 | 0:36.0–0:45.5 | 9.5 | Brush | OC-04 | S2 |
-| U1 | 0:45.5–1:03.5 | 18.0 | UI | LG-04, OC-05, LG-05 | continuous |
-| U2 | 1:03.5–1:16.0 | 12.5 | UI + A1, A2 | LG-06, OC-06 | continuous |
-| U3 | 1:16.0–1:30.0 | 14.0 | UI + A3 | OC-07, OC-08 | continuous |
-| U4 | 1:30.0–1:41.5 | 11.5 | UI | OC-09, OC-10 | S3 |
-| U5 | 1:41.5–1:54.0 | 12.5 | Pixel 3.5 s, then UI + A4 | LG-07, OC-11 | S5 |
-| U6 | 1:54.0–2:01.0 | 7.0 | Terminal | OC-12 | S6 |
-| U7 | 2:01.0–2:10.5 | 9.5 | UI | OC-13, LG-08 | S7 |
-| P1 | 2:10.5–2:18.0 | 7.5 | UI + brush arrow | LG-09, OC-14 | S8 |
-| END | 2:18.0–2:27.5 | 9.5 | Card + brush underline | AU-01 (optional), LG-10 | end |
+| H1 | 0:00–0:08.3 | 8.3 | Pixel | LG-01, LG-02 | continuous |
+| H2 | 0:08.3–0:15.2 | 6.9 | Pixel | LG-03 | S1 |
+| E1 | 0:15.2–0:24.8 | 9.6 | Brush | OC-01, OC-02 | S1a |
+| E2 | 0:24.8–0:34.8 | 10.0 | Brush | OC-03 | S1b |
+| E3 | 0:34.8–0:45 | 10.2 | Brush | OC-04 | S2 |
+| U1 | 0:45–1:03.3 | 18.2 | UI | LG-04, OC-05, LG-05 | continuous |
+| U2 | 1:03.3–1:14.8 | 11.5 | UI + A1, A2 | LG-06, OC-06 | continuous |
+| U3 | 1:14.8–1:27.7 | 12.9 | UI + A3 | OC-07, OC-08 | continuous |
+| U4 | 1:27.7–1:39.6 | 11.9 | UI | OC-09, OC-10 | S3 |
+| U5 | 1:39.6–1:52.9 | 13.3 | Pixel 3.5 s, then UI + A4 | LG-07, OC-11 | S5 |
+| U6 | 1:52.9–1:59.7 | 6.8 | Terminal | OC-12 | S6 |
+| U7 | 1:59.7–2:09.2 | 9.6 | UI | OC-13, LG-08 | S7 |
+| P1 | 2:09.2–2:16.4 | 7.2 | UI + brush arrow | LG-09, OC-14 | S8 |
+| END | 2:16.4–2:22.4 | 6.0 | Card + brush underline | AU-01 (optional), LG-10 | end |
 
-The sum is 147.5 s.
+The sum is 142.4 s.
 
-### H1 · 0:00–0:07 · Pixel · "74"
+### H1 · 0:00–0:08.3 · Pixel · "74"
 
 - **Frame 0 is the thumbnail.** On black:
   - "74" in 5x7 bitmap numerals (`#ECEAE6`, x6 logical), with "MIN" beneath in `#85837E`.
@@ -140,7 +140,7 @@ The sum is 147.5 s.
   - "out": the crate drops onto cell 0, which fills red.
 - **Audio:** music M1 starts on one low square-wave note, with a 3-note arpeggio from 2.4 s. SFX-01 ticks on each cell, and SFX-03 (the crate) lands on "out".
 
-### H2 · 0:07–0:14 · Pixel · "The window"
+### H2 · 0:08.3–0:15.2 · Pixel · "The window"
 
 - **During the line:**
   - Cells 0–4 fill under "Someone raised the alarm in four". A bell sprite rings above cell 4 on "four".
@@ -149,11 +149,11 @@ The sum is 147.5 s.
   - The scanner LED stays at grey `0` and blinks once on "nothing".
 - **After the line (silent):**
   - The bar races from 18 to 74 in 0.9 s (14 ticks, rising in pitch).
-  - At about 0:12.7 the stamp `14:26 OSV` drops on cell 74. The LED ticks to `1`, with a 1 px red line to **the red tile only**: the scanner never reaches the 20.
+  - About 1 s after the line ends, the stamp `14:26 OSV` drops on cell 74. The LED ticks to `1`, with a 1 px red line to **the red tile only**: the scanner never reaches the 20.
   - "74 MIN" returns at x6. Hold 0.5 s, then S1.
-- **Audio:** SFX-02 (the bell), a SFX-01 tick roll through the ramp, and SFX-04 (the stinger) on the stamp. M1 rises from 0:11.8 to the stamp, then holds and stops hard at S1. OC-01 starts at 0:13.6 over the pixel exit (a J-cut).
+- **Audio:** SFX-02 (the bell), a SFX-01 tick roll through the ramp, and SFX-04 (the stinger) on the stamp. M1 rises through the ramp to the stamp, then holds and stops hard at S1. OC-01 starts at 0:13.6 over the pixel exit (a J-cut).
 
-### E1 · 0:14–0:24.5 · Brush · "13:30, on call"
+### E1 · 0:15.2–0:24.8 · Brush · "13:30, on call"
 
 - **The sheet:** paper `#121214`, no texture.
   - A pen **rail** at the pixel bar's y, with a tick and the typeset label `13:30 UTC` (Martian Mono 28 px).
@@ -165,9 +165,9 @@ The sum is 147.5 s.
   - "Thirteen thirty": the rail and tick draw.
   - "zero": an `fg-0` pen ring round the 0. Not red: the scanner is not infected.
   - "repos", "what", "page": boxes 1–3 and their questions.
-- **Audio:** music M2 (felt piano and warm pad, no drums) fades in from 0:13.8. SFX-05 (pen circle) and SFX-06 (pen line per checkbox).
+- **Audio:** music M2 (felt piano and warm pad, no drums) fades in under the J-cut. SFX-05 (pen circle) and SFX-06 (pen line per checkbox).
 
-### E2 · 0:24.5–0:36 · Brush · "One range, one fetch"
+### E2 · 0:24.8–0:34.8 · Brush · "One range, one fetch"
 
 The same rail continues on a new sheet. Nodes use the app's graph legend, so the real path graph reads at a glance in U1:
 - **mocha** is a pen-drawn blue rounded square (`#5C9DFF`) labelled `mochajs/mocha`.
@@ -186,7 +186,7 @@ The same rail continues on a new sheet. Nodes use the app's graph legend, so the
 
 **Audio:** SFX-06 per stroke and SFX-07 (marker dash) on "fetched".
 
-### E3 · 0:36–0:45.5 · Brush · "A window on an edge"
+### E3 · 0:34.8–0:45 · Brush · "A window on an edge"
 
 - **The sheet:** the rail is now a time axis with typeset ticks `13:12`, `13:30` and `14:26`.
   - An amber marker **bracket** runs from 13:12 to the open right end, labelled `ADMITS {range, fromT, toT}` (Martian Mono, amber).
@@ -200,13 +200,13 @@ The same rail continues on a new sheet. Nodes use the app's graph legend, so the
   - "location": the tree chips.
   - "window": the bracket and its label.
   - "filter": the 13:30 line and the highlight.
-- **Audio:** SFX-07 on the bracket and SFX-06 on the vertical line. M2 lifts one step at 0:41.
+- **Audio:** SFX-07 on the bracket and SFX-06 on the vertical line. M2 lifts one step on "window".
 
-### U1 · 0:45.5–1:03.5 · UI · "Run triage"
+### U1 · 0:45–1:03.3 · UI · "Run triage"
 
 **Take A, continued from the fresh load.** The autoplay has finished, and the cursor is on the scrubber handle ("Scenario time, UTC").
 
-1. **0:45.5–0:46.7:** press **Shift+Left ×6** (14:30 → 13:30). The button must read **Run triage at 13:30 UTC**.
+1. **In the first 1.2 s,** press **Shift+Left ×6** (14:30 → 13:30). The button must read **Run triage at 13:30 UTC**.
    - The hero reads "21 repos one install from malware, 20 safe with npm ci" · "Advisory scanner 0" · "Patient Zero 1 LOCKED · 20 WOULD_PULL".
    - The app's own `contrast-arrow` draws.
 2. **On "Run",** click **Run triage at 13:30 UTC**. The cards stream in:
@@ -227,9 +227,9 @@ The same rail continues on a new sheet. Nodes use the app's graph legend, so the
 - SFX-10 key clicks ×6, each 1 dB lower than the last.
 - SFX-11 click on Run.
 - SFX-12 tick on the first six cards only.
-- Music M3 (a dry soft pulse, muted bass, a glassy tick, 90 bpm) enters at 0:45.5.
+- Music M3 (a dry soft pulse, muted bass, a glassy tick, 90 bpm) enters at S2.
 
-### U2 · 1:03.5–1:16.0 · UI + A1, A2 · "A path and its plan"
+### U2 · 1:03.3–1:14.8 · UI + A1, A2 · "A path and its plan"
 
 1. Click the **`mochajs/mocha`** row. It reads "^4.3.5 debug@4.4.2 · direct · declared directly by the repo", and the path graph draws the chain.
 2. Open "Show 2 more evidence paths …", then click **`[E3]`**. The `explain_path · mochajs/mocha` card opens ("range ^4.3.5 admits it · declared by the repo") with its Cypher.
@@ -244,7 +244,7 @@ The same rail continues on a new sheet. Nodes use the app's graph legend, so the
 
 **Backup** if mocha's row is off screen: `github/docs` (`chalk ^5.0.1`, `[E2]`); the VO stays the same.
 
-### U3 · 1:16.0–1:30.0 · UI + A3 · "Fix, Notice, write-back"
+### U3 · 1:14.8–1:27.7 · UI + A3 · "Fix, Notice, write-back"
 
 1. On "Fix", click **Fix** (the ghost button at the end of the mocha row). The drawer opens on the Fix tab:
    - "The malicious versions are still on npm: keep installing from your committed lockfile (npm ci) …"
@@ -256,7 +256,7 @@ The same rail continues on a new sheet. Nodes use the app's graph legend, so the
 
 **Audio:** SFX-11 clicks, and a single warm swell on "back" (an M3 stem lift of +2 dB for 1 s).
 
-### U4 · 1:30.0–1:41.5 · UI · "The next qix, and Ask"
+### U4 · 1:27.7–1:39.6 · UI · "The next qix, and Ask"
 
 1. Open the **Graph stats** tab for 1.3 s, with no VO and one SFX-12 tick. It reads "pz_acme_qix · 46,810 nodes · 123,426 edges · Dep 27,349 · Version 10,210 · Package 5,373 · Maintainer 3,817 · Advisory 30". **It must come before axios and the paste**, because it describes the run on screen.
 2. On "next", click the "Next qix? sindresorhus …" line, which opens **Concentration**: "sindresorhus 43% · 307 packages · reaches 21 of 21 repos", "ljharb 29% · 183 packages · reaches 20 of 21 repos", "types 29%".
@@ -265,30 +265,30 @@ The same rail continues on a new sheet. Nodes use the app's graph legend, so the
 
 **Backup:** ask "which exposures are prod-only and who owns them?". It reads "Complete list (prod only): 14 repos across 6 teams". Swap OC-10 for OC-10b.
 
-### U5 · 1:41.5–1:54.0 · Pixel card 3.5 s, then UI + A4 · "axios"
+### U5 · 1:39.6–1:52.9 · Pixel card 3.5 s, then UI + A4 · "axios"
 
-**U5a (pixel, 1:41.5–1:45.0).** The same engine and layout as H1–H2, with new data:
+**U5a (pixel, 1:39.6–1:43.1).** The same engine and layout as H1–H2, with new data:
 - labels `00:21` (first malicious publish) and `02:07` (the campaign's first OSV record), dated `2026-03-31`
 - a crate labelled `axios`
 - a **106-cell** bar at the same 4 px pitch: the longer bar is the point. It ramps from 0 to 106 in 1.0 s on "hundred".
 - the stamp `02:07 OSV` drops, and "106 MIN" shows for 0.4 s
 - no repo tiles in this card
 
-**U5b (UI, from 1:45.0).** S4 resolves in.
+**U5b (UI, from 1:43.1).** S4 resolves in.
 1. Click the **axios · Mar 2026** radio in the header. The triage re-runs at 01:30 UTC on 2026-03-31; cut the wait. The screen reads "Triage complete: 27 tools", and the hero reads "10 repos one install from malware, 9 safe with npm ci".
 2. On "tilde", click the **`louislam/uptime-kuma`** row: "~0.30.3 axios@0.30.4 · direct · declared directly by the repo".
 3. On "malicious": A4, a red underline under "106 minutes" in the verdict "In hindsight: it came at 02:07 UTC, 106 minutes after the first exposure".
 
 Do not say a vendor was first on this incident: the first OSV record (02:07) came before the first vendor alert (02:19).
 
-### U6 · 1:54.0–2:01.0 · Terminal · "MCP in Claude Code"
+### U6 · 1:52.9–1:59.7 · Terminal · "MCP in Claude Code"
 
 - **Before the take:** run `claude mcp add --env FALKOR_PORT=6380 --env REDIS_PASSWORD=devpass patient-zero -- node /path/to/patient-zero/server/mcp.ts` and crop the env values off screen.
 - **Terminal font:** Martian Mono.
 - **Prompt:** "Which repos would have pulled the qix malware at 13:30 UTC on 2025-09-08, and through which path?"
 - **Tool calls:** `incident_exposure`, then `explain_path`, each with its rows and "Cypher (GRAPH.RO_QUERY on pz_acme_qix)". Retake until both show. Cut the waits; don't speed them up.
 
-### U7 · 2:01.0–2:10.5 · UI · "Paste a repo"
+### U7 · 1:59.7–2:09.2 · UI · "Paste a repo"
 
 1. **Off camera:** click **qix · Sept 2025** and cut the re-run. Warm `mochajs/mocha` once beforehand, and keep to one analysis per 20 s.
 2. On "Paste", click **Paste your repo**, type `mochajs/mocha` in the GitHub repo field, and click **Analyze**.
@@ -302,7 +302,7 @@ Do not say a vendor was first on this incident: the first OSV record (02:07) cam
 - "incident": the "Judged on" line.
 - LG-08: the status line.
 
-### P1 · 2:10.5–2:18.0 · UI + brush arrow · "Before the advisory"
+### P1 · 2:09.2–2:16.4 · UI + brush arrow · "Before the advisory"
 
 - **Take E:** a fresh landing with the autoplay finished and the handle at 14:30.
   - The app's own `seventy-four-min` scribble circles "74 min · before the OSV record existed". If it does not persist, composite the PNG pair from `web/public/scribbles/`.
@@ -312,14 +312,14 @@ Do not say a vendor was first on this incident: the first OSV record (02:07) cam
 - **Cues:**
   - "fourteen twenty-six": the arrow starts.
   - "alarm": the arrowhead lands on 13:16.
-- **Audio:** SFX-06 for the arrow. M3 thins to the pad, and M4 starts at 2:16.
+- **Audio:** SFX-06 for the arrow. M3 thins to the pad, and M4 starts 2 s before the end card.
 
-### END · 2:18.0–2:27.5 · End card
+### END · 2:16.4–2:22.4 · End card
 
 Everything is left-aligned on `#0A0A0B`; only the "74 min" figure is ever centred.
 
 - **"Patient Zero"** in Cabinet Grotesk 800.
-- **"Exposed before the advisory exists."** in Satoshi 500, with a hand-drawn red underline (`end-underline`, a 500 ms wipe at 2:18.8).
+- **"Exposed before the advisory exists."** in Satoshi 500, with a hand-drawn red underline (`end-underline`, a 500 ms wipe 0.8 s into the card).
 - "FalkorDB Graph Hacks · Track 1: Agents That Act on Connected Data"
 - `patient-zero-rayp.onrender.com` · `github.com/yasharyas/Graph-Hacks-hackathon` (Martian Mono)
 - "MIT · $0 to run · a triage layer, not a detector"
@@ -329,7 +329,7 @@ Everything is left-aligned on `#0A0A0B`; only the "74 min" figure is ever centre
 - "Claude" (AU-01): the AI-use line underlines.
 - "Voices" (LG-10): the disclosure brightens.
 
-**Audio:** SFX-13 end tone on the title. M4 resolves on an open fifth, and its tail ends by 2:28.5.
+**Audio:** SFX-13 end tone on the title. M4 resolves on an open fifth, and its tail ends 1 s after the last frame.
 
 **With no author line,** nothing moves: the card text says it and the music fills.
 
@@ -350,9 +350,9 @@ Everything is left-aligned on `#0A0A0B`; only the "74 min" figure is ever centre
 {"id":"OC-01","speaker":"oncall","beat":"E1","tts":"[calm] Thirteen thirty. I'm on call, and the scanner says zero. It isn't wrong.","cues":[["Thirteen","rail and 13:30 tick"],["zero","fg-0 ring on the 0"]],"cap":"13:30 UTC · I'm on call · scanner: 0, and it isn't wrong"},
 {"id":"OC-02","speaker":"oncall","beat":"E1","tts":"Which repos does this reach, through what, and who do I page?","cues":[["repos","box 1"],["what","box 2"],["page","box 3"]],"cap":"Which repos? Through what? Who do I page?"},
 {"id":"OC-03","speaker":"oncall","beat":"E2","tts":"mocha declares debug itself. Its lockfile pins a safe version, so N-P-M C-I was safe. A fresh install would have fetched the malicious one.","cues":[["mocha","repo square"],["itself","declares line, range chip"],["pins","pin chip, lock"],["safe","green check (second occurrence)"],["fetched","dashed arrow, WOULD_PULL chip"],["malicious","red dot and ring"]],"cap":"mocha declares debug ^4.3.5 · npm ci was safe · a fresh install would have fetched it"},
-{"id":"OC-04","speaker":"oncall","beat":"E3","tts":"FalkorDB makes each lockfile location a node, and each range an edge with a time window. Exposed at thirteen thirty: a filter.","cues":[["location","tree chips"],["window","ADMITS bracket"],["filter","13:30 line, span highlight"]],"cap":"One node per lockfile location · ADMITS {range, fromT, toT} · exposed at 13:30 = a filter"},
+{"id":"OC-04","speaker":"oncall","beat":"E3","tts":"Falkor DB makes each lockfile location a node, and each range an edge with a time window. Exposed at thirteen thirty: a filter.","cues":[["location","tree chips"],["window","ADMITS bracket"],["filter","13:30 line, span highlight"]],"cap":"One node per lockfile location · ADMITS {range, fromT, toT} · exposed at 13:30 = a filter"},
 {"id":"LG-04","speaker":"ledger","beat":"U1","tts":"Twenty-one repos one install from malware. Twenty safe with N-P-M C-I.","cues":[["Twenty-one","punch-in on the hero band"]],"cap":"21 repos one install from malware · 20 safe with npm ci"},
-{"id":"OC-05","speaker":"oncall","beat":"U1","tts":"Run triage. Forty-nine read-only graph calls. A model only picks an observation by I-D; the rows build the verdict.","cues":[["Run","click Run triage"],["Forty-nine","feed"],["I-D","replay callout"]],"cap":"49 read-only graph calls · the model picks an observation id, the rows build the verdict"},
+{"id":"OC-05","speaker":"oncall","beat":"U1","tts":"Run triage. Forty-nine read-only graph calls. A model only picks an observation, by I-D.","cues":[["Run","click Run triage"],["Forty-nine","feed"],["I-D","replay callout"]],"cap":"49 read-only graph calls · a model only picks an observation id"},
 {"id":"LG-05","speaker":"ledger","beat":"U1","tts":"Sixty-two of sixty-two claims traced.","cues":[["Sixty-two","cursor to status line"]],"cap":"Triage complete: 49 tools, 62 of 62 claims traced"},
 {"id":"LG-06","speaker":"ledger","beat":"U2","tts":"Range admits it. Declared by the repo.","cues":[["Range","A1 amber underline"]],"cap":"range ^4.3.5 admits it · declared by the repo"},
 {"id":"OC-06","speaker":"oncall","beat":"U2","tts":"Zero hops, a shortest path from the root. Every card carries its Cypher, and graph explain shows the plan.","cues":[["Zero","chain highlight"],["Cypher","cursor on Cypher block"],["explain","click Show plan"],["plan","A2 loop on the index scan"]],"cap":"0 hops · shortestPath from the lockfile root · Cypher and GRAPH.EXPLAIN on every card"},
@@ -367,7 +367,7 @@ Everything is left-aligned on `#0A0A0B`; only the "74 min" figure is ever centre
 {"id":"OC-13","speaker":"oncall","beat":"U7","tts":"Paste a repo: its own graph by graph copy, its lockfile from before the incident.","cues":[["Paste","click Paste your repo"],["graph","Write graph stage"],["incident","Judged-on line"]],"cap":"Your repo: its own graph via GRAPH.COPY · lockfile from just before the incident"},
 {"id":"LG-08","speaker":"ledger","beat":"U7","tts":"Triage complete. Nine tools.","cues":[["Nine","status line"]],"cap":"Triage complete: 9 tools · npm ci is safe"},
 {"id":"LG-09","speaker":"ledger","beat":"P1","tts":"First advisory: fourteen twenty-six.","cues":[["fourteen","arrow starts at the 14:26 mark"]],"cap":"First OSV record: 14:26"},
-{"id":"OC-14","speaker":"oncall","beat":"P1","tts":"The graph needed no advisory. Just the alarm, our lockfiles, the registry.","cues":[["alarm","arrowhead lands on 13:16"]],"cap":"No advisory needed: the alarm, our lockfiles, the registry"},
+{"id":"OC-14","speaker":"oncall","beat":"P1","tts":"The graph needed no advisory. Only the alarm.","cues":[["alarm","arrowhead lands on 13:16"]],"cap":"No advisory needed · only the alarm"},
 {"id":"AU-01","speaker":"author","beat":"END","optional":true,"tts":"I built this with Claude Code. Every query is in the read-me, and I can explain each one.","cues":[["Claude","AI-use line underlines"]],"cap":"Built with Claude Code · every query is in the README"},
 {"id":"LG-10","speaker":"ledger","beat":"END","tts":"Voices: ElevenLabs, A-I.","cues":[["Voices","disclosure brightens"]],"cap":"Voices: ElevenLabs (AI)"}
 ]
@@ -387,7 +387,7 @@ AU-01 is recorded on the author's own microphone and is never synthesized. OC-10
 | **Total spoken** | **315** | **1,776** (plus 88 for the OC-10b backup) |
 
 - **Duration:** 297 synthesized words is 1:58 at 150 wpm, or 1:51 at 160. The author line adds about 7 s.
-- **Timing slack:** speech fills about 85% of the 147.5 s. The rest is click pauses, the hook's silent ramp and the seams.
+- **Timing slack:** speech fills about 87% of the 142.4 s. The rest is click pauses, the hook's silent ramp and the seams.
 - **Tightest beats:** E1 (about 92%, with the J-cut), E3 and U3 (about 91–93% at 150 wpm). If alignment runs long, trim in this order: OC-05's last clause, OC-01's "It isn't wrong" (keep it in the caption), then OC-07's "Nothing is sent" (it stays on screen).
 - **Credits:** a full pass is about 1,776 characters. Lines are cached by id, so a fix re-synthesizes one line. Plan for about 5,000 characters: the cast and pronunciation auditions, one full pass, and retakes on the risk lines (LG-02, OC-09, OC-03, LG-07).
 
@@ -398,7 +398,7 @@ These counts are verified by script against the JSON above; see `docs/decisions.
 | Term | In `tts` | A/B | Note |
 |---|---|---|---|
 | qix | `kicks` | `Q-I-X` | Unverified; A/B on LG-02 first and use the same choice in OC-09. Captions and pixel labels always read `qix`. |
-| FalkorDB | `FalkorDB` | `Falkor D-B` | FAL-kor D-B |
+| FalkorDB | `Falkor DB` | `FalkorDB` | FAL-kor D-B. Scribe heard `FalkorDB` as "Falco DB" and `Falkor DB` as "FalcorDB" (2026-10-16), so `tts` uses the space; `Falkor D-B` lost the R. |
 | npm, npm ci | `N-P-M`, `N-P-M C-I` | | |
 | Cypher | `Cypher` | `cipher` | SY-fer |
 | GRAPH.COPY, GRAPH.EXPLAIN | `graph copy`, `graph explain` | | |
@@ -476,10 +476,10 @@ These counts are verified by script against the JSON above; see `docs/decisions.
 
 | Stem | Time | Spec |
 |---|---|---|
-| M1 "Registry" | 0:00–0:14 | Square and pulse waves, A minor, 96 bpm. One low note, an arpeggio from 2.4 s, a riser 11.8–12.7 s, and a hard stop at S1 with a 1 s tail. |
-| M2 "Notebook" | 0:13.8–0:45.5 | Felt piano and warm pad, 72 bpm, no drums. Lifts one step at 0:41. |
-| M3 "Instrument" | 0:45.5–2:16 | A dry soft pulse, muted bass and a glassy tick, 90 bpm. Dips under the axios card; swells on "back". |
-| M4 "Resolve" | 2:16–2:28.5 | One open fifth |
+| M1 "Registry" | H1–H2 | Square and pulse waves, A minor, 96 bpm. One low note, an arpeggio from 2.4 s, a riser through the silent ramp, and a hard stop at S1 with a 1 s tail. |
+| M2 "Notebook" | E1–E3 (from the J-cut) | Felt piano and warm pad, 72 bpm, no drums. Lifts one step in E3. |
+| M3 "Instrument" | U1 to 2 s before END | A dry soft pulse, muted bass and a glassy tick, 90 bpm. Dips under the axios card; swells on "back". |
+| M4 "Resolve" | the last 2 s of P1 to the end | One open fifth |
 
 - **SFX** (`eleven_text_to_sound_v2`, all short, generated once and cached):
 
