@@ -211,6 +211,10 @@ test('Ask facts from tool rows: carriers, a via list and an account\'s reach say
   const blast = { rows: [{ repo: 'mochajs/mocha', packages: 3, dev: true }, { repo: 'npm/cli', packages: 1, dev: false }], params: { maintainer: 'ljharb' } };
   assert.match(checked(blastFacts(r, blast, ['acme/checkout-web']), 'ljharb'),
     /^If `ljharb` were hijacked, 2 of the 17 repos would be in reach: their lockfiles hold its packages\. `mochajs\/mocha` \(dev\), `npm\/cli`\. `acme\/checkout-web` holds none of its packages\. The most: `mochajs\/mocha`, 3 packages\. For 1 of them only through devDependencies\./);
+  // "... and through which packages?": the fewest too, and the account's packages the query named
+  const named = { ...blast, rows: [{ ...blast.rows[0], sample: ['qs', 'has'] }, { ...blast.rows[1], sample: ['qs'] }] };
+  assert.match(checked(blastFacts(r, named, [], true), 'ljharb', 'qs', 'has'),
+    /The most: `mochajs\/mocha`, 3 packages\. The fewest: `npm\/cli`, 1 package\. Its packages in those lockfiles include `has`, `qs` \(the graph names up to 6 per repo\)\. For 1 of them/);
   assert.match(checked(versionFacts(r)), /^Exposed repos by malicious version, most first: `debug@4\.4\.2` 5 repos \(every exposed repo\)/);
   assert.match(checked(explainFacts(r)), /\nTiers in plain words: LOCKED = the committed lockfile pins a malicious version/);
 });

@@ -58,6 +58,9 @@ const make = () => {
         annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       },
       async (args): Promise<CallToolResult> => {
+        // each org graph holds its scenario's incident only: another incident id would tier every repo against nothing
+        if ('incident' in properties && args.incident !== undefined && args.incident !== args.scenario)
+          return { isError: true, content: [{ type: 'text', text: 'incident must equal scenario: each Acme org graph holds only its own incident. Omit incident to use the scenario\'s.' }] };
         try {
           const g = graph(orgGraph(args.scenario as ScenarioId)); // throws on an unknown scenario
           const params = Object.fromEntries(Object.keys(properties).filter((k) => args[k] !== undefined).map((k) => [k, args[k]]));

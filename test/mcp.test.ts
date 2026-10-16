@@ -96,6 +96,11 @@ describe('mcp stdio server', { skip: !up && `FalkorDB unreachable at ${host}:${p
   test('errors are tool errors with a generic message', async () => {
     const unknown = await call('incident_exposure', { scenario: 'nope-2000-01-01', incident: 'x', at: AT });
     assert.equal(unknown.result.isError, true);
+    // an explicit incident that is not the scenario's own: a validation error in fixed words, not "0 LOCKED, 11 CLEAN"
+    const mismatch = await call('incident_exposure', { scenario: 'qix-2025-09-08', incident: 'axios-2026-03-31', at: AT });
+    assert.equal(mismatch.result.isError, true);
+    assert.match(text(mismatch), /^incident must equal scenario/);
+    assert.doesNotMatch(text(mismatch), /axios|LOCKED/);
     const noScenario = await call('concentration_risk', {});
     assert.equal(noScenario.result.isError, true);
     const badTime = await call('explain_path', { scenario: 'qix-2025-09-08', repo: 'github/docs', version: 'debug@4.4.2', at: 'garbage' });

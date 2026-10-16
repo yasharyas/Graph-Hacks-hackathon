@@ -246,13 +246,13 @@ const TERMS = SCENARIOS.map((s) => {
   const names = inc.versions.flatMap((v) => [v.id, v.id.slice(0, v.id.lastIndexOf('@'))]);
   return { s, terms: new Set([s, inc.compromised ?? '', ...names].filter(Boolean)) };
 });
-function fromAlert(text: string): { s: ScenarioId; at?: number } {
+// Fixed text, never the alert itself (S12): the two incidents this demo loads, and Paste for anything else.
+const NO_INCIDENT = 'The alert names neither loaded incident: the qix compromise on 2025-09-08 (try "qix compromised, 13:16 UTC") or axios on 2026-03-31 (try "axios compromised, 00:30 UTC"). For anything else, use Paste your repo.';
+function fromAlert(text: string): { s: ScenarioId; at?: number } | undefined {
   const words = (text.toLowerCase().match(/[a-z0-9@._/-]+/g) ?? []).map((w) => w.replace(/[.,]+$/, ''));
   const name = (w: string) => (w.lastIndexOf('@') > 0 ? w.slice(0, w.lastIndexOf('@')) : w);
   const [best] = TERMS.map(({ s, terms }) => ({ s, n: words.filter((w) => terms.has(w) || terms.has(name(w))).length })).sort((a, b) => b.n - a.n);
-  // fixed text, never the alert itself: the two incidents this demo loads, and Paste for anything else
-  if (!best?.n) throw new HttpError(400, 'The alert names neither loaded incident: the qix compromise on 2025-09-08 (try "qix compromised, 13:16 UTC") or axios on 2026-03-31 (try "axios compromised, 00:30 UTC"). For anything else, use Paste your repo.');
-  return { s: best.s, at: clockOf(text, best.s) };
+  return best?.n ? { s: best.s, at: clockOf(text, best.s) } : undefined;
 }
 // The same parser as the web app's banner (shared/clock.ts), around the same default clock: zones and offsets included
 // ("6:46 PM IST" is 13:16 UTC), within 30 days of the incident.
@@ -311,7 +311,11 @@ app.post('/api/triage', async (c) => {
   } else if (b.alert !== undefined) {
     if (b.scenario !== undefined) throw new HttpError(400, 'Send an alert or a scenario, not both.');
     alert = textOf(b.alert, 'The alert');
-    ({ s, at } = fromAlert(alert));
+    const hit = fromAlert(alert);
+    // A well-formed alert that names neither incident is an answer, not a bad request: a 200 stream with the error event
+    // the client already shows (a 400 would print a red line in the browser console for a handled case).
+    if (!hit) return sse(c, async function* () { yield { type: 'error', message: NO_INCIDENT, requestId: c.get('requestId') } as const; });
+    ({ s, at } = hit);
   } else s = scenarioOf(b.scenario);
   at = b.at !== undefined ? atOf(b.at, s) : (at ?? DEFAULT_AT[s]);
   const name = guestGraph ?? orgGraph(s, prefix());

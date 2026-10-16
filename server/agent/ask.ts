@@ -4,11 +4,12 @@
 // Questions the report answers (a list or filter, a named repo, rotate secrets / is npm ci safe, who to notify, when, a
 // named account's blast radius, exposures by malicious version or by carrier) get the graph's own answer and
 // server-chosen tool calls, no model: free-text answers to exactly these were wrong while every name in them checked out.
+// A "which/what <noun>" head ("which library / account / team / version ...?") picks ONE of them, never every match.
 // A graph answer that leaves out a repo, team, package, version or account the question names is replaced by "not
 // answered from the graph", never shown as an answer to another question. Everything else goes to the model's tool loop.
 // Only a model's answer uses one of the run's 4 follow-ups (`used`): graph answers and refusals are free, and a refusal
 // offers questions the graph answers.
-import type { Exposure, LlmMode, Report, ScenarioId, ToolName, ToolResult, TriageEvent } from '../../shared/events.ts';
+import type { Exposure, LlmMode, Refusal, Report, ScenarioId, ToolName, ToolResult, TriageEvent } from '../../shared/events.ts';
 import { graph } from '../graph/client.ts';
 import { forPrompt } from '../security.ts';
 import { findTarget, plural, TOOLS } from '../tools/registry.ts';
@@ -137,10 +138,19 @@ function entities(q: string, r: Report, via?: string): string[] {
 
 // A maintainer the graph knows (find_target), named with words about an account, routes to its blast radius. Not the
 // incident's own account (every incident answer is about it), and not "the next qix" (a figure of speech).
-const ACCOUNT = /\b(hijack\w*|compromis\w*|takeover|taken over|accounts?|maintainers?|maintains|blast radius|reach\w*|depend\w*)\b|\w's packages\b/i;
-const VIA = /\b(?:through|via)\s+`?((?:@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*[a-z0-9])`?/i;
+const ACCOUNT = /\b(hijack\w*|compromis\w*|takeover|taken over|accounts?|maintain\w*|blast radius|reach\w*|depend\w*)\b|\w's packages\b/i;
+// "... and through which packages?": with an account, which of its packages those lockfiles hold
+const PACKAGES = /\b(?:through|via|by|with)\s+(?:which|what)\s+(?:of\s+its\s+)?(?:packages?|deps?|dependenc(?:y|ies)|librar(?:y|ies)|modules?)\b|\bwhich (?:of its )?packages\b/i;
+const VIA = /\b(?:through|via)\s+`?((?:@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*[a-z0-9])`?/gi;
+// Words after "through"/"via" that are English or tooling, never a carrier, even where npm has a package of that name
+// ("through which packages" is not the npm package `which`). A package named there is then checked by the filter itself:
+// one that brings no malicious version in gets "no exposed repo gets it through that package", never a list without it.
+const STOP = new Set(('which what whose whom who whichever whatever the an any some all each every this that these those its their our '
+  + 'my your his her them it one ones more most first next last other others same such both either several many few another own '
+  + 'direct directly transitive transitively nested dev prod production npm npx yarn pnpm ci lockfile lockfiles install installs '
+  + 'package packages dependency dependencies deps dep module modules library libraries version versions repo repos account').split(' '));
 async function known(g: ReturnType<typeof graph>, q: string, r: Report): Promise<{ accounts: string[]; via?: string }> {
-  const cand = VIA.exec(q)?.[1]?.toLowerCase();
+  const cand = [...q.matchAll(VIA)].map((m) => m[1]!.toLowerCase()).find((w) => !STOP.has(w));
   if (!ACCOUNT.test(q) && !cand) return { accounts: [] };
   const rows = (await findTarget(g, { q: [cand ?? '', ACCOUNT.test(q) ? q : ''].join(' ') }).catch(() => ({ rows: [] }))).rows as { label: string; id: string }[];
   const accounts = ACCOUNT.test(q) ? rows.filter((x) => x.label === 'Maintainer' && x.id !== r.incident.maintainer && !new RegExp(`\\bnext ${esc(x.id)}\\b`, 'i').test(q)).map((x) => x.id) : [];
@@ -156,6 +166,16 @@ export function completeList(res: ToolResult): string {
   for (const x of rows) teams.set(x.team ?? '', [...(teams.get(x.team ?? '') ?? []), x]);
   const label = (x: FRow) => `${tk(x.repo)}${x.tier === 'LOCKED' ? ' (LOCKED)' : x.tier === 'MAINTAINER' ? ' (MAINTAINER)' : x.dev ? ' (dev)' : ''}`;
   const filter = res.summary.match(/\(([^)]*)\)/)?.[1] ?? 'no filter';
+  if (!rows.length) { // said plainly: "no exposed repo gets chalk@5.6.1 through supports-color", not "0 repos across 0 teams."
+    const { version, via, at } = res.params;
+    const when = typeof at === 'number' ? ` at ${new Date(at).toISOString().slice(11, 16)} UTC` : '';
+    if (filter === 'no filter') return `No repo is exposed${when}.`;
+    if (!filter.split(', ').every((x) => /^(reaches|via) /.test(x))) return `No exposed repo matches (${filter})${when}.`;
+    const what = typeof version === 'string' ? tk(version) : 'a malicious version';
+    return typeof via === 'string'
+      ? `No exposed repo gets ${what} through ${tk(via)}${when}: in no lockfile here does ${tk(via)} declare a range that admits it.`
+      : `No exposed repo gets ${what}${when}.`;
+  }
   return `Complete list (${filter}): ${plural(rows.length, 'repo')} across ${plural(teams.size, 'team')}. `
     + [...teams].map(([t, xs]) => `${t ? tk(t) : 'no owner on record'}: ${xs.map(label).join(', ')}`).join('; ') + '.';
 }
@@ -188,9 +208,37 @@ const VERSIONS = /\b(which|what) (malicious |bad |compromised |hijacked )?versio
 // "which upgrade / which single package / change one dependency": exposures grouped by carrier, in ask() (it needs rows)
 const CARRIER = /\b(which|what) (single |one )?(dependency|dependencies|upgrade|carrier)\b|\b(which|what) (single|one) package\b|\b(change|upgrade|remove|bump|update|replace|drop) (only )?(one|a single|1) (dependency|package|dep)\b|\bcarriers?\b/i;
 const DEV = /\bdev(-|\s)?(only|dependenc\w*|deps?)\b|\bdevDependencies\b/i;
-const FIRST = /\b(first|next hour|priorit\w*|next steps?|action plan)\b|\bwhat (should|do|must) (i|we) do\b/i;
-const TEAMS = /\b(which|what) team\b|\bmost (work|exposed|repos)\b|\bper team\b|\bby team\b/i;
-const PRIORITY = /\bif (i|we) (can|could) only\b|\bprioriti[sz]\w*\b|\b(which|what) (\d+|two|three|four|five|few) (repos?|first)\b|\bfix (\d+|two|three|four|five) (repos? )?(first|today)\b/i;
+// "what do I do first", not any "first" ("which library should I replace first?" is the carrier answer)
+const FIRST = /\b(do|tackle|handle|fix) first\b|\bwhat (comes |goes )?first\b|\bfirst (steps?|things?|actions?|moves?)\b|\b(next hour|priorit\w*|next steps?|action plan)\b|\bwhat (should|do|must) (i|we) do\b|\bwhere (do|should) (i|we) start\b/i;
+// "most repos" alone is not per team ("which account reaches the most repos?")
+const TEAMS = /\b(which|what) teams?\b|\bmost work\b|\bper team\b|\bby team\b/i;
+// The question's head, "which/what <noun>", names what the answer is about, so it picks ONE answer, never every block a
+// keyword elsewhere matches: "which library should I replace first?" is the carrier answer (not the Do plan), "which
+// maintainer account reaches the most repos?" the PageRank one (not the per-team list). A malicious package or account
+// ("which packages were compromised?") is the versions answer or the incident's own; a safe version to move to ("what
+// version should we pin debug to?") has no graph block (the model answers).
+const HEAD = /\b(?:which|what)\s+(?:of\s+(?:the|its|our|these|those|their)\s+)?((?:(?:single|one|bad|malicious|compromised|hijacked|poisoned|infected|npm|exposed|affected)\s+)*)([a-z]+)([^?.!;]{0,40})/i;
+const BAD = /\b(bad|malicious|compromised|hijacked|poisoned|infected)\b/i;
+const WAS_BAD = /^\s*(is|are|was|were|got|has been|have been)\s+(\w+\s+)?(bad|malicious|compromised|hijacked|poisoned|infected|affected|hit|involved|published)\b/i;
+const SAFE_TO = /\b(safe|clean|fixed|good|pin|roll ?back|downgrade|upgrade to|move to)\b/i;
+type Head = 'carrier' | 'account' | 'incident' | 'team' | 'version' | 'open';
+function headOf(q: string): Head | undefined {
+  const [, adj = '', noun = '', after = ''] = HEAD.exec(q) ?? [];
+  const w = noun.toLowerCase();
+  const bad = BAD.test(adj) || WAS_BAD.test(after);
+  if (/^packages?$/.test(w) && /^\s+(versions?|releases?)\b/i.test(after)) return SAFE_TO.test(after) ? 'open' : 'version'; // "which package versions"
+  if (/^(librar(y|ies)|packages?|dependenc(y|ies)|deps?|modules?)$/.test(w)) return bad ? 'version' : 'carrier';
+  if (/^(upgrades?|carriers?)$/.test(w)) return 'carrier';
+  if (/^(maintainers?|accounts?|persons?|people|authors?|publishers?)$/.test(w)) return bad ? 'incident' : 'account';
+  if (/^teams?$/.test(w)) return 'team';
+  if (/^(versions?|releases?)$/.test(w)) return SAFE_TO.test(after) ? 'open' : 'version';
+}
+// A question that asks two things: the first clause, then the rest ("which team has the most work, and when did it start?").
+const clauses = (q: string): [string, string] => {
+  const m = /,?\s+(?:and|also|plus)\s+(?=(?:which|what|who|when|how|is|are|do|does|should|can|could|where|why|will)\b)|\?\s+(?=\S)|;\s*/i.exec(q);
+  return m ? [q.slice(0, m.index), q.slice(m.index + m[0].length)] : [q, ''];
+};
+const PRIORITY = /\bif (i|we) (can|could) only\b|\bprioriti[sz]\w*\b|\b(which|what) (\d+|two|three|four|five|few) (repos?|first)\b|\bfix (\d+|two|three|four|five) (repos? )?(first|today)\b|\b(which|what) repos?\b[^?.!]{0,40}\b(first|most urgent|riskiest)\b/i;
 const COUNT: Record<string, number> = { two: 2, three: 3, four: 4, five: 5, few: 3 };
 // Every repo a question names (full or bare name), in the question's order: "compare mocha and nodemon" answers both.
 const where = (q: string, e: Exposure) => {
@@ -210,6 +258,14 @@ export function graphAnswer(q: string, r: Report, repo?: string, list = false, t
   const e = repo ? r.exposures.find((x) => x.repo === repo) : undefined;
   const repos = many.length > 1 ? many.slice(0, NAMED_MAX) : e ? [e] : [];
   const left = many.slice(repos.length > 1 ? NAMED_MAX : many.length);
+  // A head noun with no repo or team named: its one answer, then any second clause on its own (a list already groups by team).
+  const [lead, rest] = clauses(q);
+  const head = !repos.length && !team ? headOf(lead) : undefined;
+  if (head && head !== 'carrier') {
+    const tell = /\b(notif\w*|tell|told|ping\w*|contact\w*|channels?)\b/i.test(lead); // "which teams should we notify?": the roster
+    const one = { account: concentrationFacts, incident: summaryFacts, team: list ? () => '' : tell ? notifyFacts : teamFacts, version: versionFacts, open: () => '' }[head](r);
+    return [one, rest && graphAnswer(rest, r, undefined, list, team)].filter(Boolean).join('\n') || null;
+  }
   const urgent = !repos.length && team && URGENT.test(q) ? team : undefined;
   const priority = !repos.length && !urgent && PRIORITY.test(q);
   const first = !repos.length && !urgent && !priority && FIRST.test(q);
@@ -281,8 +337,11 @@ export async function* ask({ run, question, marks = [], chatFn = pinned, signal 
   // ("declare it directly" is its own answer, "most urgent for Payments" is that team's first action, not its repos)
   const list = pre !== undefined && (!Object.keys(pre).length || Object.keys(pre).some((k) => k !== 'repo')) && !DIRECT.test(question) && !(team && URGENT.test(question));
   const repo = typeof pre?.repo === 'string' ? report.exposures.find((e) => e.repo === pre.repo) : undefined;
-  const carrier = !accounts.length && CARRIER.test(question); // a named account goes first: its blast radius
-  const facts = accounts.length || carrier ? null : graphAnswer(question, report, repo?.repo, list, team);
+  // a named account goes first: its blast radius; then a head noun ("which library ...?") over any carrier keyword
+  const [lead, rest] = clauses(question);
+  const head = headOf(lead);
+  const carrier = !accounts.length && (head ? head === 'carrier' : CARRIER.test(question));
+  const facts = accounts.length ? null : carrier ? (rest && graphAnswer(rest, report, repo?.repo, list, team)) || null : graphAnswer(question, report, repo?.repo, list, team);
   const offer = suggestions(report);
   const graphCan = `The graph answers questions like these by itself: ${offer.map((s) => `“${s}”`).join(', ')}. This question did not use up a follow-up.`;
   // A graph answer must be about every repo, team, package, version or account the question names, never about another.
@@ -302,19 +361,20 @@ export async function* ask({ run, question, marks = [], chatFn = pinned, signal 
   let provider: string | undefined;
   let text = '';
   let mode: LlmMode = 'live';
-  let unanswered = false;
+  let reason: Refusal | undefined; // set = not answered, and why
   if (off) {
     mode = 'template';
-    unanswered = true;
+    reason = 'off-topic';
     text = notAbout;
   } else if (accounts.length || carrier) {
-    // "If ljharb were hijacked?": each named account's blast radius. "Which one upgrade?": exposures by carrier.
+    // "If ljharb were hijacked?": each named account's blast radius ("and through which packages?": its packages there too).
+    // "Which one upgrade?": exposures by carrier, then a second clause's own answer.
     const built = [];
     const asked = names.filter((x) => report.exposures.some((e) => e.repo === x));
-    for (const m of accounts) built.push(blastFacts(report, yield* step('maintainer_blast_radius', { maintainer: m }), asked));
+    for (const m of accounts) built.push(blastFacts(report, yield* step('maintainer_blast_radius', { maintainer: m }), asked, PACKAGES.test(question)));
     if (carrier) built.push(carrierFacts(report, filtered = yield* step('filter_exposures', { incident: run.scenario, at: run.at, ...pre, carriers: true })));
     mode = 'template';
-    text = built.map((b) => b.text).join('\n');
+    text = [...built.map((b) => b.text), facts ?? ''].filter(Boolean).join('\n');
     numbers.push(...built.flatMap((b) => b.numbers));
   } else if (list || facts) {
     // The graph answers: the proof is the tool calls (the repo's path and fix, or the filter), the words are the report's.
@@ -328,12 +388,12 @@ export async function* ask({ run, question, marks = [], chatFn = pinned, signal 
     text = [list && filtered ? completeList(filtered) : '', through.text, facts ?? ''].filter(Boolean).join('\n');
   } else if ((run.used ?? 0) >= MAX_ANSWERS) {
     mode = 'template';
-    unanswered = true;
+    reason = 'cap';
     text = `This triage has used its ${MAX_ANSWERS} model-written answers, so this question was not sent to a model. ${graphCan} Run the triage again for more model answers.`;
   } else {
     run.used = (run.used ?? 0) + 1; // reserved before the call, so Asks in flight together cannot pass the cap
     text = yield* modelAnswer();
-    if (!text || unanswered) run.used -= 1; // only a model's answer uses up a follow-up
+    if (!text || reason) run.used -= 1; // only a model's answer uses up a follow-up
   }
 
   async function* modelAnswer(): AsyncGenerator<TriageEvent, string> {
@@ -391,7 +451,7 @@ export async function* ask({ run, question, marks = [], chatFn = pinned, signal 
   }
   if (!text) {
     mode = 'template';
-    unanswered = true; // no model wrote an answer: what follows is the graph's raw results at most
+    reason = 'no-model'; // no model wrote an answer: what follows is the graph's raw results at most
     text = results.length
       ? `No language model answered, so here is what the graph returned: ${results.map((r) => r.summary).join('; ')}. ${graphCan}`
       : `No language model is available right now, and this question has no answer built from the graph. ${graphCan}`;
@@ -406,18 +466,19 @@ export async function* ask({ run, question, marks = [], chatFn = pinned, signal 
   return text;
   }
   if (!text) return; // the client left mid-answer
-  if (mode === 'template' && !unanswered && !covers(text)) { // e.g. a carrier answer that never names the package asked about
-    unanswered = true;
+  if (mode === 'template' && !reason && !covers(text)) { // e.g. a carrier answer that never names the package asked about
+    reason = 'off-topic';
     text = notAbout;
   }
   const ev = evidenceSet(report);
   numbers.forEach((n) => ev.numbers.add(n));
+  if (via) ev.entities.add(via); // find_target found it in the graph, even where it carries nothing ("no exposed repo gets ... through it")
   for (const r of results) {
     r.evidence.forEach((e) => ev.entities.add(e));
     ev.numbers.add(r.rows.length);
     if (r.tool === 'filter_exposures') ev.numbers.add(new Set(r.rows.map((x) => x.team ?? '')).size);
   }
-  yield { type: 'narration', mode, provider: mode === 'live' ? (provider ?? null) : null, text, at: run.at, used: run.used ?? 0, ...(unanswered ? { unanswered: true, suggestions: offer } : {}) };
+  yield { type: 'narration', mode, provider: mode === 'live' ? (provider ?? null) : null, text, at: run.at, used: run.used ?? 0, ...(reason ? { unanswered: true, reason, suggestions: offer } : {}) };
   yield guardEvent(text, ev);
   yield { type: 'done', ms: Math.round(performance.now() - t0) };
 }

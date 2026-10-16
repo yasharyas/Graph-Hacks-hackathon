@@ -5,7 +5,7 @@
 import { fixFor, type Doing, type Failure } from './errors.ts';
 
 /** Server messages for failures that a retry repeats exactly (the server's own wording, see server/ingest and server/index.ts). */
-const PERMANENT = /not a public repo|not found|does not exist|no package-lock|lockfileversion|not supported|unsupported|uses (?:yarn|pnpm)|has expired|not a repo address|only github|must be|invalid|names no known|is empty|not json|too large|too many entries/i;
+const PERMANENT = /not a public repo|not found|does not exist|no package-lock|lockfileversion|not supported|unsupported|uses (?:yarn|pnpm)|has expired|not a repo address|only github|must be|invalid|names (?:no known|neither loaded)|is empty|not json|too large|too many entries/i;
 /** The message already says what to do ("... has expired. Paste the repo again."): no second instruction under it. */
 const SAYS_WHAT = /[.:]\s+(?:Run|Use|Paste|Drop|Add|Check|Pick|Upgrade|Remove|Name|Describe|Commit|Generate)\b/;
 

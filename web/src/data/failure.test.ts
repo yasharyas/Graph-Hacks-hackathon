@@ -14,6 +14,11 @@ test('a streamed error (no status) is judged by its message', () => {
   const gone = { message: 'nope/nope is not a public repo.', requestId: 'r2' };
   assert.equal(nextStep(gone, 'analyze'), 'Check the owner/name spelling, or try a sample repo.');
   assert.equal(requestIdFor(gone), undefined);
+  // an alert naming neither incident comes as a stream event (no red 400 in the console): same next step, no request id
+  const alert = { message: 'The alert names neither loaded incident: the qix compromise on 2025-09-08 (try "qix compromised, 13:16 UTC") or axios on 2026-03-31 (try "axios compromised, 00:30 UTC"). For anything else, use Paste your repo.', requestId: 'r7' };
+  assert.equal(nextStep(alert, 'triage'), nextStep({ ...alert, status: 400 }, 'triage'));
+  assert.match(nextStep(alert, 'triage'), /^Name an incident, account or package in the alert/);
+  assert.equal(requestIdFor(alert), undefined);
   const cut = { message: 'The stream ended before the run finished', requestId: 'r3' };
   assert.equal(permanent(cut), false);
   assert.equal(requestIdFor(cut), 'r3');

@@ -2,7 +2,7 @@
 // TriageEvent into state, and exposes run / ask / abort. Components only read this state.
 import { useCallback, useEffect, useReducer, useRef } from 'react';
 import { ApiError, streamAsk, streamTriage, type TriageRequest } from './api.ts';
-import type { IncidentMeta, LlmMode, Report, ToolName, ToolResult, TriageEvent } from './types.ts';
+import type { IncidentMeta, LlmMode, Refusal, Report, ToolName, ToolResult, TriageEvent } from './types.ts';
 
 export interface TriageError {
   message: string;
@@ -36,6 +36,8 @@ export interface Narration {
   draft?: boolean;
   /** An Ask that neither the graph nor a model could answer (no model available, or the run's model answers are used). */
   unanswered?: boolean;
+  /** Why it was not answered, as the server says (the label above the answer follows it). */
+  reason?: Refusal;
   /** Ask: model-written answers the run has used, this one included (graph answers and refusals are free). */
   used?: number;
   /** Ask, unanswered: questions the graph answers, to offer as chips. */
@@ -146,7 +148,7 @@ function fold(s: TriageState, e: TriageEvent): TriageState {
     case 'report':
       return { ...s, report: e.report };
     case 'narration': {
-      const narration = { mode: e.mode, provider: e.provider, text: e.text, note: e.note ?? null, at: e.at, draft: e.draft === true, unanswered: e.unanswered === true, used: e.used, suggestions: e.suggestions };
+      const narration = { mode: e.mode, provider: e.provider, text: e.text, note: e.note ?? null, at: e.at, draft: e.draft === true, unanswered: e.unanswered === true, reason: e.reason, used: e.used, suggestions: e.suggestions };
       // A draft shows the verdict at once; its mode is the placeholder 'template', so the run's mode waits for the final one.
       return asking(s) ? { ...s, followUps: patchLast(s, { narration }) } : { ...s, narration, mode: e.draft ? s.mode : e.mode };
     }

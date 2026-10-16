@@ -101,6 +101,10 @@ test('each Ask answer says how it was produced, with the provider when there is 
   assert.equal(answerLabel({ mode: 'live', provider: null }), 'LLM answer: the model wrote the words');
   assert.equal(answerLabel({ mode: 'template', provider: null, unanswered: true }), 'Not answered: no language model is available');
   assert.equal(answerLabel({ mode: 'template', provider: null, unanswered: true, used: 4 }), 'Not answered: this triage’s 4 model answers are used');
+  // the server's reason wins: a graph-router refusal never blames the model (the header may read "LLM live")
+  assert.equal(answerLabel({ mode: 'template', provider: null, unanswered: true, reason: 'off-topic', used: 4 }), 'Not answered from the graph: the graph’s answers here are about something other than what this question names');
+  assert.equal(answerLabel({ mode: 'template', provider: null, unanswered: true, reason: 'no-model', used: 4 }), 'Not answered: no language model is available');
+  assert.equal(answerLabel({ mode: 'template', provider: null, unanswered: true, reason: 'cap', used: 4 }), 'Not answered: this triage’s 4 model answers are used');
   assert.equal(answerLabel({ mode: 'live', provider: 'groq' }), 'LLM answer: the model wrote the words · groq');
 });
 

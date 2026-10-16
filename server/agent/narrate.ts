@@ -448,20 +448,25 @@ export function viaFacts(res: { rows: Record<string, unknown>[]; params: Record<
 }
 
 // "If ljharb were hijacked, how many repos?": maintainer_blast_radius rows, the repos whose lockfiles hold the account's
-// packages, every one named; `asked`: repos the question names, said plainly when out of reach.
-export function blastFacts(r: Report, res: { rows: Record<string, unknown>[]; params: Record<string, unknown> }, asked: string[] = []): Facts {
-  const rows = res.rows as { repo: string; packages: number; dev: boolean }[];
+// packages, every one named; `asked`: repos the question names, said plainly when out of reach; `packages` ("and through
+// which packages?"): which of the account's packages those lockfiles hold, as the query names them (up to 6 per repo).
+export function blastFacts(r: Report, res: { rows: Record<string, unknown>[]; params: Record<string, unknown> }, asked: string[] = [], packages = false): Facts {
+  const rows = res.rows as { repo: string; packages: number; dev: boolean; sample?: string[] }[];
   const m = String(res.params.maintainer);
   const total = r.scope?.repos ?? Object.values(r.counts).reduce((a, b) => a + b, 0);
   const out = asked.filter((x) => !rows.some((y) => y.repo === x));
   const none = out.length ? ` ${and(out.map(tk))} ${out.length === 1 ? 'holds' : 'hold'} none of its packages.` : '';
   if (!rows.length) return { text: `No lockfile here holds a package from ${tk(m)}, so a hijack of that account would reach none of the ${plural(total, 'repo')}.${none}`, numbers: [total] };
   const dev = rows.filter((x) => x.dev).length;
+  const last = rows.at(-1)!; // most packages first
+  const names = [...new Set(rows.flatMap((x) => x.sample ?? []))].sort();
+  const which = !packages || !names.length ? ''
+    : `${rows.length > 1 ? ` The fewest: ${tk(last.repo)}, ${plural(last.packages, 'package')}.` : ''} Its packages in those lockfiles include ${names.slice(0, 12).map(tk).join(', ')}${names.length > 12 ? ` and ${names.length - 12} more` : ''} (the graph names up to 6 per repo).`;
   return {
     text: `If ${tk(m)} were hijacked, ${rows.length} of the ${plural(total, 'repo')} would be in reach: their lockfiles hold its packages. ${rows.map((x) => `${tk(x.repo)}${x.dev ? ' (dev)' : ''}`).join(', ')}.${none}`
-      + ` The most: ${tk(rows[0]!.repo)}, ${plural(rows[0]!.packages, 'package')}.${dev ? ` For ${dev} of them only through devDependencies.` : ''}`
+      + ` The most: ${tk(rows[0]!.repo)}, ${plural(rows[0]!.packages, 'package')}.${which}${dev ? ` For ${dev} of them only through devDependencies.` : ''}`
       + ' A malicious release would reach them the way this incident did: on a fresh resolve, wherever a declared range admits it. Installs from a committed lockfile (npm ci) stay safe until it is regenerated.',
-    numbers: [rows.length, total, dev, rows[0]!.packages],
+    numbers: [rows.length, total, dev, rows[0]!.packages, ...(which ? [last.packages, names.length - 12] : [])],
   };
 }
 

@@ -4,6 +4,8 @@
 //
 // Also here (pure, so node --test covers them): markdown stripping (the UI never shows raw markdown), the coverage
 // line the server appends to Ask answers, and the claim -> tool call lookup behind every clickable claim.
+import type { Refusal } from './types.ts';
+
 export interface GuardClaims {
   claims: { text: string; ok: boolean }[];
   flagged: string[];
@@ -153,9 +155,13 @@ export function spokenAnswer(text: string, max = 280): string {
 
 /** Model-written Ask answers a triage allows (server/agent/ask.ts MAX_ANSWERS); graph answers and refusals are free. */
 export const MAX_ANSWERS = 4;
-/** Above each Ask answer: how it was produced, so a person can tell a graph lookup from a model's words. */
-export function answerLabel(n: { mode: 'live' | 'replay' | 'template'; provider: string | null; unanswered?: boolean; used?: number }): string {
-  if (n.unanswered) return (n.used ?? 0) >= MAX_ANSWERS ? `Not answered: this triage’s ${MAX_ANSWERS} model answers are used` : 'Not answered: no language model is available';
+/**
+ * Above each Ask answer: how it was produced, so a person can tell a graph lookup from a model's words. A refusal says the
+ * server's own reason: the graph router refusing is not "no language model" (the header may read "LLM live").
+ */
+export function answerLabel(n: { mode: 'live' | 'replay' | 'template'; provider: string | null; unanswered?: boolean; reason?: Refusal; used?: number }): string {
+  if (n.reason === 'off-topic') return 'Not answered from the graph: the graph’s answers here are about something other than what this question names';
+  if (n.unanswered) return n.reason === 'cap' || (!n.reason && (n.used ?? 0) >= MAX_ANSWERS) ? `Not answered: this triage’s ${MAX_ANSWERS} model answers are used` : 'Not answered: no language model is available';
   const by = n.provider ? ` · ${n.provider}` : '';
   return n.mode === 'template' ? `Answered from the graph${by}` : `${n.mode === 'replay' ? 'Recorded LLM answer' : 'LLM answer'}: the model wrote the words${by}`;
 }

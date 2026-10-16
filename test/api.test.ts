@@ -311,7 +311,7 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
       // no model at all and no graph answer: said plainly, and flagged so the UI does not call it "answered from the graph"
       hooks.chat = async () => { throw new Error('every provider failed'); };
       const none = of(await askQ('do I need to notify customers?'), 'narration');
-      assert.equal(none.unanswered, true);
+      assert.deepEqual([none.unanswered, none.reason], [true, 'no-model']);
       assert.match(none.text, /^No language model is available right now, and this question has no answer built from the graph\./);
       // never a dead end: questions the graph answers, offered as chips, and each one really is a graph answer
       assert.equal(none.suggestions?.length, 3);
@@ -374,13 +374,67 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
       // a named entity the graph answer would not use: not answered, never an answer about something else
       for (const q of ['List all repos that depend on @babel/core', 'When was debug@4.4.2 published?']) {
         const { n, tools } = await askQ(q);
-        assert.deepEqual([n.unanswered, n.suggestions?.length, tools.length], [true, 3, 0], q);
+        assert.deepEqual([n.unanswered, n.reason, n.suggestions?.length, tools.length], [true, 'off-topic', 3, 0], q);
         assert.match(n.text, /^Not answered from the graph: /, q);
       }
       // an account and a repo it does not reach: said plainly; the incident's own "next qix" is still PageRank
       assert.match((await askQ('If ljharb were hijacked, would acme/checkout-web be affected?')).n.text, /`acme\/checkout-web` holds none of its packages\./);
       assert.match((await askQ('which maintainer is the next qix and why?')).n.text, /^The accounts whose compromise would reach the most here, by PageRank/);
       assert.equal(asked, 0);
+    } finally {
+      delete hooks.chat;
+    }
+  });
+
+  test('ask: natural variants get ONE answer, picked by the question\'s head noun; "through which" is English, not the package `which`', async () => {
+    const t = await triageRun({ scenario: QIX, at: QAT });
+    const runId = of(t.evs, 'start').runId;
+    let asked = 0;
+    hooks.chat = async (): Promise<ChatRes> => (asked++, { text: 'Pin `debug@4.4.2` to a clean release.', toolCalls: [], provider: 'groq:fake', raw: {} });
+    const askQ = async (question: string) => {
+      const evs = await sse<TriageEvent>(await post('/api/ask', { runId, question }, { cookie: t.sid! }));
+      assert.deepEqual(of(evs, 'guard').flagged, [], question);
+      return { n: of(evs, 'narration'), tools: evs.filter((e) => e.type === 'tool_result').map((e) => (e as Extract<TriageEvent, { type: 'tool_result' }>).result) };
+    };
+    try {
+      // which library / package / dependency / module: the carrier answer (the judge saw the Do plan and the version list)
+      for (const q of ['Which library should I replace first to reduce the exposure?', 'Which package carries the bad version into the most repos?',
+        'Which dependency should we upgrade to cut the most exposure?', 'What package brings the malicious code into the most of our repos?', 'Which module would you swap out first?']) {
+        const { n, tools } = await askQ(q);
+        assert.deepEqual(tools.map((r) => [r.tool, r.params.carriers]), [['filter_exposures', true]], q);
+        assert.match(n.text, /^One change covers the most: the version-qualified override on `debug@4\.4\.2`.*\nCarriers, the dependencies whose declared range admits a malicious version, most repos first: `@eslint\/eslintrc` 19 repos/s, q);
+        assert.doesNotMatch(n.text, /^(Do|Notify):|Exposed repos by malicious version/m, q);
+      }
+      // which maintainer / account / people: the PageRank answer alone, with each account's reach (not the per-team list first)
+      for (const q of ['Which maintainer account reaches the most repos if hijacked?', 'Which account would hurt us most if it got hijacked?', 'What maintainer should we watch next?', 'Which people publish the packages most of our repos depend on?']) {
+        const { n, tools } = await askQ(q);
+        assert.equal(tools.length, 0, q);
+        assert.match(n.text, /^The accounts whose compromise would reach the most here, by PageRank over package dependencies: `[^`]+`, \d+ packages?, reaching \d+ of 21 repos; /, q);
+        assert.ok(!n.text.includes('\n'), q);
+      }
+      // which team: the per-team list alone (no Notify roster for "owns"); a second clause gets its own answer
+      for (const q of ['Which team owns the most exposed repos?', 'What team has the biggest cleanup?']) assert.match((await askQ(q)).n.text, /^Open exposures by team, most first: `[^`]+` \d+ repos[^\n]*\.$/, q);
+      assert.match((await askQ('Which team has the most work, and when did this start?')).n.text, /^Open exposures by team, most first: [^\n]*\nExposure began at 13:12 UTC/);
+      assert.match((await askQ('Which teams need to be told?')).n.text, /^Notify: `Payments` \(`#team-payments`\): `acme\/checkout-web` \(LOCKED\); [^\n]*\.$/);
+      // a compromised package or account: the versions answer, the incident's own account; a safe version is no graph block
+      for (const q of ['Which compromised package reaches the most repos?', 'Which packages were compromised?', 'Which package versions are malicious?']) assert.match((await askQ(q)).n.text, /^Exposed repos by malicious version, most first: `debug@4\.4\.2` 21 repos/, q);
+      assert.match((await askQ('Which account was compromised?')).n.text, /^21 of 21 repos are exposed to the `qix` account compromise /);
+      assert.match((await askQ('Which repo should I fix first?')).n.text, /^Fix first, by urgency: 1\) `acme\/checkout-web`: its lockfile pins/);
+      assert.equal(asked, 0);
+      const pin = await askQ('What version should we pin debug to?');
+      assert.deepEqual([asked, pin.n.mode], [1, 'live']);
+      // "through which packages": the account's reach and the packages its lockfiles hold, never a refusal over `which`
+      const sr = await askQ('Which repos does the sindresorhus account reach, and through which packages?');
+      assert.deepEqual(sr.tools.map((r) => [r.tool, r.params.maintainer]), [['maintainer_blast_radius', 'sindresorhus']]);
+      assert.equal(sr.n.unanswered, undefined);
+      assert.match(sr.n.text, /^If `sindresorhus` were hijacked, 21 of the 21 repos would be in reach: .* The fewest: `acme\/checkout-web`, 2 packages\. Its packages in those lockfiles include `ansi-regex`, `ansi-styles`, `chalk`/s);
+      assert.match((await askQ('Which repos would ljharb reach, and through which packages?')).n.text, /^If `ljharb` were hijacked, 20 of the 21 repos .* Its packages in those lockfiles include `/s);
+      assert.match((await askQ('Is mocha exposed through npm ci?')).n.text, /^`mochajs\/mocha` \(owned by `QA`/); // npm: tooling, not a carrier
+      // a package that carries nothing here: said plainly, no "0 repos across 0 teams. ."
+      const sc = await askQ('how many repos pull chalk through supports-color?');
+      assert.deepEqual(sc.tools.map((r) => [r.tool, r.params.via, r.rows.length]), [['filter_exposures', 'supports-color', 0]]);
+      assert.equal(sc.n.text, 'No exposed repo gets `chalk@5.6.1` through `supports-color` at 13:30 UTC: in no lockfile here does `supports-color` declare a range that admits it.');
+      assert.equal(asked, 1);
     } finally {
       delete hooks.chat;
     }
@@ -399,7 +453,7 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
       up = true;
       for (let i = 1; i <= 4; i++) assert.equal((await askQ('will Dependabot PRs be a problem?')).used, i);
       const capped = await askQ('will Dependabot PRs be a problem?');
-      assert.deepEqual([capped.unanswered, capped.used, capped.suggestions?.length], [true, 4, 3]);
+      assert.deepEqual([capped.unanswered, capped.reason, capped.used, capped.suggestions?.length], [true, 'cap', 4, 3]);
       assert.match(capped.text, /^This triage has used its 4 model-written answers, so this question was not sent to a model\./);
       assert.equal((await askQ('what should I do first?')).mode, 'template'); // the graph still answers after the cap
       // a repo marked remediated in this browser (not yet written to the graph) is already done in the answer
@@ -557,7 +611,8 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
       ['/api/triage', { scenario: QIX, at: String(QAT) }, 400],
       ['/api/triage', { scenario: QIX, extra: 1 }, 400],
       ['/api/triage', { alert: 'x'.repeat(501) }, 400],
-      ['/api/triage', { alert: 'something nobody has heard of' }, 400],
+      ['/api/triage', { alert: '   ' }, 400],
+      ['/api/triage', { alert: 'qix', scenario: QIX }, 400],
       ['/api/triage', { guest: `${prefix}_acme_qix`, scenario: QIX }, 404], // only guest graphs this session built
       ['/api/triage', [1], 400],
       ['/api/ask', { runId: 'nope', question: 'q' }, 400],
@@ -569,10 +624,15 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
       ['/api/analyze', { url: 'https://github.com/a/b' }, 400],
     ];
     for (const [path, body, status] of cases) assert.equal((await post(path, body)).status, status, `${path} ${JSON.stringify(body).slice(0, 80)}`);
-    // an alert naming neither incident: the two loaded ones and Paste, in fixed words that never echo the alert
-    const { error } = await (await post('/api/triage', { alert: 'lodash hijacked <b>zzq</b>' })).json();
-    assert.match(error, /qix compromise on 2025-09-08 .* axios on 2026-03-31 .* Paste your repo/);
-    assert.doesNotMatch(error, /lodash|zzq|<b>/);
+    // a well-formed alert naming neither incident is handled, not malformed: a 200 stream whose one event is the error the
+    // client shows (no red 400 in the browser console), naming the two loaded incidents and Paste, in fixed words that never
+    // echo the alert (S12)
+    const evs = await sse<TriageEvent>(await post('/api/triage', { alert: 'lodash hijacked <b>zzq</b>' }));
+    assert.deepEqual(evs.map((e) => e.type), ['error']);
+    const { message, requestId } = evs[0] as Extract<TriageEvent, { type: 'error' }>;
+    assert.match(message, /qix compromise on 2025-09-08 .* axios on 2026-03-31 .* Paste your repo/);
+    assert.doesNotMatch(message, /lodash|zzq|<b>/);
+    assert.match(requestId, /^[0-9a-f-]{36}$/);
     const plain = await app.request('/api/triage', { method: 'POST', headers: { 'content-type': 'text/plain', 'x-forwarded-for': fresh() }, body: JSON.stringify({ scenario: QIX }) });
     assert.equal(plain.status, 415);
     for (const q of [`scenario=${QIX}&at=abc`, `scenario=${QIX}&at=-1`, 'scenario=nope&at=1', `scenario=${QIX}`])

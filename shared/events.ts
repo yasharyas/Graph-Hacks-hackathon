@@ -103,6 +103,10 @@ export interface LockSource { kind: 'snapshot' | 'head' | 'pasted'; sha?: string
 
 export interface TimelinePoint { at: number; counts: Record<Tier, number>; scanner: number }
 
+// Why an Ask was not answered: no model wrote one, the run's 4 model answers are used, or the graph's answers are about
+// something other than what the question names.
+export type Refusal = 'no-model' | 'cap' | 'off-topic';
+
 export type TriageEvent =
   | { type: 'start'; runId: string; graph: string; incident: IncidentMeta; at: number }
   | { type: 'tool_start'; id: string; tool: ToolName; params: Record<string, unknown> }
@@ -113,10 +117,10 @@ export type TriageEvent =
   // words); `mode`/`provider` describe the pick.
   // `at`: the scenario clock the narration describes (the UI dims it when the scrubber moves away).
   // `draft`: the verdict is final, but an analyst pick may still follow in the next narration event (no guard yet).
-  // Ask only: `unanswered`: no model and no graph answer (no model is available, or `used` reached the 4 model answers a
-  // run allows); `used`: model-written answers this run has used, this one included (graph answers and refusals are free);
-  // `suggestions`: with `unanswered`, 2-3 questions the graph answers, for the UI to offer as chips.
-  | { type: 'narration'; mode: LlmMode; provider: string | null; text: string; note?: string | null; at?: number; draft?: boolean; unanswered?: boolean; used?: number; suggestions?: string[] }
+  // Ask only: `unanswered`: no model and no graph answer; `reason` says why (Refusal); `used`: model-written answers this
+  // run has used, this one included (graph answers and refusals are free); `suggestions`: with `unanswered`, 2-3 questions
+  // the graph answers, for the UI to offer as chips.
+  | { type: 'narration'; mode: LlmMode; provider: string | null; text: string; note?: string | null; at?: number; draft?: boolean; unanswered?: boolean; reason?: Refusal; used?: number; suggestions?: string[] }
   // `claims`: every claim the server checked; the UI marks a span verified only if it appears here with ok=true.
   | { type: 'guard'; verified: number; total: number; flagged: string[]; claims?: { text: string; ok: boolean }[] }
   | { type: 'error'; message: string; requestId: string }
