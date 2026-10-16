@@ -98,3 +98,26 @@ Opus reviewer, read-only, against rules S1–S13: **fail** (3 high, 3 medium) �
   - With no model, the answer is labelled "Not answered".
 - **Alert clocks:** "1:16 PM", "13:16UTC" and ISO instants are read, and a time 30 days or more from the incident is ignored.
 - **S7, the range sanitizer (security round 5 H1):** the round-4 range filter ran a backtracking regex on the uncapped range: 160 KB took 15 s, and 5 MB would take hours. Every lockfile string is now cut to a few times its cap before any regex or semver call, the regexes are linear, and a test feeds 2 MB hostile ranges. A version that is not semver is dropped, not squashed.
+
+## QA round 6 — 2026-10-16
+
+- **One alert-clock parser:** `shared/clock.ts` reads IST, EST/EDT, CST, PST/PDT, CET/CEST, BST, JST, GMT, UTC, `Z` and `±hh:mm`, for the server and the web alike. The banner says how it read the time ("Read “6:46 PM IST” as 13:16 UTC").
+- **As of the clock, everywhere:** "when" answers label later facts as hindsight. Team notices carry the clock and the window ("as of 13:16 UTC on 2025-09-08"). The Fix tab leads with the scenario clock, and "Today, in hindsight" is a separate paragraph.
+- **Step order:** for a LOCKED repo: rotate, then fix the lockfile, then rebuild. This holds in the verdict, the steps, the Notice and the copied steps.
+- **Ask:**
+  - Only model-written answers count toward the cap of four. Graph answers and refusals are free.
+  - A refusal offers three questions the graph answers, as chips.
+  - New graph routes: "pin the bad version" (the LOCKED count), "declare it directly" (the direct repos), "most urgent for <team>" (that team's first step).
+  - Up to five named repos are answered.
+  - Compare questions lead with a verdict line.
+  - The guard flags camelCase and snake_case field names in model prose.
+- **Today's package.json, downgrades:** an override, or an exact pin, below what today's declared range resolves would move the package backwards. The note says so, and the PR body and the copied steps carry it. The Fix tab parses the server's exact sentence, and a test feeds it `todayNotes` output, because the first parser matched an invented wording.
+- **S4, today's ranges:** ranges read from today's `package.json` get the lockfile's semver-token filter, so no Markdown or HTML reaches the Fix tab or the export. A broken or huge `package.json` skips the today check, not the analysis. The export also escapes Markdown when a line has an odd number of backticks, which would otherwise flip what counts as code.
+- **UI:**
+  - Why and `[E1]` stay visible at 1280x720.
+  - The Notify roster is one row per team, and the copied notice ends with the run link.
+  - Copy toasts replace each other.
+  - History is in UTC.
+  - A share card (`og-card.png`).
+  - On a phone, the table pane is `overflow-x: clip` so the filter row sticks. This is CSS, not an effect.
+- **Guest lookups need `GH_TOKEN` in production:** anonymous GitHub is 60 requests an hour per IP, and a hosting provider shares the IP.
