@@ -60,7 +60,7 @@ export function segments(text: string, guard: GuardClaims | null, seen: Set<stri
 
 // Tolerates "**Verdict:**", "## Do:" and a pasted repo's "Verdict (its package-lock.json at commit 5f8e8a8 ...):", whose
 // parenthetical is where the verdict came from: it is kept apart (`source`) so the label is still "Verdict".
-const LABEL = /^[*_#\s]*(Verdict|Why|Notify|Do)\s*(?:\(([^()]*)\))?\s*[*_]*\s*:\s*[*_]*\s*/;
+const LABEL = /^[*_#\s]*(Verdict|Why|Notify|Do)\s*(?:\(([^()]*)\)\s*)?(?:[*_]+\s*)?:\s*[*_]*\s*/; // no two adjacent \s* runs: linear
 /** One narration as lines: "Verdict: ..." / "Why: ..." / "Notify: ..." / "Do: ..." split into label and body, anything else is a plain line. */
 export function lines(text: string, guard: GuardClaims | null): { label: string | null; source: string | null; segs: Segment[] }[] {
   const seen = new Set<string>(); // chips are first mentions across the whole narration, not per line

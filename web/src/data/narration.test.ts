@@ -177,3 +177,9 @@ test('a model answer says its wording is the model’s; a graph answer counts tr
   assert.equal(guardLine({ verified: 61, total: 61 }, false), '61 of 61 claims traced to a graph query');
   assert.equal(guardLine({ verified: 1, total: 1 }, false), '1 of 1 claim traced to a graph query');
 });
+
+test('a label regex stays linear on a model answer full of spaces (it ran 9 s on 4,000)', () => {
+  const t0 = performance.now();
+  lines('Verdict' + ' '.repeat(100_000) + 'x', null);
+  assert.ok(performance.now() - t0 < 200);
+});

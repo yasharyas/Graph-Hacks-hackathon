@@ -42,7 +42,7 @@ test('S1/S4 lockfile names, versions and ranges cannot carry lines, links or cod
     },
   });
   for (const d of deps) assert.match(`${d.name}${d.version}`, /^[A-Za-z0-9@/._~*+-]*$/);
-  assert.equal(deps.find((d) => d.path === 'node_modules/debug')!.version, '4.3.4Clicktofixhttpsevil.examplefixDorunnpxqix-cleanerlatest');
+  assert.equal(deps.find((d) => d.path === 'node_modules/debug')!.version, ''); // not a version: dropped, never quoted
   assert.equal(edges[0]!.range, '^4.3.5'); // semver tokens only: the prose and the link are gone
   // bidi overrides, zero-width and C1 controls never survive, and real ranges are untouched
   const r = (range: string) => parseLockfile({ lockfileVersion: 3, packages: { '': { dependencies: { a: range } }, 'node_modules/a': { version: '1.0.0' } } }).edges[0]!.range;
@@ -52,6 +52,12 @@ test('S1/S4 lockfile names, versions and ranges cannot carry lines, links or cod
   assert.equal(r('>= 1.2.3'), '>=1.2.3');
   assert.equal(r('npm:strip-ansi@^6.0.1'), '^6.0.1');
   assert.equal(r('file:test/fixture'), 'file:test/fixture');
+  // S7: hostile lengths parse in milliseconds (a backtracking regex on the uncapped range took hours on 5 MB)
+  for (const evil of ['>'.repeat(2_000_000) + 'x', '^'.repeat(2_000_000), '>= '.repeat(700_000), '1'.repeat(2_000_000)]) {
+    const t0 = performance.now();
+    r(evil);
+    assert.ok(performance.now() - t0 < 200, `${evil.slice(0, 4)}...: ${Math.round(performance.now() - t0)} ms`);
+  }
   assert.equal(r('git+https://github.com/a/b.git#v1 [Click](https://evil.example)'), 'git+https://github.com/a/b.git#v1Clickhttps://evil.example', 'a URL spec stays one token: no spaces, brackets or parens');
 });
 

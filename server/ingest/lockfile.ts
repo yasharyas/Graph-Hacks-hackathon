@@ -33,15 +33,17 @@ export const LIMITS = { entries: 6000, segments: 40, depsPerEntry: 1000, edges: 
 
 // A pasted repo's lockfile is attacker text, and names, versions and ranges are quoted in verdicts, fix steps and exports
 // (S1/S4): names keep npm's name characters, versions semver's, and a range keeps only its semver tokens (loose semver
-// would accept "^5.6.0 <any prose>"), with no control, format or bidi characters.
-const safeName = (s: string) => s.replace(/[^A-Za-z0-9@/._~*-]/g, '').slice(0, 214);
-const safeVersion = (s: string) => s.replace(/[^0-9A-Za-z.+-]/g, '').slice(0, 64);
+// would accept "^5.6.0 <any prose>"), with no control, format or bidi characters. Every input is cut to a few times its
+// cap BEFORE any regex or semver call (S7: an uncapped 5 MB range made a backtracking regex take hours), and every regex
+// here is linear.
+const safeName = (s: string) => s.slice(0, 214).replace(/[^A-Za-z0-9@/._~*-]/g, '');
+const safeVersion = (s: string) => semver.valid(s.slice(0, 64), { loose: true }) ?? ''; // not a version: nothing to match or quote
 const PROTOCOL = /^(file|link|workspace|portal|git(\+[a-z]+)?|https?|github|gitlab|bitbucket):/i; // not a semver range at all
 const safeRange = (s: string) => {
-  const spec = s.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, ' ').replace(/^\s*npm:@?[^@\s]+@/, '').trim();
+  const spec = s.slice(0, 4 * LIMITS.range).replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, ' ').replace(/^\s*npm:@?[^@\s]+@/, '').trim();
   if (PROTOCOL.test(spec)) return spec.replace(/[^A-Za-z0-9._~:/?#@!$&+,;=%*-]/g, '').slice(0, LIMITS.range); // a path or URL: one token
-  return spec.replace(/([<>=~^]+)\s+/g, '$1').split(/\s+/)
-    .filter((t) => t === '||' || t === '-' || t === 'latest' || semver.validRange(t, { loose: true }) !== null)
+  return spec.replace(/(?<=[<>=~^])\s+/g, '').split(/\s+/)
+    .filter((t) => t === '||' || t === '-' || t === 'latest' || (t.length <= 64 && semver.validRange(t, { loose: true }) !== null))
     .join(' ').slice(0, LIMITS.range);
 };
 
