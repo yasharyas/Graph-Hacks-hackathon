@@ -20,10 +20,10 @@ import { repoLabel } from '../data/repoLabel.ts';
 import type { Report } from '../data/types.ts';
 import { useStats } from '../data/useStats.ts';
 import type { ToolCardState } from '../data/useTriage.ts';
+import { ACCOUNT_NOTE, influenceShares } from './agent.ts';
 import { Button } from './Button.tsx';
 import { copyText } from './copy.ts';
 import { EmptyState } from './EmptyState.tsx';
-import { influenceShares } from './ExecSummary.tsx';
 import { Copy } from './icons/Glyphs.tsx';
 import { Wrapped } from './ToolCard.tsx';
 
@@ -38,8 +38,6 @@ export interface InsightTabsProps {
 }
 
 const count = (n: number) => n.toLocaleString('en-US');
-/** npm accounts that are not a person: a bare name would read as one (the Ask answer uses the same gloss). */
-const ACCOUNT_NOTE: Record<string, string> = { types: 'The account that publishes DefinitelyTyped’s @types packages.' };
 
 export function InsightTabs({ report, cards, graph, totalMs, remediated }: InsightTabsProps) {
   const [tab, setTab] = useState(0);

@@ -321,7 +321,7 @@ Builders re-run `/impeccable critique` on the rendered war room at the Phase 2 g
 6. **Share image.** The exec summary card doubles as the 1200×630 share card; no html-to-canvas dependency is installed. Decide client-side render vs a W13 pre-render.
 7. **Cabinet Grotesk has no `tnum`.** Counters are Satoshi; if you want the Cabinet look on the hero counter, it must only render the final value.
 
-## 12. Revisions after persona QA (rounds 2 to 6)
+## 12. Revisions after persona QA (rounds 2 to 7)
 
 These supersede the sections above where they differ.
 
@@ -356,3 +356,16 @@ These supersede the sections above where they differ.
   - Strips keep their height from the first paint: the shared-repo note reserves its longest outcome, and the shared-result strip stays ("re-checked") instead of leaving when the analysis ends.
   - A phone held sideways: Play is icon-only and the headline shares its row, so the track and the caption sit above the tab bar. The tier key sits beside its "?" when it fits neither above nor below it.
   - Share card: `web/public/og-card.png` (1200x630) is a screenshot of the landing at the end of its autoplay; re-render it when the landing changes.
+- **Round 7 (win audit A2: the agent on the first screen).** This supersedes the laptop-density target above (the first tool card's top at 560 px or less at 1366x768).
+  - Under Why, with no click, the narrative shows what the agent did. Each line is read from the run, and none is invented:
+    - "Analyst pick · LLM live", or "replayed" (the run's real mode), then the pick's own sentence. With no pick (template mode) nothing shows.
+    - "Notify 7 teams", with the first three team names. "Roster" opens the disclosure scrolled to the roster and moves focus there.
+    - "Next qix? sindresorhus: 43% of top-3 PageRank, reaches 21 of 21 repos". It is the Concentration tab's first row, printed by the same function (`components/agent.ts`), and it opens that tab. The share is of the listed maintainers' combined PageRank, so the line says "top-3".
+  - A pasted repo shows only the pick: it has no team to notify, and its Concentration tab is collapsed.
+  - The Ask placeholder is "If ljharb were hijacked next, which repos would it reach?": the runner-up in Concentration that is a person, not the line's own. A pasted repo keeps "Which exposures are prod-only?".
+  - Room, by window height:
+    - At 800 px or less (1366x768) the headline drops its "In hindsight" sentence, as it already did at `tight`. The scrubber's marks still say when.
+    - At `tight` (1280x720, 1024x768) the Next line goes first. Pick and Notify stay.
+    - The disclosure label no longer names the pick. The first tool call now sits below the fold at 1366x768.
+  - The agent lines' place is held while the verdict is coming (`AgentRoom`, and the pick's placeholder), so the tool calls do not jump down when the verdict lands.
+  - Fix: the `tight` variant had lost its second media clause (1024x768 never matched), so ToolFeed's placeholder was 64 px too tall there. It is now two rules.

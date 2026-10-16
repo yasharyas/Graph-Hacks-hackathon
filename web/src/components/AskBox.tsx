@@ -5,6 +5,8 @@
  * `ask-question` (the feed's "Skip to Ask" link focuses it).
  * Props: disabled (no triage to ask about yet, or one is still running), asking (a follow-up is running),
  *        rounds (model-written answers used so far: useTriage().rounds, the server's own count), max (default 4),
+ *        example (a maintainer from the run's Concentration: the placeholder asks "If ljharb were hijacked next, which repos
+ *        would it reach?", which the graph answers; none, for a pasted repo: "Which exposures are prod-only?"),
  *        suggestions (after an unanswered question: questions the graph answers, shown as chips that ask them),
  *        error (last follow-up failure, with status and requestId), onAsk(question).
  * Answers arrive as a guarded narration + tool cards in the feed (markdown stripped, coverage line set apart). While
@@ -17,6 +19,7 @@ import { useEffect, useRef, useState } from 'react';
 import { plainError } from '../data/errors.ts';
 import { nextStep, requestIdFor } from '../data/failure.ts';
 import type { TriageError } from '../data/useTriage.ts';
+import { askPlaceholder } from './agent.ts';
 import { Button } from './Button.tsx';
 import { CircleAlert } from './icons/Glyphs.tsx';
 
@@ -25,6 +28,7 @@ export function AskBox({
   asking,
   rounds,
   max = 4,
+  example,
   suggestions = [],
   error,
   onAsk,
@@ -33,6 +37,7 @@ export function AskBox({
   asking: boolean;
   rounds: number;
   max?: number;
+  example?: string | null;
   suggestions?: string[];
   error: TriageError | null;
   onAsk: (question: string) => void;
@@ -82,7 +87,7 @@ export function AskBox({
           readOnly={asking}
           aria-busy={asking || undefined}
           value={q}
-          placeholder="Which exposures are prod-only?"
+          placeholder={askPlaceholder(example)}
           onChange={(e) => setQ(e.target.value)}
         />
         <Button type="submit" variant="secondary" loading={asking} disabled={!ok && !asking}>

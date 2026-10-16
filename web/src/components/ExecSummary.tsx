@@ -7,9 +7,9 @@
  * Past the removal (15:15 for qix) the count is past tense: "1 of 21 exposed until 15:15 UTC". The incident, scope and clock are the band above and the header chip (named here for screen
  * readers only); tier counts by name live in the band (one place, not three); the top maintainers are the
  * Concentration tab. Figures are Satoshi bold with tabular figures.
- * Also exports influenceShares(), shared with InsightTabs so both views print the same percentages.
+ * (influenceShares(), the percentages the Concentration tab and the "Next qix?" line share, lives in agent.ts.)
  */
-import type { Concentration, Report } from '../data/types.ts';
+import type { Report } from '../data/types.ts';
 import { signedMin, utcLabel } from '../data/format.ts';
 import { repoLabel } from '../data/repoLabel.ts';
 import { IconButton } from './Button.tsx';
@@ -20,16 +20,6 @@ const TIERS = [
   ['WOULD_PULL', 'bg-tier-would-pull'],
   ['MAINTAINER', 'bg-tier-maintainer'],
 ] as const;
-
-/** Each maintainer's share of the listed maintainers' combined influence ("43%"), plus a bar width scaled to the top value. */
-export function influenceShares(rows: Concentration[]) {
-  const total = rows.reduce((n, c) => n + c.influence, 0);
-  const top = Math.max(0, ...rows.map((c) => c.influence));
-  return rows.map((c) => {
-    const p = total > 0 ? (c.influence / total) * 100 : 0;
-    return { ...c, share: p > 0 && p < 1 ? '<1%' : `${Math.round(p)}%`, bar: top > 0 ? (c.influence / top) * 100 : 0 };
-  });
-}
 
 export function ExecSummary({ report, onShare, marked = 0 }: { report: Report; onShare: () => void; marked?: number }) {
   const exposed = report.counts.LOCKED + report.counts.WOULD_PULL;

@@ -9,9 +9,20 @@
 /* The war room on a laptop-height window (1024px wide or more, 900px tall or less): the triage narrative is set a step
    tighter so the first tool call stays on screen with the whole verdict above it. */
 @custom-variant fold (@media (min-width: 1024px) and (max-height: 900px));
+/* A window 800px tall or less (1366x768): the narrative drops the headline's hindsight sentence (NarrativePanel `low`), so the
+   space reserved for the agent lines while the verdict is coming is shorter too. */
+@custom-variant low (@media (min-width: 1024px) and (max-height: 800px));
 /* A 720px-tall laptop (1280x720), or the two-pane band up to 800px tall (1024x768, whose band takes two rows): the
-   narrative drops its Why sentence (NarrativePanel `tight`), so the reserved verdict space is shorter too. */
-@custom-variant tight (@media (min-width: 1024px) and (max-height: 720px), (min-width: 1024px) and (max-width: 1279px) and (max-height: 800px));
+   narrative also drops its "Next qix?" line (NarrativePanel `tight`), so the reserved space is shorter still. */
+@custom-variant tight {
+  /* two rules, not one comma list: Tailwind kept only the first clause of `@media (a), (b)` (1024x768 never matched) */
+  @media (min-width: 1024px) and (max-height: 720px) {
+    @slot;
+  }
+  @media (min-width: 1024px) and (max-width: 1279px) and (max-height: 800px) {
+    @slot;
+  }
+}
 
 /* Hover only where hovering exists (docs/design.md section 4): use `hov:bg-bg-3`, never plain `hover:`. */
 @custom-variant hov {

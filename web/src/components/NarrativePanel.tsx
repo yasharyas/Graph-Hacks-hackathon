@@ -1,8 +1,8 @@
 /* NarrativePanel: the narration as text + claim chips (docs/design.md section 5). Never innerHTML (S5).
  * The text is the deterministic Verdict / Why / Notify / Do the server builds from the report (always complete). An optional
  * `note` is the analyst pick: one observation the LLM chose; the server wrote its words from the report. Its own short
- * paragraph run in after the label "Analyst pick (LLM)" (what the model did is the label's title and screen-reader text),
- * never mixed into the facts; no pick, no block.
+ * paragraph run in after the label "Analyst pick · LLM live" (or "replayed": the run's real mode; what the model did is the
+ * label's title and screen-reader text), never mixed into the facts; no pick, no block.
  * The narration is untrusted, so a claim is "verified" ONLY if the server's guard listed that exact text with ok=true
  * (data/narration.ts decides; this file renders). No raw markdown ever reaches the screen (stripped there).
  *
@@ -11,10 +11,12 @@
  * checks and copy see the identical text). Its label row always says "Verdict" (a pasted repo's "Verdict (its lockfile at
  * commit ...):" is parsed so; that provenance is a small line under the label). The triage narrative (`fold`) keeps the tool
  * calls (the FalkorDB proof) near the top of the feed: Why shows whole path sentences only (data/narration.ts whyParts: one
- * on a laptop-height window, 1280x720 included, two on a tall one, all on a phone, where the feed is the page), and Notify,
- * Do, the rest of Why and (except on a tall desktop window) the analyst pick sit behind ONE disclosure that says what it
- * reveals ("Show 2 more evidence paths, the analyst pick, who to notify and the steps"). An Ask answer shows every line it has
- * (`fold` is off).
+ * on a laptop-height window, 1280x720 included, two on a tall one, all on a phone, where the feed is the page).
+ * Under Why sit the agent's acts, always on the first screen (docs/design.md round 7): the analyst pick, one "Notify 7 teams"
+ * line (names cut to three; "Roster" opens the fold scrolled to the roster) and, from AgentContext, one "Next qix?" line that
+ * opens the Concentration tab. Where room is short (`tight`: 1280x720, 1024x768) the Next line goes first; the pick and Notify stay.
+ * The rest of Why, the roster, Do and the claim map sit behind ONE disclosure that says what it reveals ("Show 2 more evidence
+ * paths, who to notify, the steps and the claim map"). An Ask answer shows every line it has (`fold` is off).
  * A roster line (Notify, or an enumerating answer grouped by team) is a list, one row per team: the team (it opens its proof),
  * its channel, its repos as text, and for the demo org's Notify a "Copy notice" at the end of the row (that team's message,
  * Report.notices, plus a link back to the run; the drawer copies it one repo at a time). A pasted repo has no team to notify
@@ -40,19 +42,24 @@
  * A trailing "6 of 14 ..." line (the server's coverage of an enumerating answer) is set apart, not buried in the text.
  * A run-in label is followed by a real space, so a screen reader says "Why acme/web", not "Whyacme/web".
  */
-import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type FocusEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { createContext, Fragment, useContext, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type FocusEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { plural, utcLabel } from '../data/format.ts';
 import { citeCount, claimMap, crowded, guardLine, lines, splitCoverage, teamStarts, verdictLines, whyParts, type ProofCard, type Segment } from '../data/narration.ts';
 import type { Notice } from '../data/types.ts';
 import type { Guard, Narration } from '../data/useTriage.ts';
+import { pickLabel, teamNames } from './agent.ts';
 import { Button } from './Button.tsx';
 import { CheckDrawIcon } from './icons/CheckDrawIcon.tsx';
-import { ChevronDown, Copy } from './icons/Glyphs.tsx';
+import { ArrowRight, ChevronDown, Copy } from './icons/Glyphs.tsx';
 import { copyText } from './copy.ts';
+import { reveal } from './scrollPane.ts';
 import { subject } from './ToolCard.tsx';
 
 /** A narration as the server may send it: the contract adds `note`, `at` and `draft`, which older servers omit. */
 export type NarrationView = Narration & { note?: string | null; at?: number; draft?: boolean };
+
+/** The "Next qix?" line (label, the rest, from agent.ts nextAccount) and where it leads; App provides it, null when there is none. */
+export const AgentContext = createContext<{ label: string; text: string; open: () => void } | null>(null);
 
 interface BlockProps {
   narration: NarrationView;
@@ -86,6 +93,9 @@ const chip = 'rounded-xs border px-1.5 py-0.5 font-mono text-xs';
 const HIT = 'relative pointer-coarse:after:absolute pointer-coarse:after:-inset-x-0.5 pointer-coarse:after:-inset-y-[11px]';
 const LABEL = 'label-caps text-xs';
 const PICK_EXPLAINED = 'The model chose this observation; the words come from the graph.';
+// The pick's place while it is coming (about its usual height at each width: 5 lines in the 320px feed, 4 in 360px), so it lands
+// without moving what is below it.
+const PICK_ROOM = 'min-h-28 sm:min-h-[3.75rem] lg:min-h-20 fold:min-h-[5.7rem] min-[1440px]:fold:min-h-[4.6rem]';
 const TRACE_TITLE = 'Verified against a graph query. Click to open the tool call that returned it.';
 const summary = 'inline-flex min-h-6 items-center gap-1.5 rounded-xs text-xs pointer-coarse:min-h-11 marker:hidden [&::-webkit-details-marker]:hidden hov:text-fg-0';
 const chevron = 'transition-transform duration-(--dur-base) ease-out [details[open]_&]:rotate-180';
@@ -331,27 +341,29 @@ function ClaimMap({ guard, cards, onTrace, id, modelWords }: { guard: Guard; car
 type Row = ReturnType<typeof lines>[number];
 
 // How much room the triage narrative has. From 1024px wide the feed is a 320 to 360px column beside the graph: on a window up
-// to 900px tall (a laptop) it shows the Verdict, one whole Why sentence and the disclosure, so the first tool call stays on
-// screen; on a taller one, two Why sentences and the analyst pick. On one 720px tall or less, or 800px in the two-pane band
-// where the band takes two rows (`tight`: 1280x720, 1024x768), still one Why sentence with its [E1]: the verdict's headline
-// drops its "In hindsight: ..." sentence instead (the band, the exec strip and the caption say the 74 minutes already), so
-// the first tool call still clears the pinned Ask bar. Below 1024px the feed is the page: all of Why.
-type Room = 'phone' | 'tight' | 'short' | 'tall';
+// to 900px tall (a laptop) it shows the Verdict, one whole Why sentence, the agent lines and the disclosure; on a taller one,
+// two Why sentences. On one 800px tall or less (`low`: 1366x768), still one Why sentence with its [E1]: the verdict's headline
+// drops its "In hindsight: ..." sentence instead (the band and the scrubber's marks say when), so the pick, the Notify line,
+// the "Next qix?" line and the disclosure all clear the pinned Ask bar. Where there is less room still (`tight`: 720px tall or
+// less, or 800px in the two-pane band where the band takes two rows: 1280x720, 1024x768) the Next line goes first; the pick
+// and Notify stay. Below 1024px the feed is the page: all of Why.
+type Room = 'phone' | 'tight' | 'low' | 'short' | 'tall';
 const WIDE = '(min-width: 1024px)';
 const SHORT = '(min-width: 1024px) and (max-height: 900px)';
+const LOW = '(min-width: 1024px) and (max-height: 800px)';
 const TIGHT = '(min-width: 1024px) and (max-height: 720px), (min-width: 1024px) and (max-width: 1279px) and (max-height: 800px)';
 const COARSE = '(pointer: coarse)';
 const subscribe = (cb: () => void) => {
-  const qs = [matchMedia(WIDE), matchMedia(SHORT), matchMedia(TIGHT), matchMedia(COARSE)];
+  const qs = [matchMedia(WIDE), matchMedia(SHORT), matchMedia(LOW), matchMedia(TIGHT), matchMedia(COARSE)];
   qs.forEach((q) => q.addEventListener('change', cb));
   return () => qs.forEach((q) => q.removeEventListener('change', cb));
 };
-const room = (): Room => (!matchMedia(WIDE).matches ? 'phone' : matchMedia(TIGHT).matches ? 'tight' : matchMedia(SHORT).matches ? 'short' : 'tall');
+const room = (): Room => (!matchMedia(WIDE).matches ? 'phone' : matchMedia(TIGHT).matches ? 'tight' : matchMedia(LOW).matches ? 'low' : matchMedia(SHORT).matches ? 'short' : 'tall');
 const useRoom = () => useSyncExternalStore(subscribe, room, () => 'tall' as Room);
 const useCoarse = () => useSyncExternalStore(subscribe, () => matchMedia(COARSE).matches, () => false);
-const WHY_SHOWN: Record<Room, number> = { phone: Infinity, tight: 1, short: 1, tall: 2 };
+const WHY_SHOWN: Record<Room, number> = { phone: Infinity, tight: 1, low: 1, short: 1, tall: 2 };
 
-/** The headline without its "In hindsight: ..." sentence (the tight room: the band and the exec strip say it). Presentation only. */
+/** The headline without its "In hindsight: ..." sentence (a low or tight room: the band and the scrubber's marks say when). Presentation only. */
 function withoutHindsight(segs: Segment[]): Segment[] {
   const i = segs.findIndex((s) => s.kind === 'text' && s.text.includes(' In hindsight:'));
   if (i < 0) return segs;
@@ -426,20 +438,27 @@ export function NarrationBlock({ narration, guard, onTrace, cards = [], idSuffix
   const whyShown = compact ? Math.min(whyAll.length, WHY_SHOWN[space]) : whyAll.length;
   const whyHidden = whyAll.slice(whyShown);
   const cites = citeCount(whyHidden);
-  // The pick: in place on a tall window (and in an Ask answer); elsewhere in the triage narrative it is behind the disclosure.
-  const pickInline = !fold || space === 'tall';
-  const hasPick = note !== null || pending;
+  // The agent's acts under Why (the triage narrative only): the pick, the Notify summary, the Next line (never on a `tight` window).
+  const next = useContext(AgentContext);
+  const notifyRow = fold ? folded.find((r) => r.label === 'Notify') : undefined;
+  const notifyTeams = notifyRow ? (rosterOf(notifyRow.segs)?.teams.map((t) => t.team.text) ?? []) : [];
+  const [toRoster, setToRoster] = useState(0); // "Roster": open the fold, then scroll to the roster once it is there
+  useEffect(() => {
+    const el = toRoster ? root.current?.querySelector<HTMLElement>('[data-roster]') : null;
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    reveal(el, 'top');
+  }, [toRoster]);
   // The claim map ("62 of 62 claims traced", which the header badge also counts) folds with the rest, except on a tall window.
   const claimsFolded = fold && !full && space !== 'tall' && (checking || (guard !== null && guard.total > 0));
   const evidence = `${cites} ${whyShown === 0 ? '' : 'more '}evidence ${cites === 1 ? 'path' : 'paths'}`;
   const reveals = revealLabel([
     whyHidden.length > 0 && (whyShown === 0 ? (cites > 0 ? `why (${evidence})` : 'why') : cites > 0 ? evidence : 'the rest of why'),
-    !pickInline && hasPick && 'the analyst pick',
     folded.some((r) => r.label === 'Notify') && 'who to notify',
     folded.some((r) => r.label === 'Do') && 'the steps',
     claimsFolded && 'the claim map',
   ]);
-  const expandable = fold && (full || folded.length > 0 || whyHidden.length > 0 || (!pickInline && hasPick) || claimsFolded);
+  const expandable = fold && (full || folded.length > 0 || whyHidden.length > 0 || claimsFolded);
   const tight = `pointer-coarse:leading-7 ${fold ? 'fold:leading-[18px]' : ''}`; // a laptop-height window: 13px lines a step closer
 
   // A labelled line runs the label into the text (the 320px feed has no width for a label column), with a real space after
@@ -460,8 +479,10 @@ export function NarrationBlock({ narration, guard, onTrace, cards = [], idSuffix
   const roster = (r: Row, i: number) => {
     const ro = (r.label === 'Notify' || crowded(r.segs)) && !guest ? rosterOf(r.segs) : null;
     if (!ro) return null;
+    const notify = r.label === 'Notify';
     return (
-      <div key={`${r.label}-${i}`} className="flex max-w-(--measure) flex-col gap-1 text-sm text-fg-0">
+      // the Notify roster is where "Roster" lands (focus, then scroll): a labelled group, so the move is announced
+      <div key={`${r.label}-${i}`} {...(notify ? { 'data-roster': '', tabIndex: -1, role: 'group', 'aria-label': 'Who to notify' } : {})} className="flex max-w-(--measure) flex-col gap-1 text-sm text-fg-0">
         {(r.label || ro.head.length > 0) && (
           <p data-roving="">
             {label(r)}
@@ -508,8 +529,8 @@ export function NarrationBlock({ narration, guard, onTrace, cards = [], idSuffix
     }
     const whyNow = r === why ? whyAll.slice(0, whyShown) : [];
     const evidenceRow = coarse && r === why ? whyCites(whyNow) : [];
-    // the tight room: one Why sentence instead of the headline's hindsight clause (said by the band and the exec strip)
-    const trim = compact && space === 'tight';
+    // a low room: one Why sentence and the agent lines instead of the headline's hindsight clause (the scrubber's marks say when)
+    const trim = compact && (space === 'tight' || space === 'low');
     return (
       <Fragment key={`${r.label}-${i}`}>
         {head && (
@@ -555,15 +576,15 @@ export function NarrationBlock({ narration, guard, onTrace, cards = [], idSuffix
     );
   };
   // The analyst pick, run in after its label; what the model did is the label's title and screen-reader text. Nothing at all
-  // when no observation was picked. While it is coming, its place is held (where it is shown in place).
+  // when no observation was picked. While it is coming, its place is held.
   const pick =
     note !== null ? (
       note.map((r, i) => (
-        <p key={`pick-${i}`} data-roving="" className="max-w-(--measure) text-sm text-fg-1">
+        <p key={`pick-${i}`} data-roving="" className={`max-w-(--measure) text-sm text-fg-1 ${tight}`}>
           {i === 0 && (
             <>
               <span className={`${LABEL} mr-1`} title={PICK_EXPLAINED}>
-                Analyst pick (LLM{narration.mode === 'replay' ? ', replayed' : ''})
+                {pickLabel(narration.mode)}
               </span>{' '}
               <span className="sr-only">{PICK_EXPLAINED} </span>
             </>
@@ -572,9 +593,41 @@ export function NarrationBlock({ narration, guard, onTrace, cards = [], idSuffix
         </p>
       ))
     ) : pending ? (
-      <p className={`max-w-(--measure) text-sm text-fg-2 ${pickInline && fold ? 'min-h-10' : ''}`}>
-        <span className={`${LABEL} mr-1`}>Analyst pick (LLM)</span> Picking an observation&hellip;
+      <p className={`max-w-(--measure) text-sm text-fg-2 ${fold ? PICK_ROOM : ''}`}>
+        <span className={`${LABEL} mr-1`}>Analyst pick · LLM</span> Picking an observation&hellip;
       </p>
+    ) : null;
+  // "Notify 7 teams": the roster's headcount and first names on one line; "Roster" opens the fold scrolled to the roster.
+  const notify =
+    notifyTeams.length > 0 ? (
+      <p data-agent="notify" className={`flex items-center gap-x-2 text-sm ${tight}`}>
+        <span className="shrink-0 whitespace-nowrap">
+          <span className={LABEL}>Notify</span> <span className="text-fg-0 tabular-nums">{plural(notifyTeams.length, 'team')}</span>
+        </span>
+        <span className="min-w-0 flex-1 truncate text-fg-1" title={notifyTeams.join(', ')}>
+          {teamNames(notifyTeams)}
+        </span>
+        <button
+          type="button"
+          onClick={() => (setFull(true), setToRoster((n) => n + 1))}
+          aria-label={`Open the roster of ${plural(notifyTeams.length, 'team')} to notify`}
+          className="inline-flex min-h-6 shrink-0 items-center gap-1 rounded-xs px-1 text-xs whitespace-nowrap text-fg-1 underline underline-offset-2 hov:text-fg-0 pointer-coarse:min-h-11 pointer-coarse:px-2"
+        >
+          Roster
+          <ChevronDown size={12} aria-hidden />
+        </button>
+      </p>
+    ) : null;
+  // "Next qix? sindresorhus: 43% of top-3 PageRank, reaches 21 of 21 repos": the Concentration tab's first row, which it opens.
+  const nextLine =
+    next && fold && space !== 'tight' ? (
+      <button type="button" data-agent="next" onClick={next.open} className={`flex min-h-6 w-full items-start gap-1.5 rounded-xs text-left text-sm underline-offset-2 hov:underline pointer-coarse:min-h-11 pointer-coarse:items-center ${tight}`}>
+        <span className="min-w-0 flex-1">
+          <span className="font-medium text-fg-0">{next.label}</span> <span className="text-fg-1">{next.text}</span>
+          <span className="sr-only"> Opens the Concentration tab.</span>
+        </span>
+        <ArrowRight size={12} aria-hidden className="mt-[3px] shrink-0 text-fg-1 pointer-coarse:mt-0" />
+      </button>
     ) : null;
 
   return (
@@ -588,7 +641,17 @@ export function NarrationBlock({ narration, guard, onTrace, cards = [], idSuffix
           : 'Not checked against the graph.'}
       </span>
       {shown.map((r, i) => (r === why && whyShown === 0 ? null : row(r, i)))}
-      {pickInline && pick}
+      {fold ? (
+        (pick || notify || nextLine) && (
+          <div role="group" aria-label="What the agent did" className="flex flex-col gap-1 tight:gap-0.5">
+            {pick}
+            {notify}
+            {nextLine}
+          </div>
+        )
+      ) : (
+        pick
+      )}
 
       {coverage && (
         <p className="max-w-(--measure) rounded-xs bg-bg-2 px-2 py-1.5 text-sm text-fg-0">
@@ -612,7 +675,6 @@ export function NarrationBlock({ narration, guard, onTrace, cards = [], idSuffix
           </button>
           {full && (
             <div id={more} className="flex flex-col gap-2">
-              {!pickInline && pick}
               {folded.map((r, i) => row(r, i + shown.length))}
             </div>
           )}
@@ -641,6 +703,20 @@ function useHeld(on: boolean, ms: number): boolean {
   return on && held;
 }
 
+/**
+ * The agent lines' place while the verdict is still coming. ToolFeed's placeholder is about the verdict's own height; this adds
+ * what the pick, Notify and Next lines will take (about, per room), so the tool calls do not jump down when the verdict lands.
+ */
+function AgentRoom() {
+  return (
+    <div aria-hidden className="flex flex-col gap-2 max-sm:min-h-[16.3rem] sm:max-lg:hidden lg:min-h-[14rem] fold:min-h-[8.8rem] low:min-h-[5.8rem] tight:min-h-[7.3rem]">
+      {['w-full', 'w-11/12', 'w-3/4'].map((w) => (
+        <div key={w} className={`skeleton h-3 ${w}`} />
+      ))}
+    </div>
+  );
+}
+
 export function NarrativePanel({
   narration,
   guard,
@@ -658,7 +734,7 @@ export function NarrativePanel({
   // line changes once per scrub and never claims the clock moved while a run is aligning it. Not a live region: the report
   // clock strip beside the table says it once, for screen readers.
   const stale = useHeld(narration !== null && asOf(narration.at, clockAt), 250);
-  if (!narration) return null;
+  if (!narration) return awaitingGuard && !guest ? <AgentRoom /> : null;
   return (
     <section aria-label="Narrative" className="animate-enter flex flex-col gap-2">
       <h3 className="sr-only">Narrative</h3>

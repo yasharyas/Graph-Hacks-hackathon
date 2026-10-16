@@ -55,6 +55,7 @@ import { useSettled } from './data/useSettled.ts';
 import { useExposureAt, useExposureQuery, useTimeline } from './data/useTimeline.ts';
 import { useTriage } from './data/useTriage.ts';
 import { readUrlState, shareUrl, type OpenTab } from './data/urlState.ts';
+import { askExample, nextAccount, nextLabel } from './components/agent.ts';
 import { AskBox } from './components/AskBox.tsx';
 import { Button } from './components/Button.tsx';
 import { ContrastCard } from './components/ContrastCard.tsx';
@@ -66,6 +67,7 @@ import { FixDrawer, type DrawerTab } from './components/FixDrawer.tsx';
 import { GraphStatsSheet } from './components/GraphStatsSheet.tsx';
 import { Header } from './components/Header.tsx';
 import { InsightTabs } from './components/InsightTabs.tsx';
+import { AgentContext } from './components/NarrativePanel.tsx';
 import { OnboardingHint } from './components/OnboardingHint.tsx';
 import { PasteBox, type PasteRequest } from './components/PasteBox.tsx';
 import { PathGraph } from './components/PathGraph.tsx';
@@ -485,15 +487,19 @@ export function App() {
       }
     });
   };
-  /** "Built on FalkorDB": the Graph stats tab under the table after a triage; before one, the graph's own counts in a sheet. */
-  const openStats = () => {
-    if (!report) return setPanel('stats');
+  /** A tab under the table, opened from elsewhere: the Table pane first on a phone, then the tab pressed, focused and scrolled to. */
+  const openInsight = (name: RegExp) => {
     flushSync(() => setPane('table'));
-    const tab = [...document.querySelectorAll<HTMLElement>('#exposures [role="tab"]')].find((t) => /graph stats/i.test(t.textContent ?? ''));
+    const tab = [...document.querySelectorAll<HTMLElement>('#exposures [role="tab"]')].find((t) => name.test(t.textContent ?? ''));
     tab?.click();
     tab?.focus({ preventScroll: true });
     if (tab) scrollPaneTo(tab, 48);
   };
+  /** "Built on FalkorDB": the Graph stats tab under the table after a triage; before one, the graph's own counts in a sheet. */
+  const openStats = () => (report ? openInsight(/graph stats/i) : setPanel('stats'));
+  // "Next qix?" under the verdict: the Concentration tab's first row, which it opens (a pasted repo has no such line).
+  const nextText = report && !isGuest ? nextAccount(report) : null;
+  const agentNext = report && nextText ? { label: nextLabel(report.incident), text: nextText, open: () => openInsight(/concentration/i) } : null;
   const skipToTable = (e: { preventDefault: () => void }) => {
     e.preventDefault();
     flushSync(() => setPane('table'));
@@ -764,30 +770,33 @@ export function App() {
             // (and jumps back) while the run streams in.
             className={`scroll-pane border-line-1 bg-bg-1 p-3 fold:pt-2 lg:row-span-2 lg:border-r xl:row-span-1 xl:h-auto xl:min-h-0 ${compact ? 'max-lg:min-h-dvh lg:min-h-0' : 'lg:h-0 lg:min-h-full'} ${paneClass('feed')}`}
           >
-            <ToolFeed
-              {...feedExtra}
-              cards={triage.toolCards}
-              followUps={triage.followUps}
-              narration={triage.narration}
-              guard={triage.guard}
-              status={triage.status}
-              error={triage.error}
-              scenario={triage.incident?.id ?? scenario}
-              onRun={run}
-              onSelectEntity={selectEntity}
-              footer={
-                report && (
-                  <AskBox
-                    disabled={running}
-                    asking={triage.asking}
-                    rounds={triage.rounds}
-                    suggestions={lastFollowUp?.narration?.suggestions}
-                    error={lastFollowUp?.status === 'error' ? triage.error : null}
-                    onAsk={(q) => triage.ask(q, Object.keys(remediated))}
-                  />
-                )
-              }
-            />
+            <AgentContext.Provider value={agentNext}>
+              <ToolFeed
+                {...feedExtra}
+                cards={triage.toolCards}
+                followUps={triage.followUps}
+                narration={triage.narration}
+                guard={triage.guard}
+                status={triage.status}
+                error={triage.error}
+                scenario={triage.incident?.id ?? scenario}
+                onRun={run}
+                onSelectEntity={selectEntity}
+                footer={
+                  report && (
+                    <AskBox
+                      disabled={running}
+                      asking={triage.asking}
+                      rounds={triage.rounds}
+                      example={isGuest ? null : askExample(report)}
+                      suggestions={lastFollowUp?.narration?.suggestions}
+                      error={lastFollowUp?.status === 'error' ? triage.error : null}
+                      onAsk={(q) => triage.ask(q, Object.keys(remediated))}
+                    />
+                  )
+                }
+              />
+            </AgentContext.Provider>
           </section>
 
           <div ref={graphRef} tabIndex={-1} className={`md:min-h-[420px] lg:col-start-2 lg:row-start-1 xl:h-full xl:min-h-0 ${compact ? 'lg:h-full lg:min-h-0' : 'lg:min-h-[340px]'} ${paneClass('graph')}`}>
