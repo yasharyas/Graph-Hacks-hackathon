@@ -4,7 +4,7 @@ published: false
 tags: falkordb, security, npm, graphdatabase
 ---
 
-*Patient Zero is my entry to FalkorDB Graph Hacks, Track 1 (Agents That Act on Connected Data). Live demo: `https://<render-url>`. Code, MIT, with every Cypher query in the README: https://github.com/yasharyas/Graph-Hacks-hackathon.*
+*Patient Zero is my entry to FalkorDB Graph Hacks, Track 1 (Agents That Act on Connected Data). Code, MIT, with every Cypher query in the README, and a one-command local run (`docker compose up --build`): https://github.com/yasharyas/Graph-Hacks-hackathon.*
 
 ## Two incidents, one gap
 
@@ -108,4 +108,4 @@ Every tenant and scenario is its own graph via `GRAPH.COPY` of a registry templa
 
 Not a detector. Not proof that any of the 20 repos was compromised: `WOULD_PULL` is exposure surface on a fresh resolve, and `npm ci` was safe. Not yarn, pnpm or PyPI yet, and only the root `package-lock.json`. `latest` is modelled as "highest stable", not a moving dist-tag, and removal times are approximate because the registry keeps none. Teams and channels are synthetic; the repos and lockfiles are real.
 
-What it is: a graph that answers the on-call question before the advisory exists, with the query attached. Try it at `https://<render-url>`, and read every Cypher query at https://github.com/yasharyas/Graph-Hacks-hackathon.
+What it is: a graph that answers the on-call question before the advisory exists, with the query attached. Run it with `docker compose up --build`, and read every Cypher query at https://github.com/yasharyas/Graph-Hacks-hackathon.
