@@ -75,6 +75,18 @@ describe('mcp stdio server', { skip: !up && `FalkorDB unreachable at ${host}:${p
     assert.match(text(m), /MATCH \(:Incident \{id: \$incident\}\)-\[:INVOLVES\]->\(bad:Version\)<-\[:RESOLVES_TO\]-\(d:Dep\)/);
   });
 
+  test('incident defaults to the scenario\'s own incident; filter_exposures narrows to a version and its carrier', async () => {
+    const tools = (await rpc('tools/list')).result.tools as { name: string; inputSchema: { required: string[] } }[];
+    assert.ok(tools.every((t) => !t.inputSchema.required.includes('incident')));
+    const m = await call('incident_exposure', { scenario: 'qix-2025-09-08', at: AT });
+    assert.ok(!m.result.isError, text(m));
+    const body = JSON.parse((m.result.content as { text: string }[])[0].text);
+    assert.equal(body.params.incident, 'qix-2025-09-08');
+    assert.equal(body.rows.find((r: { repo: string }) => r.repo === 'acme/checkout-web').tier, 'LOCKED');
+    const via = JSON.parse((await call('filter_exposures', { scenario: 'qix-2025-09-08', at: AT, version: 'debug@4.4.2', via: '@babel/core' })).result.content[0].text);
+    assert.deepEqual([via.rowCount, via.params.via], [16, '@babel/core']);
+  });
+
   test('the other scenario answers from its own graph', async () => {
     const m = await call('incident_exposure', { scenario: 'axios-2026-03-31', incident: 'axios-2026-03-31', at: Date.parse('2026-03-31T01:30:00Z') });
     assert.ok(!m.result.isError, text(m));

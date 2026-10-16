@@ -42,11 +42,11 @@ const make = () => {
   const server = new McpServer(
     { name: 'patient-zero', version: '1.0.0' },
     {
-      instructions: `Read-only npm supply-chain triage over the simulated Acme org dependency graph (FalkorDB). Always pass scenario. Results are JSON {summary, params, rowCount, rows}, then the Cypher that ran. Empty, null and false fields are omitted from rows; long lists are shortened to "+N more". Times: ISO 8601 or epoch ms. Incident ids equal scenario ids.`,
+      instructions: `Read-only npm supply-chain triage over the simulated Acme org dependency graph (FalkorDB). Always pass scenario. Results are JSON {summary, params, rowCount, rows}, then the Cypher that ran. Empty, null and false fields are omitted from rows; long lists are shortened to "+N more". Times: ISO 8601 or epoch ms. Incident ids equal scenario ids, and incident defaults to scenario.`,
     },
   );
   for (const def of Object.values(TOOLS).filter((t) => t.name !== 'recall_triage')) {
-    const { required } = def.parameters;
+    const required = def.parameters.required.filter((k: string) => k !== 'incident'); // filled from scenario below
     // The registry's time() takes ISO 8601 or epoch ms but advertises "string": accept both here so the SDK's validator agrees.
     const properties = Object.fromEntries(Object.entries(def.parameters.properties).map(([k, v]) => [k, TIMES.has(k) ? { ...(v as object), type: ['string', 'number'] } : v]));
     const scenario = { type: 'string', enum: SCENARIOS, description: 'Which Acme org graph to query; the same string is the incident id where a tool asks for one' };
@@ -61,6 +61,7 @@ const make = () => {
         try {
           const g = graph(orgGraph(args.scenario as ScenarioId)); // throws on an unknown scenario
           const params = Object.fromEntries(Object.keys(properties).filter((k) => args[k] !== undefined).map((k) => [k, args[k]]));
+          if ('incident' in properties) params.incident ??= args.scenario; // the scenario's own incident, still coerced by the tool
           return render(await def.run(g, params), g.name);
         } catch (e) {
           console.error(`[mcp] ${def.name} failed:`, e); // detail stays on stderr, never in the reply

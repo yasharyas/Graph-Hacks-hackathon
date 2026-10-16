@@ -41,7 +41,8 @@ export function evidenceSet(r: Report): Evidence {
     ...Object.values(r.counts), r.exposures.length, exposed.length, teams.size, r.minutesAhead, r.paths.length,
     ...r.exposures.map((e) => e.versions.length), ...r.owners.map((o) => o.repos.length),
     exposed.filter((e) => !e.dev).length, exposed.filter((e) => e.dev).length, exposed.filter((e) => e.remediated).length,
-    r.scope?.repos ?? Object.values(r.counts).reduce((a, b) => a + b, 0), ...reach(r).slice(0, 4).map(([, n]) => n),
+    r.scope?.repos ?? Object.values(r.counts).reduce((a, b) => a + b, 0), ...reach(r).map(([, n]) => n), // the version answer
+    r.incident.versions.length, r.incident.versions.length - reach(r).length,
     ...observations(r).flatMap((o) => o.numbers),
     new Set(exposed.map((e) => e.team).filter(Boolean)).size, ...openByTeam(r).map(([, es]) => es.length), // summary and team answers
     directOf(r).length, // the "declared in their own package.json" answer
@@ -54,13 +55,14 @@ export function evidenceSet(r: Report): Evidence {
   return { entities, numbers, pathIds: new Set(r.paths.map((p) => p.id)) };
 }
 
-// How many exposed repos reach each malicious version, most first: "15 repos would fetch chalk@5.6.1", never every repo
+// Which exposed repos reach each malicious version, most first: "15 repos would fetch chalk@5.6.1", never every repo
 // lumped onto every version.
-function reach(r: Report): [string, number][] {
-  const n = new Map<string, number>();
-  for (const e of r.exposures.filter(exposedTier)) for (const v of e.versions) n.set(v, (n.get(v) ?? 0) + 1);
-  return [...n].sort((a, b) => b[1] - a[1]);
+function byVersion(r: Report): [string, string[]][] {
+  const n = new Map<string, string[]>();
+  for (const e of r.exposures.filter(exposedTier)) for (const v of e.versions) n.set(v, [...(n.get(v) ?? []), e.repo]);
+  return [...n].sort((a, b) => b[1].length - a[1].length);
 }
+const reach = (r: Report): [string, number][] => byVersion(r).map(([v, repos]) => [v, repos.length]);
 
 // Most severe first: LOCKED, WOULD_PULL prod, WOULD_PULL dev, MAINTAINER; then cite-able (has a path), then shallowest.
 const rank = (e: Exposure) => (e.tier === 'LOCKED' ? 0 : e.tier === 'WOULD_PULL' ? (e.dev ? 2 : 1) : 3);
@@ -367,6 +369,99 @@ export function concentrationFacts(r: Report): string {
   const total = r.scope?.repos ?? Object.values(r.counts).reduce((a, b) => a + b, 0);
   return `The accounts whose compromise would reach the most here, by PageRank over package dependencies: ${r.concentration.map((c) => `${tk(c.maintainer)}${Object.hasOwn(ACCOUNT_NOTES, c.maintainer) ? ` (${ACCOUNT_NOTES[c.maintainer]})` : ''}, ${plural(c.packages, 'package')}, reaching ${c.reposReached} of ${plural(total, 'repo')}`).join('; ')}. A hijack of any of them would spread the same way, so they are the ones to watch.`;
 }
+
+// "Which malicious version reaches the most repos?": the exposed repos grouped by malicious version, most first.
+export function versionFacts(r: Report): string {
+  const groups = byVersion(r);
+  if (!groups.length) return `No repo is exposed at ${hm(r.at)}, so no malicious version reaches one.`;
+  const exposed = r.exposures.filter(exposedTier).length;
+  const none = r.incident.versions.length - groups.length;
+  return `Exposed repos by malicious version, most first: ${groups.map(([v, repos]) => `${tk(v)} ${plural(repos.length, 'repo')}${repos.length === exposed && exposed > 1 ? ' (every exposed repo)' : repos.length <= 3 ? ` (${and(repos.map(tk))})` : ''}`).join('; ')}.`
+    + (none > 0 ? ` The other ${none} of the ${plural(r.incident.versions.length, 'malicious version')} reach no repo here.` : '');
+}
+
+// Answers built from tool rows return the numbers they print, for the guard's evidence.
+export type Facts = { text: string; numbers: number[] };
+type CRow = { repo: string; tier: string; versions: string[]; via?: Record<string, string[]> };
+
+// "If we can change one dependency, which removes the most?" / "which package to remove first?": filter_exposures rows
+// with carriers (the dependencies whose declared range admits a malicious version), grouped, and what one change would
+// and would not remove. One override on a malicious version covers every carrier; one carrier rarely clears a repo.
+export function carrierFacts(r: Report, res: { rows: Record<string, unknown>[]; params: Record<string, unknown> }): Facts {
+  const rows = (res.rows as CRow[]).filter((x) => x.tier === 'LOCKED' || x.tier === 'WOULD_PULL');
+  if (!rows.length) return { text: `No exposed repo matches at ${hm(r.at)}: there is nothing to change.`, numbers: [] };
+  const groups = new Map<string, { repos: Set<string>; versions: Set<string> }>();
+  for (const x of rows) for (const [v, cs] of Object.entries(x.via ?? {})) for (const c of cs.filter(Boolean)) { // '' = its own package.json
+    const gr = groups.get(c) ?? { repos: new Set<string>(), versions: new Set<string>() };
+    gr.repos.add(x.repo);
+    gr.versions.add(v);
+    groups.set(c, gr);
+  }
+  const top = [...groups].sort((a, b) => b[1].repos.size - a[1].repos.size || a[0].localeCompare(b[0]));
+  const shown = top.slice(0, 5);
+  // Changing one carrier clears a repo only when every path to every malicious version (in the filter) goes through it.
+  const own = (x: CRow) => new Set(Object.values(x.via ?? {}).flat());
+  const [best, cleared = []] = top.map(([c]) => [c, rows.filter((x) => x.tier !== 'LOCKED' && own(x).size === 1 && own(x).has(c)).map((x) => x.repo)] as const)
+    .sort((a, b) => b[1].length - a[1].length)[0] ?? [];
+  const n = new Map<string, number>();
+  for (const x of rows) for (const v of Object.keys(x.via ?? {})) n.set(v, (n.get(v) ?? 0) + 1);
+  const [v, reached] = [...n].sort((a, b) => b[1] - a[1])[0] ?? [];
+  const total = r.exposures.filter(exposedTier).length;
+  const whole = v ? rows.filter((x) => x.tier !== 'LOCKED' && x.versions.every((y) => y === v)).map((x) => x.repo) : [];
+  const what = res.params.version ? `removes ${tk(String(res.params.version))} from` : 'clears';
+  const locked = rows.filter((x) => x.tier === 'LOCKED').map((x) => x.repo);
+  const scope = [res.params.team, res.params.repo].filter((x): x is string => typeof x === 'string'); // the filter, named
+  const text = [
+    v ? `${scope.length ? `For ${and(scope.map(tk))}: one` : 'One'} change covers the most: the version-qualified override on ${tk(v)} (from each repo's Fix) applies to every dependency that brings it in, and ${tk(v)} reaches ${reached} of the ${plural(total, 'exposed repo')}. `
+      + (!whole.length ? 'It clears no repo completely: each also reaches other malicious versions, with their own overrides.'
+        : `It clears ${plural(whole.length, 'repo')} completely (${listed(whole)})${whole.length < reached! ? '; the others also reach other malicious versions, each with its own override' : ''}.`) : '',
+    shown.length ? `Carriers, the dependencies whose declared range admits a malicious version, most repos first: ${shown.map(([c, gr]) => `${tk(c)} ${plural(gr.repos.size, 'repo')} (${and([...gr.versions].map(tk))})`).join('; ')}${top.length > shown.length ? `; and ${top.length - shown.length} more dependencies` : ''}.` : '',
+    cleared.length ? `Upgrading or removing ${tk(best!)} alone ${what} ${plural(cleared.length, 'repo')} (${listed(cleared)}), and only if its new release declares a range that excludes the malicious version.`
+      : `No upgrade or removal of a single carrier ${what} any repo: each still gets a malicious version through another dependency or its own package.json, and an upgrade only helps if the new release declares a range that excludes it.`,
+    locked.length ? `${and(locked.map(tk))} ${locked.length === 1 ? 'is' : 'are'} LOCKED: whatever changes, rotate secrets and rebuild from a fixed lockfile.` : '',
+  ].filter(Boolean).join('\n');
+  return { text, numbers: [reached ?? 0, total, whole.length, whole.length - 3, cleared.length, cleared.length - 3, top.length - shown.length, ...shown.map(([, gr]) => gr.repos.size)] };
+}
+
+// The line under a `via` list ("which repos get debug@4.4.2 through @babel/core?"): what changing that carrier would and
+// would not remove, from the same rows (each row keeps every carrier of the versions in the filter).
+export function viaFacts(res: { rows: Record<string, unknown>[]; params: Record<string, unknown> }): Facts {
+  const via = String(res.params.via ?? '').toLowerCase();
+  const rows = res.rows as CRow[];
+  if (!via || !rows.length) return { text: '', numbers: [] };
+  const name = rows.flatMap((x) => Object.values(x.via ?? {}).flat()).find((c) => c.toLowerCase() === via)!; // as the graph spells it
+  const what = res.params.version ? tk(String(res.params.version)) : 'the malicious version';
+  const only = rows.filter((x) => x.tier !== 'LOCKED' && Object.values(x.via ?? {}).filter((cs) => cs.some((c) => c.toLowerCase() === via)).every((cs) => cs.length === 1)).map((x) => x.repo);
+  return {
+    text: `In ${plural(rows.length, 'repo')} ${tk(name)} declares a range that admits ${what}. `
+      + (only.length ? `It is the only dependency that brings it in for ${plural(only.length, 'repo')} (${listed(only)}), so changing ${tk(name)} removes it there, and only if its new release declares a range that excludes it.`
+        : `It is never the only dependency that brings it in, so changing ${tk(name)} alone removes it from no repo.`)
+      + ` An override on ${what} covers every dependency that brings it in.`,
+    numbers: [rows.length, only.length, only.length - 3],
+  };
+}
+
+// "If ljharb were hijacked, how many repos?": maintainer_blast_radius rows, the repos whose lockfiles hold the account's
+// packages, every one named; `asked`: repos the question names, said plainly when out of reach.
+export function blastFacts(r: Report, res: { rows: Record<string, unknown>[]; params: Record<string, unknown> }, asked: string[] = []): Facts {
+  const rows = res.rows as { repo: string; packages: number; dev: boolean }[];
+  const m = String(res.params.maintainer);
+  const total = r.scope?.repos ?? Object.values(r.counts).reduce((a, b) => a + b, 0);
+  const out = asked.filter((x) => !rows.some((y) => y.repo === x));
+  const none = out.length ? ` ${and(out.map(tk))} ${out.length === 1 ? 'holds' : 'hold'} none of its packages.` : '';
+  if (!rows.length) return { text: `No lockfile here holds a package from ${tk(m)}, so a hijack of that account would reach none of the ${plural(total, 'repo')}.${none}`, numbers: [total] };
+  const dev = rows.filter((x) => x.dev).length;
+  return {
+    text: `If ${tk(m)} were hijacked, ${rows.length} of the ${plural(total, 'repo')} would be in reach: their lockfiles hold its packages. ${rows.map((x) => `${tk(x.repo)}${x.dev ? ' (dev)' : ''}`).join(', ')}.${none}`
+      + ` The most: ${tk(rows[0]!.repo)}, ${plural(rows[0]!.packages, 'package')}.${dev ? ` For ${dev} of them only through devDependencies.` : ''}`
+      + ' A malicious release would reach them the way this incident did: on a fresh resolve, wherever a declared range admits it. Installs from a committed lockfile (npm ci) stay safe until it is regenerated.',
+    numbers: [rows.length, total, dev, rows[0]!.packages],
+  };
+}
+
+// "Explain this incident to a new on-call engineer in plain words": the verdict's headline and a one-line tier glossary.
+const GLOSSARY = 'Tiers in plain words: LOCKED = the committed lockfile pins a malicious version, so every install from it ran it (rotate secrets, rebuild); WOULD_PULL = the lockfile pins a safe version, and only a fresh resolve in the window would have fetched the malicious one; MAINTAINER = the repo holds packages from the compromised account, with no malicious version live for it; safe with npm ci = npm ci installs exactly what the lockfile pins, so it is safe for WOULD_PULL repos and not for LOCKED ones.';
+export const explainFacts = (r: Report) => `${summaryFacts(r)}\n${GLOSSARY}`;
 
 // When it started, when the record came, whether it is over: as known at the scenario clock, and anything later only as
 // "In hindsight", like the verdict.

@@ -151,23 +151,49 @@ export async function incidentExposure(g: Graph, p: { incident: unknown; at: unk
 
 // filter_exposures: the complete list behind the exposure table (incident_exposure's non-CLEAN rows, same queries),
 // filtered, with counts per team. Ask answers list, count and owner questions from it, so no match goes unnamed.
+// `version` keeps repos that reach that malicious version (or any malicious version of that package); `via` keeps repos
+// where that package's declared range admits it; `carriers` (implied by `via`) adds each row's carriers per version.
 const FILTER_TIERS = new Set(['LOCKED', 'WOULD_PULL', 'MAINTAINER']);
-export async function filterExposures(g: Graph, p: { incident: unknown; at: unknown; tier?: unknown; prod_only?: unknown; team?: unknown; repo?: unknown }) {
+export type Carried = Record<string, string[]>; // malicious version -> dependencies whose range admits it ('' = own package.json)
+export async function filterExposures(g: Graph, p: { incident: unknown; at: unknown; tier?: unknown; prod_only?: unknown; team?: unknown; repo?: unknown; version?: unknown; via?: unknown; carriers?: unknown }) {
   const all = await incidentExposure(g, { incident: p.incident, at: p.at });
   const tier = p.tier == null ? '' : str(p.tier, 20).toUpperCase();
-  const f = { tier: FILTER_TIERS.has(tier) ? tier : '', prodOnly: p.prod_only === true || p.prod_only === 'true', team: str(p.team ?? '', 60).toLowerCase(), repo: str(p.repo ?? '', 140).toLowerCase() };
+  const f = {
+    tier: FILTER_TIERS.has(tier) ? tier : '', prodOnly: p.prod_only === true || p.prod_only === 'true', team: str(p.team ?? '', 60).toLowerCase(), repo: str(p.repo ?? '', 140).toLowerCase(),
+    version: str(p.version ?? '').toLowerCase(), via: str(p.via ?? '').toLowerCase(),
+  };
+  const reaches = (v: string) => !f.version || v.toLowerCase() === f.version || nameOf(v).toLowerCase() === f.version;
+  const carry = new Map<string, Carried>();
+  let more: { cypher: string[]; ms: number } = { cypher: [], ms: 0 };
+  if (f.via || p.carriers === true || p.carriers === 'true') {
+    const res = await g.ro(Q.EXPOSURE_CARRIERS, { incident: all.params.incident, at: all.params.at });
+    for (const x of res.rows as Row[]) carry.set(x.repo, { ...carry.get(x.repo), [x.version]: x.carriers });
+    more = { cypher: [Q.EXPOSURE_CARRIERS], ms: res.ms };
+  }
+  // per row: every carrier of each version the filter keeps (with `via`, the versions that package carries), so a reader
+  // can tell where it is the only one
+  const carried = (e: ExposureRow): Carried => Object.fromEntries(e.versions.filter(reaches).map((v) => [v, carry.get(e.repo)?.[v] ?? []] as const)
+    .filter(([, cs]) => cs.length && (!f.via || cs.some((c: string) => c.toLowerCase() === f.via))));
   const exposed = rowsOf<ExposureRow>(all).filter((e) => e.tier !== 'CLEAN');
   const rows = exposed
     .filter((e) => (!f.tier || e.tier === f.tier) && (!f.prodOnly || !e.dev) && (!f.team || (e.team ?? '').toLowerCase() === f.team)
-      && (!f.repo || e.repo.toLowerCase() === f.repo || e.repo.toLowerCase().split('/')[1] === f.repo))
-    .map((e) => ({ repo: e.repo, tier: e.tier, team: e.team, dev: e.dev, versions: e.versions, locked: e.locked ?? [] }));
+      && (!f.repo || e.repo.toLowerCase() === f.repo || e.repo.toLowerCase().split('/')[1] === f.repo)
+      && (!f.version || e.versions.some(reaches)) && (!f.via || Object.keys(carried(e)).length > 0))
+    .map((e) => ({ repo: e.repo, tier: e.tier, team: e.team, dev: e.dev, versions: e.versions, locked: e.locked ?? [], ...(more.cypher.length && { via: carried(e) }) }));
   const teams = new Map<string, number>();
   for (const r of rows) teams.set(r.team ?? 'no owner', (teams.get(r.team ?? 'no owner') ?? 0) + 1);
-  const label = [f.tier && `tier ${f.tier}`, f.prodOnly && 'prod only', f.team && `team ${str(p.team, 60)}`, f.repo && `repo ${str(p.repo, 140)}`].filter(Boolean).join(', ') || 'no filter';
-  const params = { incident: all.params.incident, at: all.params.at, ...(f.tier && { tier: f.tier }), ...(f.prodOnly && { prod_only: true }), ...(f.team && { team: str(p.team, 60) }), ...(f.repo && { repo: str(p.repo, 140) }) };
+  const label = [f.tier && `tier ${f.tier}`, f.prodOnly && 'prod only', f.team && `team ${str(p.team, 60)}`, f.repo && `repo ${str(p.repo, 140)}`, f.version && `reaches ${str(p.version)}`, f.via && `via ${str(p.via)}`].filter(Boolean).join(', ') || 'no filter';
+  const params = {
+    incident: all.params.incident, at: all.params.at, ...(f.tier && { tier: f.tier }), ...(f.prodOnly && { prod_only: true }), ...(f.team && { team: str(p.team, 60) }), ...(f.repo && { repo: str(p.repo, 140) }),
+    ...(f.version && { version: str(p.version) }), ...(f.via && { via: str(p.via) }), ...(more.cypher.length && !f.via && { carriers: true }),
+  };
   const summary = `${rows.length} of ${plural(exposed.length, 'exposed repo')} ${rows.length === 1 ? 'matches' : 'match'} (${label})`
     + (rows.length ? ` across ${plural(teams.size, 'team')}: ${[...teams].map(([t, n]) => `${t} ${n}`).join(', ')}` : '');
-  return { ...all, tool: 'filter_exposures' as const, params, summary, rows, evidence: uniq(rows.flatMap((r) => [r.repo, r.team ?? '', ...r.versions, ...r.locked]).filter(Boolean)) };
+  const carriers = rows.flatMap((r) => Object.values(r.via ?? {}).flat());
+  return {
+    ...all, tool: 'filter_exposures' as const, params, summary, rows, cypher: [...all.cypher, ...more.cypher], ms: Math.round((all.ms + more.ms) * 1000) / 1000,
+    evidence: uniq([...rows.flatMap((r) => [r.repo, r.team ?? '', ...r.versions, ...r.locked]), ...carriers].filter(Boolean)),
+  };
 }
 
 export async function maintainerBlastRadius(g: Graph, p: { maintainer: unknown }) {
@@ -338,12 +364,15 @@ export const TOOLS: Record<ToolName, ToolDef<any>> = {
   scanner_view: { name: 'scanner_view', description: 'What an advisory-based scanner reports at a moment (lockfile x published OSV records), plus a plain name grep.', parameters: obj({ incident: S('Incident id'), at: AT }, ['incident', 'at']), run: async (g, p) => (await scannerView(g, p)).result },
   filter_exposures: {
     name: 'filter_exposures',
-    description: 'The complete list of exposed repos at a moment (the exposure table), optionally filtered by tier, prod-only, owning team or repo, with team, dev flag, malicious versions and what each lockfile pins, plus counts per team. Use it for every list, count or owner question: it never omits a match.',
+    description: 'The complete list of exposed repos at a moment (the exposure table), optionally filtered by tier, prod-only, owning team, repo, malicious version or carrier, with team, dev flag, malicious versions and what each lockfile pins, plus counts per team. Use it for every list, count or owner question: it never omits a match.',
     parameters: obj({
       incident: S('Incident id'), at: AT,
       tier: { type: 'string', enum: ['LOCKED', 'WOULD_PULL', 'MAINTAINER'], description: 'Only this tier' },
       prod_only: { type: 'boolean', description: 'Only repos with a production (not dev-only) hit' },
       team: S('Owning team name, e.g. QA'), repo: S('owner/name, or just the name'),
+      version: S('Only repos that reach this malicious name@version, or any malicious version of this package name'),
+      via: S('Only repos where this package declares the range that admits the malicious version (the carrier), e.g. @babel/core'),
+      carriers: { type: 'boolean', description: 'Add each row\'s carriers per malicious version ("" = the repo\'s own package.json)' },
     }, ['incident', 'at']),
     run: filterExposures,
   },

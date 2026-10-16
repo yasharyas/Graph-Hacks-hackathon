@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import type { Exposure, Report } from '../shared/events.ts';
 import { guard } from '../server/agent/guard.ts';
-import { compareFacts, directFacts, evidenceBlock, evidenceSet, observations, parsePick, PICK_SYSTEM, pickMessages, rotateFacts, teamFirstFacts, verdictText, whenFacts } from '../server/agent/narrate.ts';
+import { blastFacts, carrierFacts, compareFacts, directFacts, evidenceBlock, evidenceSet, explainFacts, observations, parsePick, PICK_SYSTEM, pickMessages, rotateFacts, teamFirstFacts, verdictText, versionFacts, viaFacts, whenFacts } from '../server/agent/narrate.ts';
 import { todayNotes } from '../server/agent/triage.ts';
 import { todayCheck } from '../web/src/data/todayCheck.ts';
 
@@ -180,6 +180,38 @@ test('Ask facts: own package.json declarations; compare and "most urgent for a t
   assert.match(rotateFacts(r), /^No LOCKED repo is still open\. Marked remediated: `acme\/checkout-web`\. For the other 4 WOULD_PULL repos/);
   assert.equal(teamFirstFacts(r, 'Payments'), '`Payments` has no open exposure at 13:30 UTC.');
   clean(r, rotateFacts(r));
+});
+
+test('Ask facts from tool rows: carriers, a via list and an account\'s reach say what one change would and would not remove', () => {
+  const r = report();
+  const rows = [
+    { repo: 'acme/checkout-web', tier: 'LOCKED', versions: ['debug@4.4.2'], via: { 'debug@4.4.2': ['express'] } },
+    { repo: 'mochajs/mocha', tier: 'WOULD_PULL', versions: ['debug@4.4.2'], via: { 'debug@4.4.2': ['', '@babel/core'] } }, // '' = its own package.json
+    { repo: 'remy/nodemon', tier: 'WOULD_PULL', versions: ['debug@4.4.2'], via: { 'debug@4.4.2': ['@babel/core'] } },
+    { repo: 'npm/cli', tier: 'WOULD_PULL', versions: ['debug@4.4.2', 'chalk@5.6.1'], via: { 'debug@4.4.2': ['@babel/core'], 'chalk@5.6.1': ['ora'] } },
+  ];
+  const checked = (x: string | { text: string; numbers: number[] }, ...entities: string[]) => {
+    const f = typeof x === 'string' ? { text: x, numbers: [] } : x;
+    const ev = evidenceSet(r);
+    f.numbers.forEach((n) => ev.numbers.add(n));
+    entities.forEach((e) => ev.entities.add(e)); // what the tool result's evidence carries
+    assert.deepEqual(guard(f.text, ev).flagged, [], f.text);
+    return f.text;
+  };
+  assert.equal(checked(carrierFacts(r, { rows, params: { carriers: true } }), 'express', 'ora', '@babel/core'), [
+    'One change covers the most: the version-qualified override on `debug@4.4.2` (from each repo\'s Fix) applies to every dependency that brings it in, and `debug@4.4.2` reaches 4 of the 5 exposed repos. It clears 2 repos completely (`mochajs/mocha` and `remy/nodemon`); the others also reach other malicious versions, each with its own override.',
+    'Carriers, the dependencies whose declared range admits a malicious version, most repos first: `@babel/core` 3 repos (`debug@4.4.2`); `express` 1 repo (`debug@4.4.2`); `ora` 1 repo (`chalk@5.6.1`).',
+    'Upgrading or removing `@babel/core` alone clears 1 repo (`remy/nodemon`), and only if its new release declares a range that excludes the malicious version.', // mocha also declares it itself
+    '`acme/checkout-web` is LOCKED: whatever changes, rotate secrets and rebuild from a fixed lockfile.',
+  ].join('\n'));
+  const via = rows.slice(1).map((x) => ({ ...x, via: { 'debug@4.4.2': x.via['debug@4.4.2']! } }));
+  assert.match(checked(viaFacts({ rows: via, params: { version: 'debug@4.4.2', via: '@Babel/Core' } }), '@babel/core'),
+    /^In 3 repos `@babel\/core` declares a range that admits `debug@4\.4\.2`\. It is the only dependency that brings it in for 2 repos \(`remy\/nodemon` and `npm\/cli`\), so changing `@babel\/core` removes it there/);
+  const blast = { rows: [{ repo: 'mochajs/mocha', packages: 3, dev: true }, { repo: 'npm/cli', packages: 1, dev: false }], params: { maintainer: 'ljharb' } };
+  assert.match(checked(blastFacts(r, blast, ['acme/checkout-web']), 'ljharb'),
+    /^If `ljharb` were hijacked, 2 of the 17 repos would be in reach: their lockfiles hold its packages\. `mochajs\/mocha` \(dev\), `npm\/cli`\. `acme\/checkout-web` holds none of its packages\. The most: `mochajs\/mocha`, 3 packages\. For 1 of them only through devDependencies\./);
+  assert.match(checked(versionFacts(r)), /^Exposed repos by malicious version, most first: `debug@4\.4\.2` 5 repos \(every exposed repo\)/);
+  assert.match(checked(explainFacts(r)), /\nTiers in plain words: LOCKED = the committed lockfile pins a malicious version/);
 });
 
 test('today notes: a pin or override below what a fresh resolve gets today is a downgrade to skip (real semver); the Fix tab reads it as a skip', () => {

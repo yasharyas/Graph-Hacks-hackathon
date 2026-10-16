@@ -250,7 +250,8 @@ function fromAlert(text: string): { s: ScenarioId; at?: number } {
   const words = (text.toLowerCase().match(/[a-z0-9@._/-]+/g) ?? []).map((w) => w.replace(/[.,]+$/, ''));
   const name = (w: string) => (w.lastIndexOf('@') > 0 ? w.slice(0, w.lastIndexOf('@')) : w);
   const [best] = TERMS.map(({ s, terms }) => ({ s, n: words.filter((w) => terms.has(w) || terms.has(name(w))).length })).sort((a, b) => b.n - a.n);
-  if (!best?.n) throw new HttpError(400, 'The alert names no known incident, account or package. Try "qix compromised, 13:16 UTC".');
+  // fixed text, never the alert itself: the two incidents this demo loads, and Paste for anything else
+  if (!best?.n) throw new HttpError(400, 'The alert names neither loaded incident: the qix compromise on 2025-09-08 (try "qix compromised, 13:16 UTC") or axios on 2026-03-31 (try "axios compromised, 00:30 UTC"). For anything else, use Paste your repo.');
   return { s: best.s, at: clockOf(text, best.s) };
 }
 // The same parser as the web app's banner (shared/clock.ts), around the same default clock: zones and offsets included

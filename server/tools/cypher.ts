@@ -51,6 +51,13 @@ WHERE a.fromT <= $at AND $at < a.toT AND l.name = bad.name AND r.range = a.range
 RETURN p.repo AS repo, bad.id AS version, min(p.depth) AS depth, collect(DISTINCT l.dev) AS devFlags,
   collect(DISTINCT a.range)[0..3] AS ranges, min(a.fromT) AS since, collect(DISTINCT l.name + '@' + l.version) AS locked`;
 
+// filter_exposures (carriers, via): per repo and malicious version, every dependency whose declared range admits it at
+// $at ('' = the repo's own package.json). Changing one of them touches only the repos it carries; an override on the
+// malicious version covers every carrier.
+export const EXPOSURE_CARRIERS = `MATCH (:Incident {id: $incident})-[:INVOLVES]->(bad:Version)<-[a:ADMITS]-(p:Dep)-[r:REQUIRES]->(l:Dep)
+WHERE a.fromT <= $at AND $at < a.toT AND l.name = bad.name AND r.range = a.range
+RETURN p.repo AS repo, bad.id AS version, collect(DISTINCT CASE WHEN p.path = '' THEN '' ELSE p.name END) AS carriers`;
+
 // maintainer_blast_radius: MAINTAINER tier. Repos whose lockfile contains any package the account maintains.
 export const MAINTAINER_BLAST_RADIUS = `MATCH (:Maintainer {name: $maintainer})-[:MAINTAINS]->(pkg:Package)<-[:OF]-(:Version)<-[:RESOLVES_TO]-(d:Dep)
 RETURN d.repo AS repo, count(DISTINCT pkg) AS packages, collect(DISTINCT pkg.name)[0..6] AS sample,
