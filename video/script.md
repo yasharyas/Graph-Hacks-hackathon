@@ -96,7 +96,7 @@ Tags in use: `[deadpan]`, `[calm]`, `[warm]`. **Never `[clear]`** (it produced "
 
 **Inside the UI:**
 - U1–U4 is one continuous take with no seams. Hidden waits (a re-run, the paste fetch, Claude Code thinking) are cursor-matched cuts with a 4-frame crossfade, never sped up.
-- Punch-ins are one quick move (0.5 s, `power3.out`) and then a still hold, at most 1.5x. No slow pushes or drift in a beat's back half.
+- Punch-ins are one quick move (0.5 s, `power3.out`) and then a still hold, at most 1.25x. No slow pushes or drift in a beat's back half.
 
 ---
 
@@ -456,18 +456,27 @@ These counts are verified by script against the JSON above; see `docs/decisions.
 
 ### UI recording: about 2 h
 
-- **Server:** the production build on `:8080`, started with **`LLM_CHAIN=replay`**.
+- **Server:** the production build (`npm run build:web`), served with **`LLM_CHAIN=replay`** on `:8090` (launch config `patient-zero-replay`).
   - Before every take, check that the header chip reads **"LLM replay"**.
   - A take showing "LLM live" or "61 of 61" is wrong: the pick and the claim count change.
-- **Capture:** 1440x900 at **deviceScaleFactor 2** (a 2880x1800 source), composited at 1728x1080, centred on `#0A0A0B`. Punch-ins up to 1.5x stay sharp.
-  - **Option 1:** Playwright `recordVideo` at 2880x1800. Log every click's time and coordinates, and composite a cursor and click ripple in Remotion, because Playwright draws none.
-  - **Option 2:** OBS on a HiDPI window with the real cursor.
+  - A pasted repo reads "LLM template", because a replay has no recorded pick for a repo pasted at record time.
+- **Capture (recorded 2026-10-16):** `node tools/record_ui.mjs <take>` in the video project (`--dry` checks the selectors without recording).
+  - It drives headless Chromium through each take's steps at 1440x900 and device scale 1.5, captured with the CDP screencast (2160x1350, JPEG q80).
+  - Frames are held to a constant 30 fps and encoded as H.264 CRF 14 (`footage/<take>.mp4`).
+  - The screencast ignores device-scale emulation on its own, so it is launched with `--force-device-scale-factor`.
+  - Scale 2 dropped motion to about 20 fps; 1.5 keeps it near 30 (median frame gap about 35 ms).
+  - The composite is 1728x1080, centred on `#0A0A0B`. 2160 px covers punch-ins up to **1.25x** at full sharpness, so no punch-in goes past 1.25x.
+  - Headless Chromium draws no cursor. Every pointer position, click, key and wheel step is logged on the screencast's clock (`footage/<take>.events.json`, with per-frame times), and Remotion draws the cursor and click ripples from it.
 - **Takes:**
-  - A = U1–U4, one continuous take from a fresh load
-  - B = axios
-  - C = the terminal
-  - D = the paste
-  - E = a fresh landing with the autoplay finished, for P1
+
+| Take | Beat | Content | Length |
+|---|---|---|---|
+| A | U1–U4 | One continuous take from a fresh load | 61.5 s |
+| B | U5b | axios. The qix triage runs off camera first, because the radio re-runs a triage only once one has run. | 11.5 s |
+| C | U6 | The terminal. Recorded by the author; see "MCP (U6)". | |
+| D | U7 | The paste | 12.4 s |
+| E | P1 | A fresh landing with the autoplay finished | 20.1 s |
+
 - The step-by-step states, keys and backups are in "Recording notes" below.
 
 ### Sound: about 2 h
@@ -567,6 +576,8 @@ Every on-screen string in this script was measured on 2026-10-16 against the pro
   - `[E2]` and `[E3]`, the Do steps and the claim map are inside "Show 2 more evidence paths …".
 - **The path (U2).**
   - Use mocha: its path is zero hops, and its root pin (`debug@4.3.5`) is safe.
+  - Click the repo name **in the exposure table** (`#exposures`). The tool cards hold small tables with the same repo names, and a click there selects nothing.
+  - The `Node By Index Scan (x:Dep)` line sits below the fold of the open card: scroll the feed until it is in view before the A2 loop.
   - A card opens with a click on its header line.
   - **Show plan** sits inside the open card, next to **Copy Cypher**, and turns into **Hide plan**.
 - **Fix and write-back (U3).**
@@ -574,6 +585,7 @@ Every on-screen string in this script was measured on 2026-10-16 against the pro
   - **Mark remediated** sits in the drawer's bottom bar under either tab, and **Undo** replaces it. Esc closes the drawer.
   - **Run again** is in the band above the panes. The mark reaches FalkorDB on that re-run (`POST /api/remediate`), as a `(:Triage)-[:ASSESSED {action: 'remediated'}]->(:Repo)` record scoped to this browser session.
   - The time on screen is the real wall clock in UTC; no caption quotes it.
+  - After **Run again**, scroll the feed to the `recall_triage` card ("21 repos assessed earlier in this session; 1 marked remediated: mochajs/mocha"). The verdict also gains the line "Marked remediated: mochajs/mocha".
 - **Graph stats and Concentration (U4).**
   - The tabs under the exposure table are **Concentration**, **All Cypher used**, **Triage history** and **Graph stats**.
   - Graph stats describes the graph of the run on screen, so it must come before axios and the paste.
