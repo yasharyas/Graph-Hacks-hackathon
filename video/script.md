@@ -377,19 +377,22 @@ AU-01 is recorded on the author's own microphone and is never synthesized. OC-10
 
 ---
 
-## Word budget and credits
+## Word budget and credits (measured, 2026-10-16)
+
+The full voice-over pass is synthesized (`eleven_v4`), aligned and checked by Scribe. The take files and the timing data live in the video project (`C:\Users\Yash Arya\patient-zero-video`: `public/audio/vo/`, `src/data/timing.json`, `out/vo-draft.mp3`). The beat table above holds the measured durations, written back by `tools/sync_script.py`.
 
 | | Words | ElevenLabs characters (with tags) |
 |---|---|---|
 | Ledger (LG-01–LG-10) | 74 | 512 |
-| On-call (OC-01–OC-14) | 223 | 1,264 |
+| On-call (OC-01–OC-14) | 215 | 1,209 |
 | Author (AU-01, own mic) | 18 | 0 |
-| **Total spoken** | **315** | **1,776** (plus 88 for the OC-10b backup) |
+| **Total spoken** | **307** | **1,721** (plus 88 for the OC-10b backup) |
 
-- **Duration:** 297 synthesized words is 1:58 at 150 wpm, or 1:51 at 160. The author line adds about 7 s.
-- **Timing slack:** speech fills about 87% of the 142.4 s. The rest is click pauses, the hook's silent ramp and the seams.
-- **Tightest beats:** E1 (about 92%, with the J-cut), E3 and U3 (about 91–93% at 150 wpm). If alignment runs long, trim in this order: OC-05's last clause, OC-01's "It isn't wrong" (keep it in the caption), then OC-07's "Nothing is sent" (it stays on screen).
-- **Credits:** a full pass is about 1,776 characters. Lines are cached by id, so a fix re-synthesizes one line. Plan for about 5,000 characters: the cast and pronunciation auditions, one full pass, and retakes on the risk lines (LG-02, OC-09, OC-03, LG-07).
+- **Runtime:** 2:22.4 without the author line. If AU-01 is recorded, END grows by about 6.5 s, for a total of about 2:29.
+- **Measured pace:** Alice runs about 128 wpm before the 1.06 tempo is applied; Viraj about 149 wpm.
+- **Timing slack:** speech fills about 87% of the runtime. The rest is click pauses, the hook's silent ramp and the seams. Each beat lasts its lead + speech + gaps + hold (`tools/lines.py`), so a longer retake moves every later beat instead of overrunning.
+- **Trim order** if a retake runs long: OC-01's "It isn't wrong" (it stays in the caption), then OC-07's "Nothing is sent" (it stays on screen).
+- **Credits:** a full pass is 1,721 characters, and lines are cached by id. Used so far: 354 (audition) + 1,776 (first pass) + 220 (two rewrites, the FalkorDB A/B, one retake), about 2,350.
 
 These counts are verified by script against the JSON above; see `docs/decisions.md`.
 
