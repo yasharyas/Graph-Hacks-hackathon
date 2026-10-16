@@ -197,12 +197,15 @@ Also add a 10 s **Mark remediated → graph write → Triage history** beat. It 
 | A6 Video script | Done; re-walked against the merged app |
 | A7 Submission copy | Done (`docs/submission.md`, 149 words) |
 | A8 MCP default, alert error | Done |
-| A9 Absolute og:image | Waits for the live URL |
+| A9 Absolute og:image | Done (`og:url`, absolute `og:image` / `twitter:image`, live on Render) |
 | A10 Font fetch retry | Done |
 | Security round 7 | PASS after fixes (0 high / 0 medium; `qa/security/phase3r7-security.md`) |
 | Judge r7c | 9.25 overall, every dimension at or above 9 |
 | Issue #1 | Replied and closed |
-| USER 1-2, 4-7 | Open: Render deploy and keys, GitHub About, second LLM key (optional), blog publish, video, freeze and submit |
+| Render | Live at https://patient-zero-rayp.onrender.com (keys set; triage 49 tools, 61/61 traced, live Groq pick; paste uses GH_TOKEN; no source exposed) |
+| GitHub About | Description, topics, website and social preview set |
+| Blog | Published on dev.to (AI-assisted), with the live demo link |
+| USER still open | UptimeRobot on `/api/health`, second LLM key (optional), the decisions list in your own words, video, freeze and submit |
 
 ## Not worth doing
 
