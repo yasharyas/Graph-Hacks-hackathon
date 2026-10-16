@@ -119,9 +119,12 @@ export function questionFilter(q: string, r: Report, via?: string): Record<strin
   const version = REPOS_Q.test(q) ? badOf(q, r) : undefined;
   if (version) f.version = version;
   if (via && REPOS_Q.test(q)) f.via = via;
-  const listing = /\b(list|all|every|each|how many)\b|\bwho owns\b/i.test(q);
-  return Object.keys(f).length || listing ? f : undefined;
+  return Object.keys(f).length || listing(q) ? f : undefined;
 }
+// "List the repos": a list word, or "all / every / each" when the question asks about no other head noun ("of all the
+// maintainers, which one ...?" is the account answer, "which team should handle all of this?" the teams answer) and
+// not for one of them ("of all the repos, which one is most urgent?").
+const listing = (q: string) => /\b(list|how many)\b|\bwho owns\b/i.test(q) || (/\b(all|every|each)\b/i.test(q) && !/\bwhich one\b/i.test(q) && !headOf(clauses(q)[0]));
 
 // Every entity a question names that a graph answer must be about: the run's repos (a bare name only when no team of that
 // name is named too) and teams, any name@version, a scoped package, and the `via` package. A bare name of the incident's
@@ -180,15 +183,13 @@ export function completeList(res: ToolResult): string {
     + [...teams].map(([t, xs]) => `${t ? tk(t) : 'no owner on record'}: ${xs.map(label).join(', ')}`).join('; ') + '.';
 }
 
-// Coverage post-check: an answer that names some but not all matches, without "N of M" / "+K more", is replaced by
-// the complete list; one that names none (e.g. "no information") gets the list appended.
-export function enforceCoverage(text: string, res: ToolResult): { text: string; replaced: boolean } {
+// Coverage post-check, for a question that asks for repos: a model answer that does not name every match, nor say "N of M"
+// / "+K more", gets the complete list appended. Never replaced: the words shown as the model's are the model's.
+export function enforceCoverage(text: string, res: ToolResult): string {
   const rows = res.rows as FRow[];
-  if (!rows.length) return { text, replaced: false };
   const named = rows.filter((x) => mentions(text, x.repo)).length;
   const marked = new RegExp(`\\bof ${rows.length}\\b`).test(text) || text.includes(`+${rows.length - named} more`);
-  if (named === rows.length || marked) return { text, replaced: false };
-  return named ? { text: completeList(res), replaced: true } : { text: `${text}\n${completeList(res)}`, replaced: false };
+  return !rows.length || named === rows.length || marked ? text : `${text}\n${completeList(res)}`;
 }
 
 // ponytail: keyword intents, not language understanding; whatever they miss, the model answers (names still checked).
@@ -216,14 +217,26 @@ const TEAMS = /\b(which|what) teams?\b|\bmost work\b|\bper team\b|\bby team\b/i;
 // keyword elsewhere matches: "which library should I replace first?" is the carrier answer (not the Do plan), "which
 // maintainer account reaches the most repos?" the PageRank one (not the per-team list). A malicious package or account
 // ("which packages were compromised?") is the versions answer or the incident's own; a safe version to move to ("what
-// version should we pin debug to?") has no graph block (the model answers).
-const HEAD = /\b(?:which|what)\s+(?:of\s+(?:the|its|our|these|those|their)\s+)?((?:(?:single|one|bad|malicious|compromised|hijacked|poisoned|infected|npm|exposed|affected)\s+)*)([a-z]+)([^?.!;]{0,40})/i;
+// version should we pin debug to?") has no graph block (the model answers). Adjectives may stand between ("which transitive
+// dependency"), and "which one" / "who" with no noun takes the one a preposition names ("of all the maintainers, which one").
+const ADJ = '(?:(?:single|one|bad|malicious|compromised|hijacked|poisoned|infected|npm|exposed|affected|transitive|direct|indirect|nested|upstream|shared|common|individual|specific|particular|top|main|key|biggest|largest|riskiest|worst|weakest|other|third-party|open-source|dev|prod|production|runtime|root|underlying|vulnerable|risky|dangerous|offending)\\s+)*';
+const DET = '(?:(?:all|every|each)\\s+(?:of\\s+)?)?(?:(?:the|its|our|these|those|their)\\s+)?';
+const HEAD = new RegExp(`\\b(?:which|what)\\s+(?:ones?\\s+)?(?:(?:of|out of|among)\\s+${DET})?(${ADJ})([a-z]+)([^?.!;]{0,40})`, 'i');
+const NOUN = /^(librar(y|ies)|packages?|dependenc(y|ies)|deps?|modules?|upgrades?|carriers?|maintainers?|accounts?|persons?|people|authors?|publishers?|teams?|versions?|releases?|repos?|repositor(y|ies)|projects?)$/i;
+const BACK = new RegExp(`\\b(?:of|out of|among|from)\\s+${DET}(${ADJ})([a-z]+)`, 'gi');
+const PRONOUN = /\b(?:which(?:\s+ones?)?|who)\b(?!\s+owns?\b)/i;
 const BAD = /\b(bad|malicious|compromised|hijacked|poisoned|infected)\b/i;
 const WAS_BAD = /^\s*(is|are|was|were|got|has been|have been)\s+(\w+\s+)?(bad|malicious|compromised|hijacked|poisoned|infected|affected|hit|involved|published)\b/i;
 const SAFE_TO = /\b(safe|clean|fixed|good|pin|roll ?back|downgrade|upgrade to|move to)\b/i;
 type Head = 'carrier' | 'account' | 'incident' | 'team' | 'version' | 'open';
 function headOf(q: string): Head | undefined {
-  const [, adj = '', noun = '', after = ''] = HEAD.exec(q) ?? [];
+  let [, adj = '', noun = '', after = ''] = HEAD.exec(q) ?? [];
+  const p = NOUN.test(noun) ? null : PRONOUN.exec(q);
+  const back = p && [...q.matchAll(BACK)].find((b) => NOUN.test(b[2]!));
+  if (back) {
+    [, adj = '', noun = ''] = back;
+    after = q.slice(p.index + p[0].length).slice(0, 40); // "of all the packages, which one was compromised?"
+  }
   const w = noun.toLowerCase();
   const bad = BAD.test(adj) || WAS_BAD.test(after);
   if (/^packages?$/.test(w) && /^\s+(versions?|releases?)\b/i.test(after)) return SAFE_TO.test(after) ? 'open' : 'version'; // "which package versions"
@@ -238,7 +251,7 @@ const clauses = (q: string): [string, string] => {
   const m = /,?\s+(?:and|also|plus)\s+(?=(?:which|what|who|when|how|is|are|do|does|should|can|could|where|why|will)\b)|\?\s+(?=\S)|;\s*/i.exec(q);
   return m ? [q.slice(0, m.index), q.slice(m.index + m[0].length)] : [q, ''];
 };
-const PRIORITY = /\bif (i|we) (can|could) only\b|\bprioriti[sz]\w*\b|\b(which|what) (\d+|two|three|four|five|few) (repos?|first)\b|\bfix (\d+|two|three|four|five) (repos? )?(first|today)\b|\b(which|what) repos?\b[^?.!]{0,40}\b(first|most urgent|riskiest)\b/i;
+const PRIORITY = /\bif (i|we) (can|could) only\b|\bprioriti[sz]\w*\b|\b(which|what) (\d+|two|three|four|five|few) (repos?|first)\b|\bfix (\d+|two|three|four|five) (repos? )?(first|today)\b|\b(which|what) repos?\b[^?.!]{0,40}\b(first|most urgent|riskiest)\b|\brepos\b[^?.!]{0,40}\bwhich one\b[^?.!]{0,40}\b(first|most urgent|riskiest)\b/i;
 const COUNT: Record<string, number> = { two: 2, three: 3, four: 4, five: 5, few: 3 };
 // Every repo a question names (full or bare name), in the question's order: "compare mocha and nodemon" answers both.
 const where = (q: string, e: Exposure) => {
@@ -457,13 +470,9 @@ export async function* ask({ run, question, marks = [], chatFn = pinned, signal 
       : `No language model is available right now, and this question has no answer built from the graph. ${graphCan}`;
   }
   text = stripMarkdown(text);
-  const last = results.findLast((r) => r.tool === 'filter_exposures');
-  if (last) {
-    const c = enforceCoverage(text, last);
-    text = c.text;
-    if (c.replaced) mode = 'template';
-  }
-  return text;
+  // only a question that asks for repos: "is chalk or debug the bigger problem?" keeps the model's comparison as written
+  const last = REPOS_Q.test(question) && !head ? results.findLast((r) => r.tool === 'filter_exposures') : undefined;
+  return last ? enforceCoverage(text, last) : text;
   }
   if (!text) return; // the client left mid-answer
   if (mode === 'template' && !reason && !covers(text)) { // e.g. a carrier answer that never names the package asked about

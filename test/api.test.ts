@@ -440,6 +440,68 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
     }
   });
 
+  test('ask: "all / every / each" lists the repos only when the question is about repos; "which one" and adjectives keep the head noun', async () => {
+    const t = await triageRun({ scenario: QIX, at: QAT });
+    const runId = of(t.evs, 'start').runId;
+    let asked = 0;
+    hooks.chat = async (): Promise<ChatRes> => (asked++, { text: 'Pin `debug@4.4.2` to a clean release.', toolCalls: [], provider: 'groq:fake', raw: {} });
+    const askQ = async (question: string) => {
+      const evs = await sse<TriageEvent>(await post('/api/ask', { runId, question }, { cookie: t.sid! }));
+      assert.deepEqual(of(evs, 'guard').flagged, [], question);
+      return of(evs, 'narration').text;
+    };
+    const expect: [RegExp, string[]][] = [
+      [/^The accounts whose compromise would reach the most here, by PageRank over package dependencies: `sindresorhus`, \d+ packages, reaching 21 of 21 repos; [^\n]*$/, [
+        'Of all the maintainers, which one has the widest reach into our dependency tree?', 'Out of all the maintainers, who is the biggest risk?',
+        'Which maintainer, out of all of them, is the riskiest?', 'Which one of the maintainers has the widest reach?', 'Among all our maintainers, which one would hurt every repo most?']],
+      [/^Open exposures by team, most first: `CLI` 5 repos; [^\n]*\.$/, ['Which team should handle all of this?', 'Of every team, which one has the most exposed repos?', 'Which of all the teams owns the most exposed repos?']],
+      [/^One change covers the most: the version-qualified override on `debug@4\.4\.2`/, [
+        'Which transitive dependency lets debug@4.4.2 in for the most repos?', 'Of all the packages involved, which one should I patch first?', 'Which single direct dependency should each team bump first?']],
+      [/^Exposed repos by malicious version, most first: `debug@4\.4\.2` 21 repos/, ['Which compromised release hit all our repos?', 'Of all the packages, which one was compromised?']],
+      [/^Fix first, by urgency: 1\) `acme\/checkout-web`/, ['Of all the repos, which one is most urgent?']],
+      [/^Complete list \(no filter\): 21 repos across 7 teams\. /, ['Which repos does each team own?', 'Is every repo affected?']], // about repos: still the list
+    ];
+    try {
+      for (const [want, qs] of expect) for (const q of qs) {
+        const text = await askQ(q);
+        assert.match(text, want, q);
+        if (!want.source.startsWith('^Complete list')) assert.doesNotMatch(text, /Complete list/, q);
+      }
+      assert.equal(asked, 0);
+    } finally {
+      delete hooks.chat;
+    }
+  });
+
+  test('ask: a model\'s comparison is never swapped for the repo list; a repo question gets the list added, not substituted', async () => {
+    const t = await triageRun({ scenario: QIX, at: QAT });
+    const runId = of(t.evs, 'start').runId;
+    let reply = '';
+    let calls = 0;
+    // the model looks at the exposures first, then answers naming two of the 21 repos without "of 21" (the judge's repro)
+    hooks.chat = async (): Promise<ChatRes> => (calls++ % 2 === 0
+      ? { text: '', toolCalls: [{ id: 'c1', name: 'filter_exposures', args: {} }], provider: 'groq:fake', raw: { role: 'assistant', content: null, tool_calls: [{ id: 'c1', type: 'function', function: { name: 'filter_exposures', arguments: '{}' } }] } }
+      : { text: reply, toolCalls: [], provider: 'groq:fake', raw: {} });
+    const askQ = async (question: string) => {
+      const evs = await sse<TriageEvent>(await post('/api/ask', { runId, question }, { cookie: t.sid! }));
+      return { n: of(evs, 'narration'), g: of(evs, 'guard'), tools: evs.filter((e) => e.type === 'tool_start').length };
+    };
+    try {
+      reply = '`debug@4.4.2` is the bigger problem: it reaches 21 repos, including `acme/checkout-web` and `mochajs/mocha`, while `chalk@5.6.1` reaches 17 repos.';
+      const cmp = await askQ('Is chalk or debug the bigger problem here?');
+      assert.deepEqual([cmp.n.mode, cmp.n.provider, cmp.n.unanswered, cmp.n.used, cmp.tools], ['live', 'groq:fake', undefined, 1, 1]);
+      assert.equal(cmp.n.text, reply); // the model's words, guarded as usual
+      assert.deepEqual(cmp.g.flagged, []);
+      reply = 'The hardest are `acme/checkout-web` and `npm/cli`.';
+      const hard = await askQ('Which repos are hardest to fix?');
+      assert.deepEqual([hard.n.mode, hard.n.used], ['live', 2]);
+      assert.match(hard.n.text, /^The hardest are `acme\/checkout-web` and `npm\/cli`\.\nComplete list \(no filter\): 21 repos across 7 teams\. /);
+      assert.equal(calls, 4);
+    } finally {
+      delete hooks.chat;
+    }
+  });
+
   test('ask: only a model-written answer uses up one of the 4 follow-ups; graph answers and refusals are free; marks count at once', async () => {
     const t = await triageRun({ scenario: QIX, at: QAT });
     const runId = of(t.evs, 'start').runId;
