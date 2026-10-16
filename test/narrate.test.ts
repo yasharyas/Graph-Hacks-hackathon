@@ -5,7 +5,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import type { Exposure, Report } from '../shared/events.ts';
 import { guard } from '../server/agent/guard.ts';
-import { evidenceBlock, evidenceSet, observations, parsePick, PICK_SYSTEM, pickMessages, verdictText } from '../server/agent/narrate.ts';
+import { compareFacts, directFacts, evidenceBlock, evidenceSet, observations, parsePick, PICK_SYSTEM, pickMessages, rotateFacts, teamFirstFacts, verdictText, whenFacts } from '../server/agent/narrate.ts';
+import { todayNotes } from '../server/agent/triage.ts';
+import { todayCheck } from '../web/src/data/todayCheck.ts';
 
 const fixture = JSON.parse(readFileSync(new URL('../shared/fixtures/triage-qix.json', import.meta.url), 'utf8'));
 const FIRST = Date.parse('2025-09-08T13:12:10Z');
@@ -45,6 +47,8 @@ test('org verdict: complete, plain-language, cited, guard-clean, no markdown', (
   assert.ok(!notify.includes('http-party/http-server'));
   assert.match(notify, /^Notify: `Payments` \(`#team-payments`\): `acme\/checkout-web` \(LOCKED\); /);
   assert.match(todo, /^Do: 1\) For `acme\/checkout-web` \[E1\]: rotate secrets/); // the step that cannot wait comes first
+  // then the lockfile fix, then the rebuild from it: a rebuild from the old lockfile reinstalls the malicious version
+  assert.match(todo, /rotate secrets that builds and CI could read in the window, regenerate the lockfile with the overrides from its Fix, then rebuild and redeploy from the fixed lockfile\. 2\)/);
   assert.match(todo, /2\) Keep installing the 4 WOULD_PULL repos from their committed lockfiles \(npm ci\): none pins a malicious version\. 3\) Only for a re-resolve during the window/);
   assert.match(todo, /replace `chalk@5\.6\.1` with `chalk@5\.6\.0`|replace `debug@4\.4\.2` with `debug@4\.4\.1`/);
   assert.doesNotMatch(t, /\*\*|#your-team|Your team/);
@@ -104,11 +108,24 @@ test('a pasted repo gets one plain answer: what its lockfile pins, no Notify, co
   r.notices = [];
   let t = verdictText(r);
   clean(r, t);
-  assert.match(t, /^Verdict: `mochajs\/mocha` was safe if installed from your committed lockfile, which pins `debug@4\.3\.7`\. Only a fresh install between 13:12 UTC and 15:15 UTC on 2025-09-08 would have fetched `debug@4\.4\.2`, from the `qix` account compromise\./);
+  // two sentences: the answer, then the window and who; no OSV timing (the timeline and the steps carry it)
+  assert.match(t, /^Verdict: `mochajs\/mocha` was safe if installed from your committed lockfile, which pins safe versions where its ranges admit a malicious one \(`debug@4\.3\.7`\)\. Only a fresh install between 13:12 UTC and 15:15 UTC on 2025-09-08 would have fetched `debug@4\.4\.2`, from the `qix` account compromise\.\n/);
+  assert.doesNotMatch(t, /OSV|In hindsight/);
   // which lockfile was judged: the last commit before the incident, or a pasted file (a counterfactual)
   r.scope = { ...r.scope, source: { kind: 'snapshot', sha: '5f8e8a8'.padEnd(40, '0'), date: Date.parse('2025-09-01T10:00:00Z') } };
-  assert.match(verdictText(r), /^Verdict \(its package-lock\.json at commit 5f8e8a8 from 2025-09-01, the last change before the incident\): `mochajs\/mocha` was safe if installed/);
+  assert.match(verdictText(r), /^Verdict \(judged on the package-lock\.json at commit 5f8e8a8 from 2025-09-01, the last change before the incident\): `mochajs\/mocha` was safe if installed/);
   clean(r, verdictText(r));
+  // a renamed repo: judged under the name it was pasted as, its new name said once
+  r.scope = { ...r.scope, source: { ...r.scope.source!, now: 'mochajs/mocha-renamed' } };
+  assert.match(verdictText(r), /^Verdict \(judged on the package-lock\.json at commit 5f8e8a8 from 2025-09-01, the last change before the incident; the repo is now mochajs\/mocha-renamed\): /);
+  assert.equal(verdictText(r).split('mochajs/mocha-renamed').length, 2);
+  clean(r, verdictText(r));
+  // more than three pins: three (its main package first), then how many more; never a list that reads as everything it holds
+  const many = structuredClone(r);
+  many.exposures[0]!.locked = ['ansi-regex@6.1.0', 'chalk@5.3.0', 'debug@4.3.2', 'debug@4.3.5', 'debug@4.4.0', 'strip-ansi@7.1.0'];
+  assert.match(verdictText(many), /which pins safe versions where its ranges admit a malicious one \(`debug@4\.3\.2`, `debug@4\.3\.5`, `debug@4\.4\.0` and 3 more\)\./);
+  assert.match(verdictText(many), /it pins `debug@4\.3\.2`, `debug@4\.3\.5`, `debug@4\.4\.0` and 3 more \(safe\)/);
+  clean(many, verdictText(many));
   r.scope = { ...r.scope, source: { kind: 'pasted' } };
   assert.match(verdictText(r), /^Verdict \(counterfactual: this checks the lockfile you pasted as if it had been committed on 2025-09-08\): /);
   r.scope = { kind: 'guest', label: 'mochajs/mocha', repos: 1 };
@@ -128,10 +145,55 @@ test('a pasted repo gets one plain answer: what its lockfile pins, no Notify, co
   r.scope.label = 'pasted/app';
   t = verdictText(r);
   clean(r, t);
-  assert.match(t, /^Verdict: LOCKED for the `qix` account compromise: the lockfile itself pins the malicious version `debug@4\.4\.2`, so rotate secrets and rebuild\./);
+  assert.match(t, /^Verdict: LOCKED for the `qix` account compromise: the lockfile itself pins the malicious version `debug@4\.4\.2`, so rotate secrets and rebuild\.\n/);
+  assert.match(t, /Do: 1\) Rotate secrets .* 2\) .*regenerate the lockfile.* 3\) Rebuild and redeploy, from the fixed lockfile/); // one order everywhere
 
   r.exposures = [];
   assert.match(verdictText(r), /^Verdict: `pasted\/app` is not exposed to the `qix` account compromise at 13:30 UTC/);
+});
+
+test('"when": what is known at the clock, anything later only "in hindsight" (the record\'s seconds in its own minute)', () => {
+  const r = report(); // 13:30: before the 14:26:51 OSV record and the 15:15 removal
+  const at = (hhmm: string) => ({ ...r, at: Date.parse(`2025-09-08T${hhmm}:00Z`) });
+  assert.equal(whenFacts(r), 'Exposure began at 13:12 UTC, when `ansi-styles@6.2.2` was published. No OSV record exists yet at 13:30 UTC. In hindsight: it came at 14:26 UTC, 74 minutes after the first exposure. At 13:30 UTC they were still live. In hindsight: npm removed them around 15:15 UTC.');
+  assert.match(whenFacts(at('14:26')), /No OSV record exists yet at 14:26 UTC\. In hindsight: it came at 14:26:51 UTC,/);
+  assert.match(whenFacts(at('14:30')), /The first OSV record came at 14:26 UTC, 74 minutes later\. At 14:30 UTC they were still live\./);
+  assert.match(whenFacts(at('15:30')), /removed around 15:15 UTC \(approximate\)\.$/);
+  assert.match(whenFacts(at('13:05')), /^No repo here was exposed yet at 13:05 UTC\. In hindsight: exposure began at 13:12 UTC/);
+  for (const t of ['13:05', '13:30', '14:26', '14:30', '15:30']) clean(at(t), whenFacts(at(t)));
+  assert.match(verdictText(at('14:26')), /No OSV record exists yet at 14:26 UTC\. In hindsight: it came at 14:26:51 UTC,/);
+});
+
+test('Ask facts: own package.json declarations; compare and "most urgent for a team" lead with one verdict; marks count as done', () => {
+  const r = report();
+  const by = (repo: string) => r.exposures.find((e) => e.repo === repo)!;
+  const direct = directFacts(r);
+  assert.match(direct, /^3 repos declare a range that admits a malicious version in their own package\.json, so their owners can change it there: `npm\/cli` declares `\^10\.0\.0`, which admits `supports-color@10\.2\.1` \[E4\]; `mochajs\/mocha` declares `\^4\.3\.5`/);
+  assert.ok(!direct.includes('checkout-web') && !direct.includes('github/docs'), direct);
+  // the same urgency as "if I can only fix three": LOCKED, then production declared in its own package.json, ...
+  assert.match(compareFacts(r, [by('mochajs/mocha'), by('acme/checkout-web')]), /^Most urgent: `acme\/checkout-web` \(its lockfile pins the malicious version, so rotate secrets and rebuild\); then `mochajs\/mocha` \(production, and its own package\.json declares the range/);
+  assert.equal(compareFacts(r, [by('npm/cli'), by('mochajs/mocha')]), 'By urgency, `npm/cli` and `mochajs/mocha` rank the same, for each: production, and its own package.json declares the range, so its owner can pin it directly.');
+  assert.match(teamFirstFacts(r, 'Payments'), /^Most urgent for `Payments`: `acme\/checkout-web` \(its lockfile pins the malicious version, so rotate secrets and rebuild\)\. First step: /);
+  assert.match(teamFirstFacts(r, 'QA'), /^Most urgent for `QA`: `mochajs\/mocha` .* Then `remy\/nodemon`\.$/);
+  for (const t of [direct, compareFacts(r, [by('npm/cli'), by('mochajs/mocha')]), teamFirstFacts(r, 'QA')]) clean(r, t);
+  by('acme/checkout-web').remediated = { at: 1, action: 'remediated' };
+  assert.match(rotateFacts(r), /^No LOCKED repo is still open\. Marked remediated: `acme\/checkout-web`\. For the other 4 WOULD_PULL repos/);
+  assert.equal(teamFirstFacts(r, 'Payments'), '`Payments` has no open exposure at 13:30 UTC.');
+  clean(r, rotateFacts(r));
+});
+
+test('today notes: a pin or override below what a fresh resolve gets today is a downgrade to skip (real semver); the Fix tab reads it as a skip', () => {
+  const m = { repo: 'mochajs/mocha', overrides: { 'debug@4.4.2': '4.4.1', 'chalk@5.6.1': '5.6.0' }, direct: { debug: '4.4.1' }, steps: [], prBody: '' };
+  const versions = { debug: ['4.3.5', '4.4.0', '4.4.1', '4.4.3'], chalk: ['5.6.0', '5.6.2', '6.0.1'] };
+  const { notes, skip } = todayNotes(m, { deps: { debug: '^4.3.5' }, dev: {}, versions });
+  assert.deepEqual(notes, [
+    "Today's package.json declares debug ^4.3.5, which resolves 4.4.3 today; the debug@4.4.2 override and the exact debug 4.4.1 pin would downgrade it to 4.4.1: skip the debug@4.4.2 override and its pin unless you are replaying the window.",
+    'chalk@5.6.1 is gone from npm, so ranges that admitted it now resolve chalk 5.6.2; the chalk@5.6.1 override would hold them at 5.6.0: skip the chalk@5.6.1 override unless you are replaying the window.', // ^5.6.0: never onto chalk 6
+  ]);
+  assert.deepEqual(skip, ['debug', 'chalk']);
+  assert.deepEqual(todayCheck(notes)!.skipped, ['debug@4.4.2', 'chalk@5.6.1']);
+  // no release newer than the pins: nothing to skip
+  assert.deepEqual(todayNotes(m, { deps: { debug: '^4.3.5' }, dev: {}, versions: { debug: ['4.4.0', '4.4.1'], chalk: ['5.6.0'] } }).notes, ["Checked against today's package.json: its direct dependencies still match this fix."]);
 });
 
 test('observations: built only from the report, so every one passes the guard; degenerate counts read naturally', () => {

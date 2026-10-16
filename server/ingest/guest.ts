@@ -62,7 +62,7 @@ async function get(url: string, signal: AbortSignal, api = false) {
   }
 }
 
-export type Today = { deps: Record<string, string>; dev: Record<string, string> };
+export type Today = { deps: Record<string, string>; dev: Record<string, string>; versions?: Record<string, string[]> };
 // Today's package.json (raw, no API quota): only its direct dependency names and ranges, sanitized and capped.
 async function fetchToday(owner: string, repo: string, signal: AbortSignal): Promise<Today | undefined> {
   const res = await get(`https://raw.githubusercontent.com/${owner}/${repo}/HEAD/package.json`, signal).catch(() => null);
@@ -104,18 +104,23 @@ async function fetchLock({ owner, repo }: { owner: string; repo: string }, snaps
   if (commits?.status === 404) throw new HttpError(404, `github.com/${owner}/${repo} is not a public repo.`);
   let sha: unknown;
   let date: unknown;
+  let url: unknown;
   if (commits?.ok) {
-    const c = (safeJson(await capped(commits), 1_000_000) as { sha?: unknown; commit?: { committer?: { date?: unknown } } }[] | null)?.[0];
+    const c = (safeJson(await capped(commits), 1_000_000) as { sha?: unknown; html_url?: unknown; commit?: { committer?: { date?: unknown } } }[] | null)?.[0];
     sha = c?.sha;
     date = c?.commit?.committer?.date;
+    url = c?.html_url;
   } else void commits?.body?.cancel().catch(() => {});
   const ref = typeof sha === 'string' && /^[0-9a-f]{40}$/.test(sha) ? sha : null;
   const when = typeof date === 'string' ? Date.parse(date) : NaN;
+  // A renamed repo: GitHub redirected the commits call, and the commit's own link names where the repo lives now.
+  const moved = typeof url === 'string' ? /^https:\/\/github\.com\/([A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100})\/commit\//.exec(url)?.[1] : undefined;
+  const now = moved && moved.toLowerCase() !== `${owner}/${repo}`.toLowerCase() ? moved : undefined;
   const res = await get(`https://raw.githubusercontent.com/${owner}/${repo}/${ref ?? 'HEAD'}/package-lock.json`, signal);
   if (res.status === 404) throw new HttpError(404, await noLockfile(owner, repo, signal, bad));
   if (!res.ok) throw new HttpError(502, GITHUB_DOWN);
   const { name: _name, ...parsed } = checkLock(await capped(res));
-  const source: LockSource = ref ? { kind: 'snapshot', sha: ref, ...(Number.isFinite(when) && { date: when }) } : { kind: 'head', reason: commits?.ok ? 'no-history' : 'unavailable' };
+  const source: LockSource = ref ? { kind: 'snapshot', sha: ref, ...(Number.isFinite(when) && { date: when }), ...(now && { now }) } : { kind: 'head', reason: commits?.ok ? 'no-history' : 'unavailable' };
   const today = ref ? await fetchToday(owner, repo, signal) : undefined; // only a snapshot can differ from today
   return { parsed, sha: ref, source, today, repo: ref ? `${owner}/${repo}` : `${owner}/${repo}@HEAD` }; // @HEAD: today's lockfile, a counterfactual
 }
@@ -125,7 +130,8 @@ async function noLockfile(owner: string, repo: string, signal: AbortSignal, bad:
   const list = bad.length ? `${bad.slice(0, 6).map((v) => v.replace(/@(?=[^@]*$)/, ' ')).join(', ')}${bad.length > 6 ? ` and ${bad.length - 6} more (the timeline lists them all)` : ''}` : '';
   for (const [file, tool] of [['yarn.lock', 'yarn'], ['pnpm-lock.yaml', 'pnpm']] as const) {
     const r = await safeFetch(`https://raw.githubusercontent.com/${owner}/${repo}/HEAD/${file}`, { method: 'HEAD', signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]) }).catch(() => null);
-    if (r?.ok) return `${owner}/${repo} uses ${tool} (${file}), and Patient Zero reads only npm's package-lock.json (v2 or v3); ${tool} lockfiles are on the roadmap.${list ? ` To check it by hand, search ${file} at a commit from before the incident for the malicious versions: ${list}.` : ''} If the project also installs with npm (no workspace: dependencies), run npm install --package-lock-only in a checkout and drop the generated file here.`;
+    // The by-hand check first: npm install --package-lock-only fails on workspace: and catalog: dependencies (most pnpm and yarn monorepos).
+    if (r?.ok) return `${owner}/${repo} uses ${tool} (${file}), and Patient Zero reads only npm's package-lock.json (v2 or v3) so far. To check it by hand, search ${file} at a commit from before the incident for the malicious versions${list ? `: ${list}` : ' (the timeline lists them)'}. Only for a plain npm project (no workspace: or catalog: dependencies): run npm install --package-lock-only in a checkout and drop the generated file here.`;
   }
   return `No package-lock.json at the root of ${owner}/${repo}. In a checkout, run npm install --package-lock-only (it writes the lockfile without installing anything) and drop the generated package-lock.json here.`;
 }
@@ -193,6 +199,10 @@ export async function* analyze(input: Input, scenario: ScenarioId, session: stri
     if (input.github) {
       yield progress('fetch', 0);
       ({ parsed, repo, sha, source, today } = await fetchLock(input.github, snapshotAt, signal, inc.versions.map((v) => v.id)));
+      // what a fresh resolve of each affected package gets today: its clean releases in the committed npm cache
+      const bad = new Set(inc.versions.map((v) => v.id));
+      if (today) today.versions = Object.fromEntries([...new Set(inc.versions.map((v) => v.id.slice(0, v.id.lastIndexOf('@'))))]
+        .map((n) => [n, Object.keys(data!.packuments[n]?.versions ?? {}).filter((v) => !bad.has(`${n}@${v}`))]));
       yield progress('fetch', 1);
     }
     yield progress('parse', 1);

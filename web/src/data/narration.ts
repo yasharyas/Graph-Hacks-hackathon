@@ -76,15 +76,16 @@ export function lines(text: string, guard: GuardClaims | null): { label: string 
 
 /**
  * The Why line as whole path sentences: "`a/b` locks `debug@4.4.2` through `express@5.1.0` [E1]; `c/d` declares ..." breaks
- * after each "; " that is followed by a name (the next path), never inside a parenthetical like "(paths for 3 of 21; +18 more
- * in the table)". Presentation only: the pieces join back to the identical segments, so chips and claim checks are unchanged.
+ * at each "; " that is followed by a name (the next path), never inside a parenthetical like "(paths for 3 of 21; +18 more
+ * in the table)". Each piece is its own line, so the "; " between them goes (left at a line's end after a name it read as a
+ * stray "chalk@5.6.1 ;"). Presentation only: chips and claim checks are unchanged.
  */
 export function whyParts(segs: Segment[]): Segment[][] {
   const out: Segment[][] = [[]];
   segs.forEach((s, i) => {
     const next = segs[i + 1];
     if (s.kind === 'text' && next?.kind === 'entity' && /; $/.test(s.text)) {
-      out.at(-1)!.push({ kind: 'text', text: s.text.slice(0, -1) }); // the ";" ends this sentence, the space goes with the break
+      if (s.text.length > 2) out.at(-1)!.push({ kind: 'text', text: s.text.slice(0, -2) });
       out.push([]);
       return;
     }
@@ -150,9 +151,11 @@ export function spokenAnswer(text: string, max = 280): string {
   return `${end > max / 3 ? cut.slice(0, end + 1) : `${cut.trimEnd()}…`} The full answer is in the feed.`;
 }
 
+/** Model-written Ask answers a triage allows (server/agent/ask.ts MAX_ANSWERS); graph answers and refusals are free. */
+export const MAX_ANSWERS = 4;
 /** Above each Ask answer: how it was produced, so a person can tell a graph lookup from a model's words. */
-export function answerLabel(n: { mode: 'live' | 'replay' | 'template'; provider: string | null; unanswered?: boolean }): string {
-  if (n.unanswered) return 'Not answered: no language model is available';
+export function answerLabel(n: { mode: 'live' | 'replay' | 'template'; provider: string | null; unanswered?: boolean; used?: number }): string {
+  if (n.unanswered) return (n.used ?? 0) >= MAX_ANSWERS ? `Not answered: this triage’s ${MAX_ANSWERS} model answers are used` : 'Not answered: no language model is available';
   const by = n.provider ? ` · ${n.provider}` : '';
   return n.mode === 'template' ? `Answered from the graph${by}` : `${n.mode === 'replay' ? 'Recorded LLM answer' : 'LLM answer'}: the model wrote the words${by}`;
 }

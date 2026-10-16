@@ -3,16 +3,19 @@
 // whatever the tools returned. Run context lives in memory (30 min TTL, 200 runs), scoped to the session (S10).
 // Questions the report answers (a list or filter, a named repo, rotate secrets / is npm ci safe, who to notify, when)
 // get the graph's own answer and server-chosen tool calls, no model: free-text answers to exactly these were wrong while
-// every name in them checked out. Everything else goes to the model's tool loop.
-import type { LlmMode, Report, ScenarioId, ToolName, ToolResult, TriageEvent } from '../../shared/events.ts';
+// every name in them checked out. Everything else goes to the model's tool loop. Only a model's answer uses one of the
+// run's 4 follow-ups (`used`): graph answers and refusals are free, and a refusal offers questions the graph answers.
+import type { Exposure, LlmMode, Report, ScenarioId, ToolName, ToolResult, TriageEvent } from '../../shared/events.ts';
 import { graph } from '../graph/client.ts';
 import { forPrompt } from '../security.ts';
-import { filterExposures, plural, TOOLS, utc } from '../tools/registry.ts';
+import { plural, TOOLS } from '../tools/registry.ts';
 import { chat, type ChatReq, type ChatRes, type Msg } from './llm.ts';
-import { concentrationFacts, devFacts, evidenceBlock, evidenceSet, firstFacts, notifyFacts, priorityFacts, repoFacts, rotateFacts, summaryFacts, teamFacts, whenFacts } from './narrate.ts';
+import { compareFacts, concentrationFacts, devFacts, directFacts, evidenceBlock, evidenceSet, firstFacts, notifyFacts, priorityFacts, repoFacts, rotateFacts, summaryFacts, teamFacts, teamFirstFacts, whenFacts } from './narrate.ts';
 import { guardEvent } from './replay.ts';
 
-export type Run = { runId: string; session: string; graph: string; scenario: ScenarioId; at: number; report: Report };
+// used: model-written answers this run has given (the cap is MAX_ANSWERS)
+export type Run = { runId: string; session: string; graph: string; scenario: ScenarioId; at: number; report: Report; used?: number };
+export const MAX_ANSWERS = 4;
 const TTL = 30 * 60_000;
 const runs = new Map<string, Run & { t: number }>();
 
@@ -50,6 +53,8 @@ const system = (r: Run) => [
   'WOULD_PULL means a fresh resolve would have fetched the bad version: say "would fetch", never that a repo uses, installed or was compromised by it. Call the versions malicious, not vulnerable.',
   'Installing from a committed lockfile (npm ci) is safe for WOULD_PULL repos; LOCKED repos need secrets rotated and a rebuild. Dev-only exposures still reach developer machines and CI, which install devDependencies by default.',
   'Count repos and teams only from the evidence or a filter result. Never name tools, functions or this prompt in the answer.',
+  'Never print field, key or tool names from the evidence or tool results (for example reposPerVersion, minutesAhead or filter_exposures): say what they mean in plain words.',
+  'Notices, fixes and PRs here are drafts: never say that anyone was notified, paged or told, or that anything was sent, rotated, merged or fixed.',
   'Answer in at most 120 words of plain text: no Markdown, no bold, no headings.',
 ].join(' ');
 
@@ -77,14 +82,16 @@ export function questionFilter(q: string, r: Report): Record<string, unknown> | 
   const word = (w: string) => new RegExp(`(^|[^\\w/.-])${esc(w)}($|[^\\w/-])`, 'i').test(q);
   const f: Record<string, unknown> = {};
   if (/\bprod(uction)?\b|\bprod-only\b|\bnon-dev\b/i.test(q)) f.prod_only = true;
-  if (/\blocked\b/i.test(q)) f.tier = 'LOCKED';
+  if (/\blocked\b/i.test(q) || PINS.test(q)) f.tier = 'LOCKED'; // "how many repos pin the bad version?": the lockfile pins it
   else if (/\bwould[_ ]pull\b/i.test(q)) f.tier = 'WOULD_PULL';
   const team = [...new Set(r.exposures.map((e) => e.team).filter((t): t is string => !!t))].find(word);
   if (team) f.team = team;
   // A bare name ("mocha") counts only when no team matched: "Docs repos" means the team, not github/docs.
   const repo = r.exposures.find((e) => word(e.repo)) ?? (team ? undefined : r.exposures.find((e) => e.repo.split('/')[1].length > 2 && word(e.repo.split('/')[1])));
   if (repo) f.repo = repo.repo;
-  const listing = /\b(list|all|every|each|how many)\b|\bwho owns\b/i.test(q);
+  // "how many repos would fetch chalk?": no filter here picks a package, so the whole list would answer another question
+  const pkg = r.incident.versions.some((v) => word(v.id.slice(0, v.id.lastIndexOf('@'))));
+  const listing = !pkg && /\b(list|all|every|each|how many)\b|\bwho owns\b/i.test(q);
   return Object.keys(f).length || listing ? f : undefined;
 }
 
@@ -118,7 +125,11 @@ export function enforceCoverage(text: string, res: ToolResult): { text: string; 
 const ROTATE = /\b(rotat\w*|secrets?|credentials?|tokens?)\b/i;
 const SAFE = /\b(npm ci|safe(ly)?)\b/i; // with a named repo, "safe" is about that repo: its own facts answer it
 const EXCEPT = /\b(after|besides|other than|except|apart from|excluding)\b/i; // "riskiest after X": not X's own facts
-const NOTIFY = /\b(notify|owners?|owns?|channels?|ping|contact)\b|\bwho (should|do|to|must|needs?) (i |we )?(tell|notify|ping|contact)\b/i;
+// "own" alone is "their own package.json", not an owner
+const NOTIFY = /\b(notify|owners?|owns|channels?|ping|contact)\b|\bwho (should|do|to|must|needs?) (i |we )?(tell|notify|ping|contact)\b/i;
+const PINS = /\b(pins?|pinned|locks?)\b[^?.!]{0,40}\b(bad|malicious|compromised|hijacked)\b|\b(bad|malicious|compromised) versions? in (its|their|the) lock ?files?\b/i;
+const DIRECT = /\b(direct(ly)?|own|root)\b[^?.!]{0,60}\bpackage\.json\b|\bdeclar\w*\b[^?.!]{0,60}\bdirect(ly)?\b|\bdirect (dependenc\w*|deps?)\b/i;
+const URGENT = /\b(urgent\w*|first|priorit\w*|start with)\b/i; // with a team named: that team's first action
 const OUTSIDE = /\b(customers?|users?|public|regulators?|disclos\w*|press|legal|vendors?)\b/i; // not in the graph: the model answers
 const WHEN = /\b(when|window|how long|timeline|how far ahead|advisory|osv|still live)\b/i;
 const SUMMARY = /\b(how bad|summar\w*|status|overview|impact|ciso|my (lead|manager|boss)|exec\w*|brief(ing)?|big picture|tl;?dr)\b|\b(am i|are we|is (our|my) org) (affected|exposed|at risk)\b/i;
@@ -127,46 +138,71 @@ const FIRST = /\b(first|next hour|priorit\w*|next steps?|action plan)\b|\bwhat (
 const TEAMS = /\b(which|what) team\b|\bmost (work|exposed|repos)\b|\bper team\b|\bby team\b/i;
 const PRIORITY = /\bif (i|we) (can|could) only\b|\bprioriti[sz]\w*\b|\b(which|what) (\d+|two|three|four|five|few) (repos?|first)\b|\bfix (\d+|two|three|four|five) (repos? )?(first|today)\b/i;
 const COUNT: Record<string, number> = { two: 2, three: 3, four: 4, five: 5, few: 3 };
-// Every repo a question names (full or bare name): "compare mocha and nodemon" answers both, not the first one only.
-const named = (q: string, r: Report) => r.exposures.filter((e) => mentions(q, e.repo) || (e.repo.split('/')[1]!.length > 2 && mentions(q, e.repo.split('/')[1]!)));
+// Every repo a question names (full or bare name), in the question's order: "compare mocha and nodemon" answers both.
+const where = (q: string, e: Exposure) => {
+  const bare = e.repo.split('/')[1]!;
+  const at = [e.repo, ...(bare.length > 2 ? [bare] : [])].map((n) => new RegExp(`(^|[^\\w/.-])${esc(n)}($|[^\\w/-])`, 'i').exec(q)?.index ?? -1).filter((i) => i >= 0);
+  return at.length ? Math.min(...at) : -1;
+};
+const named = (q: string, r: Report) => r.exposures.map((e) => [e, where(q, e)] as const).filter(([, i]) => i >= 0).sort((a, b) => a[1] - b[1]).map(([e]) => e);
+const NAMED_MAX = 5; // repos answered in one go; the rest are named, never dropped silently
 const NEXT = /\bnext (qix|target|compromise|account|maintainer)\b|\bconcentrat\w*|\bwhich maintainers?\b|\bpagerank\b|\bsingle points? of failure\b|\b(compromised|hijacked) next\b/i;
-export function graphAnswer(q: string, r: Report, repo?: string, list = false): string | null {
+// `team`: a team the question names ("the most urgent thing for Payments" is that team's first action, not its repo list).
+export function graphAnswer(q: string, r: Report, repo?: string, list = false, team?: string): string | null {
   const many = named(q, r);
   // "riskiest after X": the urgency order without X; any other comparison is the model's (with the filter result attached)
   if (EXCEPT.test(q)) return /\b(riskiest|most (urgent|at risk|exposed)|next|after)\b/i.test(q) && (PRIORITY.test(q) || /\b(riskiest|most (urgent|at risk))\b/i.test(q))
     ? priorityFacts(r, 3, many.map((x) => x.repo)) : null;
   const e = repo ? r.exposures.find((x) => x.repo === repo) : undefined;
-  const repos = many.length > 1 ? many.slice(0, 3) : e ? [e] : [];
-  const priority = !repos.length && PRIORITY.test(q);
-  const first = !repos.length && !priority && FIRST.test(q);
+  const repos = many.length > 1 ? many.slice(0, NAMED_MAX) : e ? [e] : [];
+  const left = many.slice(repos.length > 1 ? NAMED_MAX : many.length);
+  const urgent = !repos.length && team && URGENT.test(q) ? team : undefined;
+  const priority = !repos.length && !urgent && PRIORITY.test(q);
+  const first = !repos.length && !urgent && !priority && FIRST.test(q);
+  const direct = DIRECT.test(q);
   const n = /\b(\d+|two|three|four|five|few)\b/i.exec(q)?.[1]?.toLowerCase();
   const parts = [
+    repos.length > 1 ? compareFacts(r, repos) : '', // the verdict first, then each repo's facts
     ...repos.map((x) => repoFacts(r, x)),
+    left.length ? `That answers the first ${NAMED_MAX} named; ask again for ${left.map((x) => `\`${x.repo}\``).join(', ')}.` : '',
+    urgent ? teamFirstFacts(r, urgent) : '',
     priority ? priorityFacts(r, Math.min(10, Math.max(1, Number(n) || COUNT[n ?? ''] || 3))) : '',
     !e && SUMMARY.test(q) ? summaryFacts(r) : '',
     first ? firstFacts(r) : '', // its Do line already says who rotates and who keeps npm ci
-    !first && (ROTATE.test(q) || (!e && SAFE.test(q))) ? rotateFacts(r) : '',
+    !first && (ROTATE.test(q) || PINS.test(q) || (!e && SAFE.test(q))) ? rotateFacts(r) : '',
+    direct ? directFacts(r) : '',
     DEV.test(q) ? devFacts(r) : '',
     !e && TEAMS.test(q) ? teamFacts(r) : '',
     !e && NEXT.test(q) ? concentrationFacts(r) : '',
-    !e && !first && !list && NOTIFY.test(q) && !OUTSIDE.test(q) ? notifyFacts(r) : '', // a list already groups its repos by team
+    !e && !first && !urgent && !direct && !list && NOTIFY.test(q) && !OUTSIDE.test(q) ? notifyFacts(r) : '', // a list already groups its repos by team
     WHEN.test(q) ? whenFacts(r) : '',
   ].filter(Boolean);
   return parts.length ? parts.join('\n') : null;
 }
 
+// Questions the graph answers by itself, offered when a question gets no answer (each routes to graphAnswer).
+export const suggestions = (r: Report): string[] => r.scope?.kind === 'guest'
+  ? ['Is npm ci safe?', 'What should I do first?', 'When did it start?']
+  : [r.counts.LOCKED ? 'Which repos need secrets rotated, and is npm ci safe for the rest?' : 'Is npm ci safe?', 'What should I do first?', 'Which exposures are prod-only and who owns them?'];
+
 const stripMarkdown = (s: string) => s.replace(/\*\*|__/g, '').replace(/^#{1,6}\s+/gm, '').replace(/^([ \t]*)\*[ \t]+/gm, '$1- '); // [ \t], not \s: \s spans newlines and backtracks quadratically
 
-export async function* ask({ run, question, chatFn = pinned, signal }: { run: Run; question: string; chatFn?: ChatFn; signal?: AbortSignal }): AsyncGenerator<TriageEvent> {
+// `marks`: repos this browser marked remediated since the run (not written to the graph until the next run), so answers
+// already leave them out of what is open.
+export async function* ask({ run, question, marks = [], chatFn = pinned, signal }: { run: Run; question: string; marks?: string[]; chatFn?: ChatFn; signal?: AbortSignal }): AsyncGenerator<TriageEvent> {
   const t0 = performance.now();
   const g = graph(run.graph);
   const tools = Object.values(TOOLS).map(({ name, description, parameters }) => ({ name, description, parameters }));
   const results: ToolResult[] = [];
   let ids = 0;
+  const report: Report = !marks.length ? run.report : {
+    ...run.report,
+    exposures: run.report.exposures.map((e) => (!e.remediated && marks.includes(e.repo) ? { ...e, remediated: { at: Date.now(), action: 'remediated' } } : e)),
+  };
   // Path ids and remediation marks belong to the run, not the graph: filter rows get them from the run's report.
   const decorate = (r: ToolResult): ToolResult => r.tool !== 'filter_exposures' ? r : {
     ...r,
-    rows: r.rows.map((x) => ({ ...x, path: run.report.paths.find((p) => p.repo === x.repo)?.id ?? null, remediated: !!run.report.exposures.find((e) => e.repo === x.repo)?.remediated })),
+    rows: r.rows.map((x) => ({ ...x, path: report.paths.find((p) => p.repo === x.repo)?.id ?? null, remediated: !!report.exposures.find((e) => e.repo === x.repo)?.remediated })),
   };
 
   async function* step(tool: ToolName, params: Record<string, unknown>): AsyncGenerator<TriageEvent, ToolResult> {
@@ -183,10 +219,13 @@ export async function* ask({ run, question, chatFn = pinned, signal }: { run: Ru
     return result;
   }
 
-  const pre = questionFilter(question, run.report);
-  const list = pre !== undefined && (!Object.keys(pre).length || Object.keys(pre).some((k) => k !== 'repo')); // a filter or "list all", not just a repo name
-  const repo = typeof pre?.repo === 'string' ? run.report.exposures.find((e) => e.repo === pre.repo) : undefined;
-  const facts = graphAnswer(question, run.report, repo?.repo, list);
+  const pre = questionFilter(question, report);
+  const team = typeof pre?.team === 'string' ? pre.team : undefined;
+  // a filter or "list all", not just a repo name; not when the list would answer a different question than the one asked
+  // ("declare it directly" is its own answer, "most urgent for Payments" is that team's first action, not its repos)
+  const list = pre !== undefined && (!Object.keys(pre).length || Object.keys(pre).some((k) => k !== 'repo')) && !DIRECT.test(question) && !(team && URGENT.test(question));
+  const repo = typeof pre?.repo === 'string' ? report.exposures.find((e) => e.repo === pre.repo) : undefined;
+  const facts = graphAnswer(question, report, repo?.repo, list, team);
   let attached = '';
   let filtered: ToolResult | undefined;
   if (pre && (list || !facts)) {
@@ -198,6 +237,8 @@ export async function* ask({ run, question, chatFn = pinned, signal }: { run: Ru
   let text = '';
   let mode: LlmMode = 'live';
   let unanswered = false;
+  const offer = suggestions(report);
+  const graphCan = `The graph answers questions like these by itself: ${offer.map((s) => `“${s}”`).join(', ')}. This question did not use up a follow-up.`;
   if (list || facts) {
     // The graph answers: the proof is the tool calls (the repo's path and fix, or the filter), the words are the report's.
     if (repo && repo.tier !== 'MAINTAINER' && repo.versions.length) {
@@ -206,14 +247,19 @@ export async function* ask({ run, question, chatFn = pinned, signal }: { run: Ru
     }
     mode = 'template';
     text = [list && filtered ? completeList(filtered) : '', facts ?? ''].filter(Boolean).join('\n');
+  } else if ((run.used ?? 0) >= MAX_ANSWERS) {
+    mode = 'template';
+    unanswered = true;
+    text = `This triage has used its ${MAX_ANSWERS} model-written answers, so this question was not sent to a model. ${graphCan} Run the triage again for more model answers.`;
   } else {
     text = yield* modelAnswer();
+    if (text && !unanswered) run.used = (run.used ?? 0) + 1; // only a model's answer uses up a follow-up
   }
 
   async function* modelAnswer(): AsyncGenerator<TriageEvent, string> {
   const messages: Msg[] = [
     { role: 'system', content: system(run) },
-    { role: 'user', content: `${evidenceBlock(run.report)}${attached}\nQUESTION: ${question}` },
+    { role: 'user', content: `${evidenceBlock(report)}${attached}\nQUESTION: ${question}` },
   ];
   let text = '';
   let n = filtered ? 1 : 0; // the server's own filter counts toward the S7 budget
@@ -249,7 +295,7 @@ export async function* ask({ run, question, chatFn = pinned, signal }: { run: Ru
         // Only the tool's declared arguments pass; the graph is always the run's own, incident and time default to the
         // run's, and the session is supplied server-side (never by the model, never shown). For an exposed repo, the
         // repo id is canonical and its own malicious versions fill version/versions, so any repo's path and fix work.
-        const e = typeof call.args.repo === 'string' ? run.report.exposures.find((x) => x.repo.toLowerCase() === String(call.args.repo).toLowerCase()) : undefined;
+        const e = typeof call.args.repo === 'string' ? report.exposures.find((x) => x.repo.toLowerCase() === String(call.args.repo).toLowerCase()) : undefined;
         const defaults: Record<string, unknown> = { incident: run.scenario, at: run.at, ...(e && { version: e.versions[0], versions: e.versions }) };
         const params = Object.fromEntries(Object.keys(def.parameters.properties).filter((k) => k !== 'session')
           .map((k) => [k, (k === 'repo' && e ? e.repo : call.args[k]) ?? defaults[k]]).filter(([, v]) => v !== undefined));
@@ -267,8 +313,8 @@ export async function* ask({ run, question, chatFn = pinned, signal }: { run: Ru
     mode = 'template';
     unanswered = true; // no model wrote an answer: what follows is the graph's raw results at most
     text = results.length
-      ? `No language model answered, so here is what the graph returned: ${results.map((r) => r.summary).join('; ')}.`
-      : `No language model is available right now, and this question has no answer built from the graph. The graph answers these by itself: which repos are exposed (or prod-only, by team), is npm ci safe, how bad is it, what to do first, which team has the most work, who could be compromised next, and when it started. Every panel of the triage at ${utc(run.at)} comes straight from graph queries.`;
+      ? `No language model answered, so here is what the graph returned: ${results.map((r) => r.summary).join('; ')}. ${graphCan}`
+      : `No language model is available right now, and this question has no answer built from the graph. ${graphCan}`;
   }
   text = stripMarkdown(text);
   const last = results.findLast((r) => r.tool === 'filter_exposures');
@@ -280,13 +326,13 @@ export async function* ask({ run, question, chatFn = pinned, signal }: { run: Ru
   return text;
   }
   if (!text) return; // the client left mid-answer
-  const ev = evidenceSet(run.report);
+  const ev = evidenceSet(report);
   for (const r of results) {
     r.evidence.forEach((e) => ev.entities.add(e));
     ev.numbers.add(r.rows.length);
     if (r.tool === 'filter_exposures') ev.numbers.add(new Set(r.rows.map((x) => x.team ?? '')).size);
   }
-  yield { type: 'narration', mode, provider: mode === 'live' ? (provider ?? null) : null, text, at: run.at, ...(unanswered ? { unanswered: true } : {}) };
+  yield { type: 'narration', mode, provider: mode === 'live' ? (provider ?? null) : null, text, at: run.at, used: run.used ?? 0, ...(unanswered ? { unanswered: true, suggestions: offer } : {}) };
   yield guardEvent(text, ev);
   yield { type: 'done', ms: Math.round(performance.now() - t0) };
 }

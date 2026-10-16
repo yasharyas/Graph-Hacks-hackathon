@@ -98,7 +98,8 @@ export interface Report {
 // Which lockfile a pasted repo was judged on: the last commit before the incident (sha, commit time), today's (no history
 // available), or a pasted file (no date known). Only the first is the repo's real state at the time.
 // reason (head only): no lockfile commit before the incident, or GitHub's history could not be read (rate limit, outage).
-export interface LockSource { kind: 'snapshot' | 'head' | 'pasted'; sha?: string; date?: number; reason?: 'no-history' | 'unavailable' }
+// now (snapshot only): the repo's current owner/name when GitHub redirected a renamed repo (e.g. "mochajs/mocha").
+export interface LockSource { kind: 'snapshot' | 'head' | 'pasted'; sha?: string; date?: number; reason?: 'no-history' | 'unavailable'; now?: string }
 
 export interface TimelinePoint { at: number; counts: Record<Tier, number>; scanner: number }
 
@@ -112,7 +113,10 @@ export type TriageEvent =
   // words); `mode`/`provider` describe the pick.
   // `at`: the scenario clock the narration describes (the UI dims it when the scrubber moves away).
   // `draft`: the verdict is final, but an analyst pick may still follow in the next narration event (no guard yet).
-  | { type: 'narration'; mode: LlmMode; provider: string | null; text: string; note?: string | null; at?: number; draft?: boolean; unanswered?: boolean } // unanswered: an Ask with no model and no graph answer
+  // Ask only: `unanswered`: no model and no graph answer (no model is available, or `used` reached the 4 model answers a
+  // run allows); `used`: model-written answers this run has used, this one included (graph answers and refusals are free);
+  // `suggestions`: with `unanswered`, 2-3 questions the graph answers, for the UI to offer as chips.
+  | { type: 'narration'; mode: LlmMode; provider: string | null; text: string; note?: string | null; at?: number; draft?: boolean; unanswered?: boolean; used?: number; suggestions?: string[] }
   // `claims`: every claim the server checked; the UI marks a span verified only if it appears here with ok=true.
   | { type: 'guard'; verified: number; total: number; flagged: string[]; claims?: { text: string; ok: boolean }[] }
   | { type: 'error'; message: string; requestId: string }

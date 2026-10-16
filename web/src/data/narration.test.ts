@@ -77,8 +77,9 @@ test('Why splits into whole path sentences, never inside a parenthetical, and jo
   const text = '`acme/checkout-web` locks `debug@4.4.2` through `express@5.1.0` [E1], and also `chalk@5.6.1`; `github/docs` declares `^5.0.1`, which admits `chalk@5.6.1` [E2]; `mochajs/mocha` declares `^4.3.5`, which admits `debug@4.4.2` [E3] (paths for 3 of 21; +18 more in the table).';
   const parts = whyParts(segments(text, null));
   assert.equal(parts.length, 3);
-  assert.equal(parts.map((p) => join([p])).join(' '), text);
-  assert.match(join([parts[0]!]), /^`acme\/checkout-web` .* \[E1\], and also `chalk@5\.6\.1`;$/);
+  assert.equal(parts.map((p) => join([p])).join('; '), text); // each piece is a line: the "; " between them goes
+  assert.match(join([parts[0]!]), /^`acme\/checkout-web` .* \[E1\], and also `chalk@5\.6\.1`$/); // no stray "chalk@5.6.1 ;"
+  assert.match(join([parts[1]!]), /\[E2\]$/);
   assert.match(join([parts[2]!]), /\(paths for 3 of 21; \+18 more in the table\)\.$/);
   assert.equal(citeCount(parts.slice(1)), 2);
   assert.equal(whyParts(segments('`mochajs/mocha` declares `^4.3.5`, which admits `debug@4.4.2` [E1].', null)).length, 1);
@@ -99,6 +100,7 @@ test('each Ask answer says how it was produced, with the provider when there is 
   assert.equal(answerLabel({ mode: 'template', provider: null }), 'Answered from the graph');
   assert.equal(answerLabel({ mode: 'live', provider: null }), 'LLM answer: the model wrote the words');
   assert.equal(answerLabel({ mode: 'template', provider: null, unanswered: true }), 'Not answered: no language model is available');
+  assert.equal(answerLabel({ mode: 'template', provider: null, unanswered: true, used: 4 }), 'Not answered: this triage’s 4 model answers are used');
   assert.equal(answerLabel({ mode: 'live', provider: 'groq' }), 'LLM answer: the model wrote the words · groq');
 });
 

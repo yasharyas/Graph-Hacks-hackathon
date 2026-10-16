@@ -92,7 +92,7 @@ export async function* triage({ graph: g, scenario, at, alert, session, source, 
       const p = { repo: e.repo, versions: e.versions, at };
       remediations.push(...T.rowsOf<Remediation>(yield* step('draft_remediation', p, () => T.draftRemediation(g, p))));
     }
-    if (today) for (const m of remediations) m.today = todayNotes(m, today);
+    if (today) for (const m of remediations) applyToday(m, today);
     const concentration = T.rowsOf<Concentration>(yield* step('concentration_risk', { top: 3 }, () => T.concentrationRisk(g, { top: 3 })));
     const scan = yield* step('scanner_view', { incident: incident.id, at }, () => T.scannerView(g, { incident: incident.id, at }));
 
@@ -102,7 +102,7 @@ export async function* triage({ graph: g, scenario, at, alert, session, source, 
       incident, at, counts, minutesAhead: T.minutesAhead(incident),
       scope: guest ? { kind: 'guest', label: rows[0]?.repo ?? 'pasted repo', repos: rows.length, ...(source && { source }) } : { kind: 'org', label: 'Acme demo org', repos: rows.length },
       scanner: T.rowsOf<ScannerHit>(scan.result), grepCount: scan.grepCount,
-      exposures, paths, owners, remediations, notices: guest ? [] : notices(incident, exposures, owners, remediations, paths), concentration,
+      exposures, paths, owners, remediations, notices: guest ? [] : notices(incident, exposures, owners, remediations, paths, at), concentration,
     };
     yield { type: 'report', report };
 
@@ -138,34 +138,69 @@ export async function* triage({ graph: g, scenario, at, alert, session, source, 
   }
 }
 
-// One plain-text notice per owning team (synthetic team channels only).
-// One plain-text notice per owning team (synthetic team channels only): each repo with its tier in words, what it
-// reaches, and its own fix, so the message stands on its own in Slack.
-export type Today = { deps: Record<string, string>; dev: Record<string, string> };
-// A fix drafted from a pre-incident snapshot, read against today's package.json (direct dependencies only): an override
-// that today's declared range no longer needs would hold the package back, and a pin for a package no longer declared
-// would add it.
-export function todayNotes(m: Remediation, today: Today): string[] {
+// versions: the clean releases of each affected package known today (the committed npm cache), to tell what a fresh
+// resolve gets now.
+export type Today = { deps: Record<string, string>; dev: Record<string, string>; versions?: Record<string, string[]> };
+const LOOSE = { loose: true };
+const MATCH = "Checked against today's package.json: its direct dependencies still match this fix.";
+// A fix drafted from a pre-incident snapshot, read against today's package.json: an override that today's declared range no
+// longer needs, or that would hold a package below what a fresh resolve gets today (the malicious versions are gone), only
+// moves it backwards; a pin for a package no longer declared would add it. `skip`: the packages whose override and pin to
+// leave out (unless replaying the window).
+export function todayNotes(m: Remediation, today: Today): { notes: string[]; skip: string[] } {
   const declared = (n: string) => today.deps[n] ?? today.dev[n];
   const notes: string[] = [];
+  const skip: string[] = [];
   for (const [key, pin] of Object.entries(m.overrides)) {
     const at = key.lastIndexOf('@');
     const [name, bad] = at > 0 ? [key.slice(0, at), key.slice(at + 1)] : [key, ''];
     const range = declared(name);
-    if (range && bad && semver.validRange(range, { loose: true }) && !semver.satisfies(bad, range, { loose: true }))
+    const valid = range !== undefined && semver.validRange(range, LOOSE) !== null;
+    if (valid && bad && !semver.satisfies(bad, range, LOOSE)) {
       notes.push(`Today's package.json declares ${name} ${range}, which no longer admits ${bad}: skip the ${key} override (it would hold ${name} at ${pin}).`);
+      skip.push(name);
+      continue;
+    }
+    // what a fresh resolve gets today: under today's declared range, or (a dependency's range) the newest release on the pin's major
+    const now = semver.maxSatisfying(today.versions?.[name] ?? [], valid ? range : `^${pin}`, LOOSE);
+    if (!now || !semver.gt(now, pin, LOOSE)) continue;
+    const exact = Object.hasOwn({ ...m.direct, ...m.devDirect }, name);
+    notes.push(valid
+      ? `Today's package.json declares ${name} ${range}, which resolves ${now} today; the ${key} override${exact ? ` and the exact ${name} ${pin} pin` : ''} would downgrade it to ${pin}: skip the ${key} override${exact ? ' and its pin' : ''} unless you are replaying the window.`
+      : `${key} is gone from npm, so ranges that admitted it now resolve ${name} ${now}; the ${key} override would hold them at ${pin}: skip the ${key} override unless you are replaying the window.`);
+    skip.push(name);
   }
   for (const [name, block, other] of [...Object.keys(m.direct ?? {}).map((n) => [n, 'dependencies', 'devDependencies'] as const), ...Object.keys(m.devDirect ?? {}).map((n) => [n, 'devDependencies', 'dependencies'] as const)]) {
     const here = block === 'dependencies' ? today.deps : today.dev;
     if (name in here) continue;
-    notes.push((block === 'dependencies' ? today.dev : today.deps)[name] !== undefined
-      ? `Today's package.json declares ${name} in ${other}, not ${block}: move its pin there.`
-      : `Today's package.json no longer declares ${name}: skip its pin.`);
+    const moved = (block === 'dependencies' ? today.dev : today.deps)[name] !== undefined;
+    notes.push(moved ? `Today's package.json declares ${name} in ${other}, not ${block}: move its pin there.` : `Today's package.json no longer declares ${name}: skip its pin.`);
+    if (!moved) skip.push(name);
   }
-  return notes.length ? notes : ["Checked against today's package.json: its direct dependencies still match this fix."];
+  return { notes: notes.length ? notes : [MATCH], skip };
 }
 
-function notices(incident: IncidentMeta, exposures: Exposure[], owners: OwnerGroup[], remediations: Remediation[], paths: ExposurePath[]): Notice[] {
+// The notes go on the fix itself: the Fix tab shows them, the PR description carries them, and no step or PR line still says
+// to set a pin they say to skip.
+function applyToday(m: Remediation, today: Today) {
+  const { notes, skip } = todayNotes(m, today);
+  m.today = notes;
+  m.steps = m.steps.filter((s) => !skip.some((n) => s.startsWith(`If you add the ${n} override,`)));
+  const all = { ...m.direct, ...m.devDirect };
+  const kept = Object.fromEntries(Object.entries(all).filter(([n]) => !skip.includes(n)));
+  m.prBody = `${m.prBody.replace(T.directNote(all), T.directNote(kept))} Checked against today's package.json: ${notes.map((n) => n.replace(/^Checked against today's package\.json: /, '')).join(' ')}`;
+}
+
+// As of the scenario clock, like the verdict and the per-repo notice: the clock, the window then, and the same Do order
+// (LOCKED: rotate, fix the lockfile, then rebuild from it; WOULD_PULL: npm ci, the override only for a re-resolve).
+function notices(incident: IncidentMeta, exposures: Exposure[], owners: OwnerGroup[], remediations: Remediation[], paths: ExposurePath[], at: number): Notice[] {
+  const hm = (t: number) => `${new Date(t).toISOString().slice(11, 16)} UTC`;
+  const day = (t: number) => new Date(t).toISOString().slice(0, 10);
+  const from = incident.firstExposureAt ?? incident.firstPublishAt;
+  const closed = at >= incident.removedAt;
+  const window = closed ? `Window: malicious versions were live from ${hm(from)} on ${day(from)} until npm removed them around ${hm(incident.removedAt)}.`
+    : at < from ? `Window: no malicious version was live yet at ${hm(at)} on ${day(at)}.`
+      : `Window: malicious versions live since ${hm(from)} on ${day(from)} (still live at ${hm(at)}).`;
   // The overrides, plus the root dependencies npm needs set to the same version (EOVERRIDE otherwise).
   const fix = (repo: string) => {
     const m = remediations.find((x) => x.repo === repo);
@@ -176,13 +211,15 @@ function notices(incident: IncidentMeta, exposures: Exposure[], owners: OwnerGro
   const line = (e: Exposure) => {
     const pins = fix(e.repo);
     const p = paths.find((x) => x.repo === e.repo && x.kind === 'ADMITS' && x.range); // its own range, paired with the version it admits
-    if (e.tier === 'LOCKED') return `- ${e.repo}: LOCKED, its lockfile pins ${e.versions.join(', ')}. Rotate build secrets, rebuild${pins ? `, and override ${pins}` : ''}.`;
+    if (e.remediated && e.tier !== 'MAINTAINER') return `- ${e.repo}: ${e.tier}, marked remediated.`;
+    if (e.tier === 'LOCKED') return `- ${e.repo}: LOCKED, its lockfile pins ${e.versions.join(', ')}. Rotate build secrets, then ${closed ? 're-resolve to a clean release (npm no longer serves the locked version)' : pins ? `fix the lockfile (override ${pins}, then regenerate it)` : 'remove the malicious versions and regenerate the lockfile'}, then rebuild and redeploy from the fixed lockfile.`;
+    // (a WOULD_PULL repo is only exposed while the window is open)
     if (e.tier === 'WOULD_PULL') return `- ${e.repo}${e.dev ? ' (dev-only)' : ''}: WOULD_PULL, a fresh resolve would fetch ${e.versions.slice(0, 3).join(', ')}${e.versions.length > 3 ? ` +${e.versions.length - 3} more` : ''}${p ? ` (${p.version} via ${p.range})` : ''}. Keep npm ci on the committed lockfile${pins ? `; only if you must re-resolve, override ${pins}` : ''}.`;
     return `- ${e.repo}: depends on packages from the compromised account; no malicious version is live for it.`;
   };
   return owners.map((o) => {
     const mine = exposures.filter((e) => e.tier !== 'CLEAN' && o.repos.includes(e.repo));
-    return { team: o.team, channel: o.channel, text: `${o.team}: npm incident ${incident.id}.\n${mine.map(line).join('\n')}\nPaths and fix PRs are in Patient Zero.` };
+    return { team: o.team, channel: o.channel, text: `${o.team}: npm incident ${incident.id}, as of ${hm(at)} on ${day(at)}.\n${window}\n${mine.map(line).join('\n')}\nPaths and fix PRs are in Patient Zero.` };
   });
 }
 

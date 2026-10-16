@@ -81,3 +81,8 @@ test('regressions from the arena judge', () => {
 test('empty text', () => {
   assert.deepEqual(guard('', ev), { verified: 0, total: 0, flagged: [], claims: [] });
 });
+
+test('an internal field or tool name a model copied (camelCase, snake_case) is flagged; package.json keys are words', () => {
+  assert.deepEqual(guard('See the reposPerVersion counts and filter_exposures. Dev-only means devDependencies; npm ci stays safe.', ev).flagged, ['reposPerVersion', 'filter_exposures']);
+  assert.deepEqual(guard('LOCKED and WOULD_PULL repos, as of 13:16 UTC.', ev).flagged, []);
+});

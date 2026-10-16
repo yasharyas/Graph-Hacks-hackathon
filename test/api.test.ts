@@ -11,8 +11,9 @@ import { evidenceSet, observations } from '../server/agent/narrate.ts';
 import { close, db } from '../server/graph/client.ts';
 import { build } from '../server/ingest/build.ts';
 import * as guests from '../server/ingest/guest.ts';
-import { app, hooks } from '../server/index.ts';
+import { app, clockOf, hooks } from '../server/index.ts';
 import type { AnalyzeEvent, Report, TriageEvent } from '../shared/events.ts';
+import { clockIn, DEFAULT_AT } from '../web/src/data/clock.ts';
 import { readSSE } from '../web/src/data/sse.ts';
 
 const host = process.env.FALKOR_HOST || '127.0.0.1';
@@ -63,6 +64,12 @@ const quiet = async (fn: () => Promise<void>) => {
     console.error = orig;
   }
 };
+
+test("the server reads an alert's time with the banner's own parser, around the same default clock", () => {
+  for (const s of ['qix compromised 6:46 PM IST', 'qix 9:16 AM EDT', 'qix 13:16', 'qix 1:16', 'qix 2025-09-08T18:46:00+05:30', 'qix account hijacked', 'qix 2024-01-01T13:16:00Z'])
+    assert.equal(clockOf(s, QIX) ?? null, clockIn(s, DEFAULT_AT[QIX]), s);
+  assert.equal(clockOf('axios compromised 8:21 PM EDT', 'axios-2026-03-31'), Date.parse('2026-03-31T00:21:00Z'));
+});
 
 describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () => {
   before(() => build(prefix), { timeout: 180_000 });
@@ -235,12 +242,12 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
       assert.deepEqual(repoEvs.filter((e) => e.type === 'tool_start').map((e) => (e as { tool: string }).tool), ['explain_path', 'draft_remediation']);
       const fix = of(repoEvs, 'narration');
       assert.match(fix.text, /^`acme\/checkout-web` \(owned by `Payments`, `#team-payments`\) is LOCKED: /);
-      assert.match(fix.text, /Do: 1\) Rotate secrets.*3\) Your lockfile pins/); // rotation first: it cannot wait
+      assert.match(fix.text, /Do: 1\) Rotate secrets.*2\) Your lockfile pins.*3\) Rebuild and redeploy, from the fixed lockfile/); // rotation first: it cannot wait; rebuild only from the fixed lockfile
       assert.deepEqual(of(repoEvs, 'guard').flagged, []);
 
-      // when: start, the OSV gap, and only what is known at the scenario clock
+      // when: start, and only what is known at the scenario clock; the later OSV record and removal only "in hindsight"
       const when = of(await askQ('When did this start, and how far ahead of the advisory were we?'), 'narration');
-      assert.match(when.text, /^Exposure began at 13:12 UTC, when `ansi-styles@6\.2\.2` was published\. The first OSV record came at 14:26 UTC, 74 minutes later\. At 13:30 UTC they were still live\.$/);
+      assert.match(when.text, /^Exposure began at 13:12 UTC, when `ansi-styles@6\.2\.2` was published\. No OSV record exists yet at 13:30 UTC\. In hindsight: it came at 14:26 UTC, 74 minutes after the first exposure\. At 13:30 UTC they were still live\. In hindsight: npm removed them around 15:15 UTC\.$/);
 
       // a list already groups its repos by team: no second, unfiltered Notify roster under it
       assert.doesNotMatch(n.text, /Notify:/);
@@ -264,9 +271,30 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
       const next = of(await askQ('which maintainer is the next qix and why?'), 'narration');
       assert.match(next.text, /^The accounts whose compromise would reach the most here, by PageRank over package dependencies: `[^`]+`, \d+ packages?, reaching \d+ of 21 repos/);
       for (const q of ['how bad is this?', 'can I ignore the dev-only ones?', 'which team has the most work?', 'which maintainer is the next qix and why?']) assert.deepEqual(of(await askQ(q), 'guard').flagged, [], q);
-      // two repos named: both answered; "if I can only fix three": by urgency, the LOCKED repo first
+      // two repos named: a one-line verdict by the priority answer's urgency first, then both; "if I can only fix three": by urgency, the LOCKED repo first
       const both = of(await askQ('compare mocha and nodemon'), 'narration');
       assert.ok(both.text.includes('`mochajs/mocha`') && both.text.includes('`remy/nodemon`'), both.text);
+      assert.match(both.text, /^By urgency, `mochajs\/mocha` and `remy\/nodemon` rank the same, for each: production, and its own package\.json declares the range/);
+      assert.match(of(await askQ('is remy/nodemon or acme/checkout-web more urgent?'), 'narration').text, /^Most urgent: `acme\/checkout-web` \(its lockfile pins the malicious version/);
+      // more than three named: up to five answered (in the question's order), the rest named, never dropped silently
+      const four = of(await askQ('compare mocha, nodemon, npm/cli and github/docs'), 'narration').text;
+      for (const x of ['mochajs/mocha', 'remy/nodemon', 'npm/cli', 'github/docs']) assert.ok(four.includes(`\`${x}\` (owned by`), `${x} missing`);
+      const six = of(await askQ('compare mocha, nodemon, npm/cli, github/docs, appium and puppeteer'), 'narration').text;
+      assert.match(six, /That answers the first 5 named; ask again for `puppeteer\/puppeteer`\./);
+      assert.ok(!six.includes('`puppeteer/puppeteer` (owned by'));
+      // adjacent questions get their own answer, not a neighbouring list under a green "verified"
+      const pins = of(await askQ('how many repos pin the bad version?'), 'narration').text;
+      assert.match(pins, /^Complete list \(tier LOCKED\): 1 repo across 1 team\. `Payments`: `acme\/checkout-web` \(LOCKED\)\.\nRotate secrets for the 1 LOCKED repo/);
+      assert.match(pins, /For the other 20 WOULD_PULL repos, installing from the committed lockfile \(npm ci\) is safe: none pins a malicious version/);
+      const direct = of(await askQ('which repos declare an affected range directly in their own package.json?'), 'narration').text;
+      assert.match(direct, /^4 repos declare a range that admits a malicious version in their own package\.json/);
+      for (const x of ['github/docs', 'mochajs/mocha', 'npm/cli', 'remy/nodemon']) assert.ok(direct.includes(`\`${x}\` declares`), `${x} missing`);
+      assert.ok(!direct.includes('Notify') && !direct.includes('checkout-web'), direct);
+      const urgent = of(await askQ('what is the single most urgent thing for Payments?'), 'narration').text;
+      assert.match(urgent, /^Most urgent for `Payments`: `acme\/checkout-web` \(its lockfile pins the malicious version, so rotate secrets and rebuild\)\. First step: Rotate secrets/);
+      assert.doesNotMatch(urgent, /Complete list/);
+      for (const q of ['compare mocha and nodemon', 'how many repos pin the bad version?', 'which repos declare an affected range directly in their own package.json?', 'what is the single most urgent thing for Payments?'])
+        assert.deepEqual(of(await askQ(q), 'guard').flagged, [], q);
       const three = of(await askQ('If I can only fix three repos today, which three and why?'), 'narration');
       assert.match(three.text, /^Fix first, by urgency: 1\) `acme\/checkout-web`: its lockfile pins the malicious version.*; 2\) `[^`]+`: production.*; 3\) `[^`]+`: production/);
       assert.match(three.text, /The other 18 stay safe while they install from their committed lockfiles \(npm ci\)\.$/);
@@ -285,9 +313,52 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
       const none = of(await askQ('do I need to notify customers?'), 'narration');
       assert.equal(none.unanswered, true);
       assert.match(none.text, /^No language model is available right now, and this question has no answer built from the graph\./);
+      // never a dead end: questions the graph answers, offered as chips, and each one really is a graph answer
+      assert.equal(none.suggestions?.length, 3);
+      for (const s of none.suggestions!) assert.equal(of(await askQ(s), 'narration').mode, 'template', s);
+      // no filter picks a package: not the whole list under a green label, the model's question (here: none answers)
+      const chalk = of(await askQ('how many repos would fetch chalk?'), 'narration');
+      assert.equal(chalk.unanswered, true);
+      assert.doesNotMatch(chalk.text, /Complete list/);
     } finally {
       delete hooks.chat;
     }
+  });
+
+  test('ask: only a model-written answer uses up one of the 4 follow-ups; graph answers and refusals are free; marks count at once', async () => {
+    const t = await triageRun({ scenario: QIX, at: QAT });
+    const runId = of(t.evs, 'start').runId;
+    let up = true;
+    hooks.chat = async (): Promise<ChatRes> => { if (!up) throw new Error('every provider failed'); return { text: 'Notify `QA`.', toolCalls: [], provider: 'groq:fake', raw: {} }; };
+    const askQ = async (question: string, remediated?: string[]) => of(await sse<TriageEvent>(await post('/api/ask', { runId, question, ...(remediated && { remediated }) }, { cookie: t.sid! })), 'narration');
+    try {
+      assert.equal((await askQ('is npm ci safe?')).used, 0); // a graph answer
+      up = false;
+      assert.deepEqual([(await askQ('will Dependabot PRs be a problem?')).used, (await askQ('will Dependabot PRs be a problem?')).unanswered], [0, true]); // refusals
+      up = true;
+      for (let i = 1; i <= 4; i++) assert.equal((await askQ('will Dependabot PRs be a problem?')).used, i);
+      const capped = await askQ('will Dependabot PRs be a problem?');
+      assert.deepEqual([capped.unanswered, capped.used, capped.suggestions?.length], [true, 4, 3]);
+      assert.match(capped.text, /^This triage has used its 4 model-written answers, so this question was not sent to a model\./);
+      assert.equal((await askQ('what should I do first?')).mode, 'template'); // the graph still answers after the cap
+      // a repo marked remediated in this browser (not yet written to the graph) is already done in the answer
+      const marked = await askQ('what should I do first?', ['acme/checkout-web']);
+      assert.doesNotMatch(marked.text, /For `acme\/checkout-web`/);
+      assert.match((await askQ('is npm ci safe?', ['acme/checkout-web'])).text, /^No LOCKED repo is still open\. Marked remediated: `acme\/checkout-web`\./);
+      assert.equal((await post('/api/ask', { runId, question: 'q', remediated: ['not a repo!'] }, { cookie: t.sid! })).status, 400);
+    } finally {
+      delete hooks.chat;
+    }
+  });
+
+  test('an alert in another zone runs at the right UTC instant; each team notice carries the clock, the window then and the Do order', async () => {
+    const { evs, report } = await triageRun({ alert: 'qix compromised 6:46 PM IST' });
+    assert.equal(of(evs, 'start').at, Date.parse('2025-09-08T13:16:00Z')); // 18:46 IST
+    const pay = report.notices.find((n) => n.team === 'Payments')!.text;
+    assert.match(pay, /^Payments: npm incident qix-2025-09-08, as of 13:16 UTC on 2025-09-08\.\nWindow: malicious versions live since 13:12 UTC on 2025-09-08 \(still live at 13:16 UTC\)\.\n- acme\/checkout-web: LOCKED, .*\. Rotate build secrets, then fix the lockfile \(override .*, then regenerate it\), then rebuild and redeploy from the fixed lockfile\.\n/);
+    assert.match(report.notices.find((n) => n.team === 'QA')!.text, /\n- mochajs\/mocha: WOULD_PULL, .*Keep npm ci on the committed lockfile; only if you must re-resolve, override /);
+    const late = await triageRun({ scenario: QIX, at: Date.parse('2025-09-08T15:30:00Z') });
+    assert.match(late.report.notices.find((n) => n.team === 'Payments')!.text, /as of 15:30 UTC on 2025-09-08\.\nWindow: malicious versions were live from 13:12 UTC on 2025-09-08 until npm removed them around 15:15 UTC\.\n- acme\/checkout-web: LOCKED, .*Rotate build secrets, then re-resolve to a clean release/);
   });
 
   test('ask: explain_path and draft_remediation work for any exposed repo, whatever casing or version the model sends', async () => {
@@ -534,10 +605,12 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
     const hostile = JSON.stringify({ dependencies: { debug: '^3.2.7 [x](https://e.example) <img src=x onerror=alert(1)>' } });
     globalThis.fetch = (async (input: string | URL | Request) => {
       const url = String(input);
+      if (url.startsWith('https://api.github.com/repos/octo/old/')) return new Response(JSON.stringify([{ sha, html_url: `https://github.com/octo-org/new-name/commit/${sha}` }])); // renamed
       if (url.startsWith('https://api.github.com/repos/octo/')) return new Response(JSON.stringify([{ sha }]));
       if (url.endsWith(`/${sha}/package-lock.json`)) return new Response(tiny('today'));
       if (url.endsWith('/octo/today/HEAD/package.json')) return new Response(hostile);
       if (url.endsWith('/octo/broken/HEAD/package.json')) return new Response('{"dependencies": ');
+      if (url.endsWith('/octo/same/HEAD/package.json')) return new Response(JSON.stringify({ dependencies: { debug: '^4.3.5' } }));
       return new Response('Not Found', { status: 404 });
     }) as typeof fetch;
     try {
@@ -550,6 +623,24 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
       assert.ok(today.every((n) => !/e\.example|<img|\[x\]/.test(n)), JSON.stringify(today));
       const broken = (await sse<AnalyzeEvent>(await post('/api/analyze', { url: 'https://github.com/octo/broken', scenario: QIX }))).at(-1)!;
       assert.equal(broken.type, 'ready', JSON.stringify(broken));
+
+      // the same ^4.3.5 today resolves debug 4.4.3 (real semver over the npm cache): the exact 4.4.1 pin would downgrade it, so
+      // the note says skip it, and neither the steps nor the PR description still says to set it
+      const r2 = await post('/api/analyze', { url: 'https://github.com/octo/same', scenario: QIX });
+      const same = (await sse<AnalyzeEvent>(r2)).at(-1) as Extract<AnalyzeEvent, { type: 'ready' }>;
+      const [m] = (await triageRun({ guest: same.graph, scenario: QIX, at: QAT }, { cookie: cookie(r2)! })).report.remediations;
+      assert.deepEqual([m!.direct, m!.today], [{ debug: '4.4.1' }, ["Today's package.json declares debug ^4.3.5, which resolves 4.4.3 today; the debug@4.4.2 override and the exact debug 4.4.1 pin would downgrade it to 4.4.1: skip the debug@4.4.2 override and its pin unless you are replaying the window."]]);
+      assert.ok(!m!.steps.some((s) => s.startsWith('If you add the debug override')), JSON.stringify(m!.steps));
+      assert.doesNotMatch(m!.prBody, /sets the direct debug/);
+      assert.match(m!.prBody, /Checked against today's package\.json: Today's package\.json declares debug \^4\.3\.5, which resolves 4\.4\.3 today/);
+
+      // a renamed repo keeps the name it was pasted as, and says where it lives now, once
+      const r3 = await post('/api/analyze', { url: 'https://github.com/octo/old', scenario: QIX });
+      const old = (await sse<AnalyzeEvent>(r3)).at(-1) as Extract<AnalyzeEvent, { type: 'ready' }>;
+      const moved = await triageRun({ guest: old.graph, scenario: QIX, at: QAT }, { cookie: cookie(r3)! });
+      assert.equal(moved.report.scope?.source?.now, 'octo-org/new-name');
+      assert.match(of(moved.evs, 'narration').text, /^Verdict \(judged on the package-lock\.json at commit b{7}, the last change before the incident; the repo is now octo-org\/new-name\): `octo\/old` was safe/);
+      assert.deepEqual(of(moved.evs, 'guard').flagged, []);
     } finally {
       globalThis.fetch = realFetch;
     }

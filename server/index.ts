@@ -12,6 +12,7 @@ import { getCookie, setCookie } from 'hono/cookie';
 import { requestId, type RequestIdVariables } from 'hono/request-id';
 import { secureHeaders } from 'hono/secure-headers';
 import { streamSSE } from 'hono/streaming';
+import { clockIn } from '../shared/clock.ts';
 import type { AnalyzeEvent, Exposure, IncidentMeta, LockSource, ScannerHit, ScenarioId, Tier, TimelinePoint, ToolName, TriageEvent } from '../shared/events.ts';
 import { ask, latestRun, recall, remember, type ChatFn, type Run } from './agent/ask.ts';
 import { narrated } from './agent/replay.ts';
@@ -252,17 +253,9 @@ function fromAlert(text: string): { s: ScenarioId; at?: number } {
   if (!best?.n) throw new HttpError(400, 'The alert names no known incident, account or package. Try "qix compromised, 13:16 UTC".');
   return { s: best.s, at: clockOf(text, best.s) };
 }
-export function clockOf(text: string, s: ScenarioId): number | undefined {
-  const iso = /\b(\d{4}-\d\d-\d\d)T([01]\d|2[0-3]):([0-5]\d)(?::[0-5]\d(?:\.\d+)?)?Z?/i.exec(text);
-  const m = iso ? null : /(?<![\d:.])([01]?\d|2[0-3]):([0-5]\d)(?![\d:])\s*([ap])\.?\s?m\b\.?/i.exec(text) ?? /(?<![\d:.])([01]?\d|2[0-3]):([0-5]\d)(?![\d:])/.exec(text);
-  if (!iso && !m) return undefined;
-  let h = Number(iso ? iso[2] : m![1]);
-  const ap = m?.[3]?.toLowerCase();
-  if (ap === 'p' && h < 12) h += 12;
-  if (ap === 'a' && h === 12) h = 0;
-  const t = Date.parse(`${iso ? iso[1] : SNAPSHOT[s].slice(0, 10)}T${String(h).padStart(2, '0')}:${iso ? iso[3] : m![2]}:00Z`);
-  return Math.abs(t - Date.parse(SNAPSHOT[s])) <= 30 * DAY ? t : undefined;
-}
+// The same parser as the web app's banner (shared/clock.ts), around the same default clock: zones and offsets included
+// ("6:46 PM IST" is 13:16 UTC), within 30 days of the incident.
+export const clockOf = (text: string, s: ScenarioId): number | undefined => clockIn(text, DEFAULT_AT[s]) ?? undefined;
 
 // Keeps each finished report (by runId, with its session and graph) for Ask and remediation.
 async function* remembering(events: AsyncIterable<TriageEvent>, ctx: Omit<Run, 'runId' | 'report'>): AsyncGenerator<TriageEvent> {
@@ -327,13 +320,16 @@ app.post('/api/triage', async (c) => {
 
 app.post('/api/ask', async (c) => {
   limit(c, 'ask', 10, 10 * MIN);
-  const b = await body(c, ['runId', 'question']);
+  const b = await body(c, ['runId', 'question', 'remediated']);
   if (typeof b.runId !== 'string' || !/^[0-9a-f-]{36}$/.test(b.runId)) throw new HttpError(400, 'runId is not valid.');
   const question = textOf(b.question, 'The question');
+  // repos this browser marked remediated since the run (written to the graph on the next run): the answer leaves them out of what is open
+  const marks = b.remediated ?? [];
+  if (!Array.isArray(marks) || marks.length > 200 || !marks.every((x) => typeof x === 'string' && REPO.test(x))) throw new HttpError(400, 'remediated must be a list of owner/name repos.');
   const run = recall(b.runId, c.get('sid'));
   if (!run) throw new HttpError(404, 'That triage has expired. Run it again to ask follow-ups.');
   const release = slot();
-  return sse(c, (signal) => ask({ run, question, signal, chatFn: hooks.chat }), release);
+  return sse(c, (signal) => ask({ run, question, marks, signal, chatFn: hooks.chat }), release);
 });
 
 app.post('/api/analyze', async (c) => {

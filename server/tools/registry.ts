@@ -219,6 +219,10 @@ export async function concentrationRisk(g: Graph, p: { top?: unknown }) {
   return c.result('concentration_risk', params, summary, rows, rows.map((r) => r.maintainer));
 }
 
+// The PR description's line about the direct pins (triage drops the ones today's package.json says to skip).
+export const directNote = (pins: Record<string, string>) =>
+  Object.keys(pins).length ? ` It also sets the direct ${Object.entries(pins).map(([n, v]) => `${n} to ${v}`).join(', ')}, which npm requires next to an override of a direct dependency.` : '';
+
 export async function draftRemediation(g: Graph, p: { repo: unknown; versions: unknown; at: unknown }) {
   const params = { repo: str(p.repo), versions: strs(p.versions, 20), at: time(p.at) };
   const key = memoKey(g, 'draft_remediation', params);
@@ -257,25 +261,25 @@ export async function draftRemediation(g: Graph, p: { repo: unknown; versions: u
   const pairs = Object.entries(overrides).map(([k, v]) => `"${k}": "${v}"`).join(', ');
   const pins = Object.entries(overrides).map(([k, v]) => `${nameOf(k)}@${v}`);
   const missing = uniq(params.versions.filter((v) => !overrides[v]).map(nameOf));
-  // Order: LOCKED's rotate-and-rebuild first (it cannot wait), then the lockfile fix; otherwise what keeps you safe, then
-  // the conditional override.
+  // Order: LOCKED rotates first (it cannot wait), then fixes the lockfile, then rebuilds from the fixed one (a rebuild from
+  // the old lockfile reinstalls the malicious version); otherwise what keeps you safe, then the conditional override.
   const steps = (isLocked
     ? [
       'Rotate secrets that builds and CI could read since the first malicious publish',
-      'Rebuild and redeploy anything built from this lockfile during the window',
       `Your lockfile pins ${badLocked.join(', ')}, which ${badLocked.length === 1 ? 'is' : 'are'} malicious: ${pairs ? `add the overrides ${pairs} to package.json, run npm install to regenerate the lockfile and commit it` : 'remove them and regenerate the lockfile'}`,
       ...notes,
+      'Rebuild and redeploy, from the fixed lockfile, anything built from the old one during the window',
     ]
     : [
       `Keep installing from your committed lockfile (npm ci): ${safeLocked.length ? `it pins ${safeLocked.join(', ')} (safe)` : 'it never resolved the malicious version'}`,
       !pairs ? ''
         : Number.isFinite(until) && until <= params.at ? `The malicious versions stopped resolving at ${utc(until)}, so a fresh resolve now gets a clean release and no override is needed (the overrides ${pairs} were the fix during the window)`
-          : `Only for a re-resolve during the window${Number.isFinite(until) ? ` (in hindsight, it closed at ${utc(until)})` : ''}: add the overrides ${pairs} to package.json; they pin every dependent whose range admits the malicious version to that release, other majors untouched, and can come out once the window has closed`,
+          : `Only for a re-resolve during the window${Number.isFinite(until) ? ` (in hindsight, it closed at ${utc(until)}; after that no override is needed)` : ''}: add the overrides ${pairs} to package.json; they pin every dependent whose range admits the malicious version to that release, other majors untouched`,
       ...notes,
     ]).filter(Boolean);
   const prBody = `${isLocked ? 'The lockfile resolves' : 'Declared ranges admit'} ${params.versions.join(', ')}. `
     + (pairs ? `This adds version-qualified overrides (${pairs}): every dependent whose range admits a malicious version is pinned to the clean release, other majors untouched. They only matter while the malicious versions are on npm.` : 'No clean version to pin yet.')
-    + (Object.keys({ ...direct, ...devDirect }).length ? ` It also sets the direct ${Object.entries({ ...direct, ...devDirect }).map(([n, v]) => `${n} to ${v}`).join(', ')}, which npm requires next to an override of a direct dependency.` : '');
+    + directNote({ ...direct, ...devDirect });
   const row: Remediation = { repo: params.repo, overrides, ...(Object.keys(direct).length && { direct }), ...(Object.keys(devDirect).length && { devDirect }), steps: uniq(steps), prBody };
   const summary = `${params.repo}: lockfile pins ${isLocked ? `${badLocked.join(', ')} (malicious)` : safeLocked.length ? `${safeLocked.join(', ')} (safe)` : 'no malicious version'}; `
     + `${pins.length ? `override to ${pins.join(', ')}` : 'nothing safe to pin'}${missing.length ? `; no clean ${missing.join(', ')}` : ''}${isLocked ? '; rotate secrets and rebuild' : ''}`;

@@ -34,8 +34,12 @@ export interface Narration {
   at?: number;
   /** The verdict is final but an analyst pick may still follow: `mode` / `provider` / `note` are not settled yet, and no guard has run. */
   draft?: boolean;
-  /** An Ask that neither the graph nor a model could answer (no model available). */
+  /** An Ask that neither the graph nor a model could answer (no model available, or the run's model answers are used). */
   unanswered?: boolean;
+  /** Ask: model-written answers the run has used, this one included (graph answers and refusals are free). */
+  used?: number;
+  /** Ask, unanswered: questions the graph answers, to offer as chips. */
+  suggestions?: string[];
 }
 export interface Guard {
   verified: number;
@@ -142,7 +146,7 @@ function fold(s: TriageState, e: TriageEvent): TriageState {
     case 'report':
       return { ...s, report: e.report };
     case 'narration': {
-      const narration = { mode: e.mode, provider: e.provider, text: e.text, note: e.note ?? null, at: e.at, draft: e.draft === true, unanswered: e.unanswered === true };
+      const narration = { mode: e.mode, provider: e.provider, text: e.text, note: e.note ?? null, at: e.at, draft: e.draft === true, unanswered: e.unanswered === true, used: e.used, suggestions: e.suggestions };
       // A draft shows the verdict at once; its mode is the placeholder 'template', so the run's mode waits for the final one.
       return asking(s) ? { ...s, followUps: patchLast(s, { narration }) } : { ...s, narration, mode: e.draft ? s.mode : e.mode };
     }
@@ -156,6 +160,9 @@ function fold(s: TriageState, e: TriageEvent): TriageState {
       return asking(s) ? { ...s, followUps: patchLast(s, { status: 'done' }) } : { ...s, status: 'done', ms: e.ms };
   }
 }
+
+/** Follow-ups used: the server's own count of model-written answers (graph answers and refusals are free), so the AskBox counter and the server's cap agree. */
+export const followUpsUsed = (followUps: readonly FollowUp[]): number => Math.max(0, ...followUps.map((f) => f.narration?.used ?? 0));
 
 const toError = (err: unknown): TriageError =>
   err instanceof ApiError
@@ -190,13 +197,17 @@ export function useTriage() {
     [consume, start],
   );
 
-  /** Ask a follow-up about the current triage (the server bounds this at 4 rounds). */
+  /**
+   * Ask a follow-up about the current triage (the server allows 4 model-written answers per run; graph answers are free).
+   * `remediated`: repos marked remediated in this browser since the run, so the answer already counts them as done.
+   */
   const ask = useCallback(
-    (question: string) => {
+    (question: string, remediated: string[] = []) => {
       if (!state.runId) return;
       const ctrl = start();
       dispatch({ kind: 'ask', question });
-      void consume(streamAsk({ runId: state.runId, question }, ctrl.signal), ctrl);
+      const body = { runId: state.runId, question, ...(remediated.length && { remediated }) };
+      void consume(streamAsk(body, ctrl.signal), ctrl);
     },
     [consume, start, state.runId],
   );
@@ -208,5 +219,5 @@ export function useTriage() {
 
   useEffect(() => () => ctl.current?.abort(), []);
 
-  return { ...state, asking: asking(state), run, ask, abort };
+  return { ...state, asking: asking(state), rounds: followUpsUsed(state.followUps), run, ask, abort };
 }

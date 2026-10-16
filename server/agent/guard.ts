@@ -16,6 +16,10 @@ const PATHLIKE = /\.(?:[cm]?js|tsx?|jsx|json|md|ya?ml|css|html|lock)$/i;
 const PROSE = new Set('and/or yes/no on/off true/false read/write input/output either/or he/she his/her pass/fail client/server ci/cd tcp/ip npm/yarn npm/pnpm yarn/pnpm ui/ux dev/prod w/out pros/cons'.split(' '));
 const NOUN = new Set('repo repos repository repositories package packages version versions team teams path paths maintainer maintainers'.split(' '));
 const WORDS = new Map('one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty'.split(' ').map((w, i) => [w, i + 1]));
+// An internal field or tool name a model copied from the evidence (reposPerVersion, filter_exposures): checked like a claim,
+// so it is struck unless it is a known entity. package.json's own keys are words a reader knows.
+const FIELD = /^[a-z][a-z0-9]*(?:[A-Z][a-z0-9]*)+$|^[a-z]+(?:_[a-z]+)+$/;
+const KEYS = new Set('devdependencies peerdependencies optionaldependencies bundledependencies lockfileversion'.split(' '));
 
 export function guard(text: string, ev: Evidence): { verified: number; total: number; flagged: string[]; claims: Claim[] } {
   text = typeof text === 'string' ? text : '';
@@ -52,7 +56,7 @@ export function guard(text: string, ev: Evidence): { verified: number; total: nu
         continue;
       }
     }
-    if (NPM.test(tok) || (REPO.test(tok) && !PROSE.has(low) && (!PATHLIKE.test(tok) || known.has(low)))) add('entity', tok, start, end, known.has(low));
+    if (NPM.test(tok) || (REPO.test(tok) && !PROSE.has(low) && (!PATHLIKE.test(tok) || known.has(low))) || (FIELD.test(tok) && !KEYS.has(low))) add('entity', tok, start, end, known.has(low));
   }
   const bad = claims.filter((c) => !c.ok);
   return { verified: claims.length - bad.length, total: claims.length, flagged: bad.map((c) => c.text), claims };
