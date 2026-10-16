@@ -185,6 +185,25 @@ Also add a 10 s **Mark remediated → graph write → Triage history** beat. It 
    - submit the form with `docs/submission.md`, Track 1
    - then the launch posts, with no vote requests
 
+## Status after QA round 7 (2026-10-16, main f941e21)
+
+| Item | Status |
+|---|---|
+| A1 Ask answers the question asked | Done: six audit questions plus about 30 paraphrases are regression tests (judge r7c: Correctness 9.1, Trust 9.0) |
+| A2 Agent on the first screen | Done |
+| A3 README first screen | Done (image, links, 60 s tour, "What the agent does", MCP transcript) |
+| A4 Contradicted claims | Done |
+| A5 AI disclosure | Done; the decisions list awaits the author's own words |
+| A6 Video script | Done; re-walked against the merged app |
+| A7 Submission copy | Done (`docs/submission.md`, 149 words) |
+| A8 MCP default, alert error | Done |
+| A9 Absolute og:image | Waits for the live URL |
+| A10 Font fetch retry | Done |
+| Security round 7 | PASS after fixes (0 high / 0 medium; `qa/security/phase3r7-security.md`) |
+| Judge r7c | 9.25 overall, every dimension at or above 9 |
+| Issue #1 | Replied and closed |
+| USER 1-2, 4-7 | Open: Render deploy and keys, GitHub About, second LLM key (optional), blog publish, video, freeze and submit |
+
 ## Not worth doing
 
 - **Real Slack sends or GitHub PRs.** They need OAuth on a public demo and risk spamming real OSS repos. Surface the existing acts instead (A2, A3, A6).

@@ -121,3 +121,22 @@ Opus reviewer, read-only, against rules S1–S13: **fail** (3 high, 3 medium) �
   - A share card (`og-card.png`).
   - On a phone, the table pane is `overflow-x: clip` so the filter row sticks. This is CSS, not an effect.
 - **Guest lookups need `GH_TOKEN` in production:** anonymous GitHub is 60 requests an hour per IP, and a hosting provider shares the IP.
+
+## Judge win audit and QA round 7 — 2026-10-16
+
+- **Win audit (`qa/reports/win-audit.md`):** an arena of three judge-persona auditors (Opus, Sonnet, Fable) with a Sonnet cross-judge, base Opus. It found the entry strong but not complete (no video, no live URL), the agent invisible after triage, and Ask answering a different question under a green badge.
+- **Ask answers the question asked, or says why not:** named maintainers go to their blast radius. The head noun of "which/what <noun>" picks one answer:
+  - library, package or dependency: carriers, through the new read-only `EXPOSURE_CARRIERS`
+  - maintainer or account: PageRank reach
+  - team: teams
+  - version: versions
+
+  "Explain in plain words" gets the graph summary with a tier glossary. Stop words are never read as package names. A question whose named entity the graph route would not use is refused with `reason: 'off-topic'`, as distinct from `no-model` and `cap`. Coverage only adds the complete list to questions that ask for repos; it never replaces a model's answer.
+- **The carrier pick says "shortest paths":** "4 repos' shortest paths … run through `@babel/core`". Counting every path, 16 repos reach debug@4.4.2 through it, and Ask now lists those, so the two numbers no longer read as a contradiction.
+- **The agent on the first screen:** the analyst pick, "Notify 7 teams" and "Next qix?" (PageRank) lines show after triage with no click. The Ask placeholder is a graph-answered agent question.
+- **S7, the carrier answer (security round 7 H1):** it was quadratic in carriers, so one hostile pasted lockfile froze the event loop for 11–43 s. It is now one pass. The tool result sends at most 20 carriers per version. Model-chosen `version`/`via` filters must be package refs. The four-answer cap is reserved before the model call.
+- **Smaller fixes:**
+  - MCP `incident` defaults to `scenario` and is rejected when they differ.
+  - An unknown alert is a 200 with an SSE error, so a handled case logs no console error.
+  - The font fetch retries network and 5xx failures 3 times; a hash mismatch still fails.
+- **Docs:** the README has a 60-second judge tour, "What the agent does", a real MCP transcript and the setup above the Cypher. The claims the app contradicted are corrected (the EXPLAIN_PATH plan starts at the Dep index), the AI-use disclosure is complete, and `docs/submission.md` is new.
