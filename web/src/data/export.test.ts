@@ -222,13 +222,13 @@ test('the Markdown opens with a summary: the headline, the tier lines, the windo
   const total = Object.values(report.counts).reduce((a, b) => a + b, 0);
   const head = lines[4]!;
   assert.match(head, new RegExp(`^${exposed} of ${total} repos are exposed to the \`qix\` account compromise at 13:30 UTC on 2025-09-08\\.`));
-  assert.ok(head.includes(`The graph showed this ${report.minutesAhead} minutes before the first OSV record.`));
+  assert.ok(head.includes(`No OSV record exists yet at 13:30 UTC (in hindsight, it came at 14:26 UTC, ${report.minutesAhead} minutes after the first exposure).`), head); // as of the clock
   const locked = report.exposures.filter((e) => e.tier === 'LOCKED').map((e) => `\`${e.repo}\``);
   assert.ok(md.includes(`LOCKED, ${locked.length} repo${locked.length === 1 ? '' : 's'} (${locked.join(', ')}): the lockfile itself pins the malicious version, so rotate secrets and rebuild.`));
   const pull = report.exposures.filter((e) => e.tier === 'WOULD_PULL');
   const prod = pull.filter((e) => !e.dev).length;
   assert.ok(md.includes(`WOULD_PULL, ${pull.length} repos (${prod} prod, ${pull.length - prod} dev-only): exposed only on a fresh install; installing from the committed lockfile (npm ci) was safe.`));
-  assert.match(md, /Window: malicious versions were live from \d\d:\d\d UTC on \d{4}-\d\d-\d\d until npm removed them around \d\d:\d\d UTC\./);
+  assert.match(md, /Window: malicious versions live since \d\d:\d\d UTC on \d{4}-\d\d-\d\d \(still live at 13:30 UTC\)\./); // as of the scenario clock
   // who to notify: team, channel, repos; the team with the LOCKED repo first
   const notify = md.slice(md.indexOf('Who to notify'), md.indexOf('Scenario clock:')).split('\n').filter((l) => l.startsWith('- '));
   assert.equal(notify.length, report.owners.length);
@@ -249,10 +249,10 @@ test('the summary escapes every repo, team and channel it prints, and a filter s
   const md = reportToMarkdown(hostile);
   assert.ok(!/^# Injected/m.test(md) && !/^\[x\]/m.test(md), md);
   assert.ok(md.includes("- `evil' # Injected [x](http://x)` (`evil' # Injected [x](http://x)`): `evil' # Injected [x](http://x)`"));
-  // a filtered file keeps the whole run's headline and only the owners of the listed repos
+  // a filtered file summarises its own repos (not the whole run) and lists only the owners of the listed repos
   const one = report.exposures[1]!;
   const filtered = reportToMarkdown(report, { repos: [one.repo], label: `search "${one.repo}", 1 of ${report.exposures.length} repos` });
-  assert.ok(filtered.includes(`${report.counts.LOCKED + report.counts.WOULD_PULL} of `), 'headline is the whole run');
+  assert.match(filtered, /\b1 repo in this filter is exposed to /, 'headline is the filter');
   const teams = filtered.slice(filtered.indexOf('Who to notify'), filtered.indexOf('Scenario clock:')).split('\n').filter((l) => l.startsWith('- '));
   assert.equal(teams.length, 1);
   assert.ok(teams[0]!.includes(`\`${one.repo}\``));

@@ -66,7 +66,7 @@ export function fixScopeNote(fix?: Pick<Remediation, 'direct' | 'devDirect'>, su
 /** What is true now: npm removed the malicious versions, so installing from a clean lockfile needs no change; a LOCKED lockfile pins a removed version. `tier` null = a report of many repos. */
 export function fixTodayNote(incident: IncidentMeta, tier: Tier | null, now?: number): string {
   if (!isClosed(incident, now)) return 'The malicious versions are still on npm: keep installing from your committed lockfile (npm ci), and use the overrides only if you must re-resolve dependencies while they are live.';
-  const gone = `npm removed the malicious versions ${removedWhen(incident)}`;
+  const gone = `Today, in hindsight: npm removed the malicious versions ${removedWhen(incident)}`;
   if (tier === 'LOCKED') return `${gone}, so npm ci on a lockfile that pins one can no longer fetch it. Re-resolve to a clean release (the overrides below force it), rotate the secrets that builds could read, and rebuild.`;
   if (tier === null) return `${gone}. A lockfile that pins a clean version (npm ci) needs no change today and a fresh install resolves a clean release; a LOCKED repo's lockfile pins a removed version and has to be re-resolved.`;
   return `${gone}, so today npm ci needs no change and a fresh install resolves a clean release. Keep the overrides only to hold that release or to replay the window.`;
@@ -95,15 +95,20 @@ const and = (xs: string[]) => (xs.length < 2 ? (xs[0] ?? '') : `${xs.slice(0, -1
  * is a code span (code()), as everywhere else in the export.
  */
 function summaryLines(whole: Report, r: Report, now?: number): string[] {
-  const { incident: inc, counts } = whole;
-  const exposed = whole.exposures.filter((e) => e.tier === 'LOCKED' || e.tier === 'WOULD_PULL');
+  const { incident: inc } = whole;
+  const counts = r.counts; // a filtered file summarises its own repos, not the whole org
+  const exposed = r.exposures.filter((e) => e.tier === 'LOCKED' || e.tier === 'WOULD_PULL');
   const locked = exposed.filter((e) => e.tier === 'LOCKED');
   const pull = exposed.filter((e) => e.tier === 'WOULD_PULL');
   const total = whole.scope?.repos ?? Object.values(counts).reduce((a, b) => a + b, 0);
   const project = /^(\S+) npm account takeover/.exec(inc.title)?.[1]; // "axios npm account takeover: ..." -> axios
   const who = inc.maintainer ? `the ${code(inc.maintainer)} account compromise${project && project !== inc.maintainer ? ` (the ${code(project)} maintainer)` : ''}` : `incident ${code(inc.id)}`;
   const first = inc.firstExposureAt ?? inc.firstPublishAt; // an older server sends no first exposure: the first publish stands in
-  const ahead = whole.minutesAhead > 0 && whole.at >= first ? ` The graph showed this ${whole.minutesAhead} minutes before the first OSV record.` : '';
+  const ahead = whole.minutesAhead > 0 && whole.at >= first
+    ? whole.at < inc.advisoryAt
+      ? ` No OSV record exists yet at ${utcLabel(whole.at)} (in hindsight, it came at ${utcLabel(inc.advisoryAt)}, ${whole.minutesAhead} minutes after the first exposure).`
+      : ` The graph showed this ${whole.minutesAhead} minutes before the first OSV record.`
+    : '';
   const when = `at ${utcLabel(whole.at)} on ${dayOf(whole.at)}`;
   const fixed = exposed.filter((e) => e.remediated);
   const out: string[] = [];
@@ -127,7 +132,9 @@ function summaryLines(whole: Report, r: Report, now?: number): string[] {
     return out;
   }
   const prod = pull.filter((e) => !e.dev).length;
-  out.push(`${exposed.length} of ${plural(total, 'repo')} ${exposed.length === 1 ? 'is' : 'are'} exposed to ${who} ${when}.${ahead}`);
+  out.push(r === whole
+    ? `${exposed.length} of ${plural(total, 'repo')} ${exposed.length === 1 ? 'is' : 'are'} exposed to ${who} ${when}.${ahead}`
+    : `${plural(exposed.length, 'repo')} in this filter ${exposed.length === 1 ? 'is' : 'are'} exposed to ${who} ${when}.${ahead}`);
   if (locked.length) out.push(`LOCKED, ${plural(locked.length, 'repo')} (${and(locked.map((e) => code(e.repo)))}): the lockfile itself pins the malicious version, so rotate secrets and rebuild.`);
   if (pull.length) out.push(`WOULD_PULL, ${plural(pull.length, 'repo')} (${prod} prod, ${pull.length - prod} dev-only): exposed only on a fresh install; installing from the committed lockfile (npm ci) was safe.`);
   if (fixed.length) out.push(`Marked remediated: ${and(fixed.map((e) => code(e.repo)))}.`);
@@ -235,11 +242,11 @@ export function detailsLink(base: string, report: Pick<Report, 'incident' | 'at'
 function windowLine(incident: IncidentMeta, at?: number, now?: number): string {
   const from = incident.firstExposureAt ?? incident.firstPublishAt;
   const day = dayOf;
-  // closed by today's date (a message sent now) or by the scenario clock: either way it is past tense
-  if (isClosed(incident, now) || (at !== undefined && at >= incident.removedAt)) {
+  // as of the scenario clock (a notice is what you would send then): past tense only once the clock passed the removal
+  if (at === undefined ? isClosed(incident, now) : at >= incident.removedAt) {
     return `Window: malicious versions were live from ${utcLabel(from)} on ${day(from)} until npm removed them around ${utcLabel(incident.removedAt)}${day(incident.removedAt) === day(from) ? '' : ` on ${day(incident.removedAt)}`}.`;
   }
-  return `Window: malicious versions live since ${utcLabel(from)} on ${day(from)}${at !== undefined ? ` (still live at ${utcLabel(at)}; npm removed them around ${utcLabel(incident.removedAt)})` : ''}.`;
+  return `Window: malicious versions live since ${utcLabel(from)} on ${day(from)}${at !== undefined ? ` (still live at ${utcLabel(at)})` : ''}.`;
 }
 
 /**
@@ -248,7 +255,7 @@ function windowLine(incident: IncidentMeta, at?: number, now?: number): string {
  */
 export function slackMessage(i: { exposure: Exposure; paths: ExposurePath[]; fix?: Remediation; incident: IncidentMeta; link: string | null; at?: number; anonymous?: boolean; source?: LockSource; now?: number }): string {
   const { exposure: e } = i;
-  const closed = isClosed(i.incident, i.now) || (i.at !== undefined && i.at >= i.incident.removedAt);
+  const closed = i.at === undefined ? isClosed(i.incident, i.now) : i.at >= i.incident.removedAt; // as of the scenario clock
   const lock = lockNote(i.source, e.repo);
   const bad = new Set(i.incident.versions.map((v) => v.id));
   const pins = i.fix ? pinTargets(i.fix.overrides) : [];

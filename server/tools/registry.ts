@@ -101,7 +101,7 @@ export async function suspectVersions(g: Graph, p: { maintainer: unknown; since:
   const rows = await c.q(Q.SUSPECT_VERSIONS, params);
   const removed = rows.filter((r) => r.removed).length;
   const summary = `${plural(rows.length, 'version')} of ${params.maintainer}'s packages published ${utc(params.since)} to ${utc(params.until)}`
-    + (rows.length ? `: ${few(rows.map((r) => r.version))}` : '') + (removed ? `; ${removed} later removed from npm` : '');
+    + (rows.length ? `: ${few(rows.map((r) => r.version))}` : '') + (removed ? `; in hindsight, ${removed} were removed from npm` : '');
   return c.result('suspect_versions', params, summary, rows, [params.maintainer, ...rows.map((r) => r.version)]);
 }
 
@@ -257,19 +257,20 @@ export async function draftRemediation(g: Graph, p: { repo: unknown; versions: u
   const pairs = Object.entries(overrides).map(([k, v]) => `"${k}": "${v}"`).join(', ');
   const pins = Object.entries(overrides).map(([k, v]) => `${nameOf(k)}@${v}`);
   const missing = uniq(params.versions.filter((v) => !overrides[v]).map(nameOf));
-  // Order: what keeps you safe today, then the conditional override, then LOCKED's rotate-and-rebuild.
+  // Order: LOCKED's rotate-and-rebuild first (it cannot wait), then the lockfile fix; otherwise what keeps you safe, then
+  // the conditional override.
   const steps = (isLocked
     ? [
-      `Your lockfile pins ${badLocked.join(', ')}, which ${badLocked.length === 1 ? 'is' : 'are'} malicious: ${pairs ? `add the overrides ${pairs} to package.json, run npm install to regenerate the lockfile and commit it` : 'remove them and regenerate the lockfile'}`,
-      ...notes,
       'Rotate secrets that builds and CI could read since the first malicious publish',
       'Rebuild and redeploy anything built from this lockfile during the window',
+      `Your lockfile pins ${badLocked.join(', ')}, which ${badLocked.length === 1 ? 'is' : 'are'} malicious: ${pairs ? `add the overrides ${pairs} to package.json, run npm install to regenerate the lockfile and commit it` : 'remove them and regenerate the lockfile'}`,
+      ...notes,
     ]
     : [
       `Keep installing from your committed lockfile (npm ci): ${safeLocked.length ? `it pins ${safeLocked.join(', ')} (safe)` : 'it never resolved the malicious version'}`,
       !pairs ? ''
         : Number.isFinite(until) && until <= params.at ? `The malicious versions stopped resolving at ${utc(until)}, so a fresh resolve now gets a clean release and no override is needed (the overrides ${pairs} were the fix during the window)`
-          : `Only for a re-resolve during the window${Number.isFinite(until) ? ` (it closed when the malicious versions stopped resolving at ${utc(until)})` : ''}: add the overrides ${pairs} to package.json; they pin every dependent whose range admits the malicious version to that release, other majors untouched, and can come out once the window has closed`,
+          : `Only for a re-resolve during the window${Number.isFinite(until) ? ` (in hindsight, it closed at ${utc(until)})` : ''}: add the overrides ${pairs} to package.json; they pin every dependent whose range admits the malicious version to that release, other majors untouched, and can come out once the window has closed`,
       ...notes,
     ]).filter(Boolean);
   const prBody = `${isLocked ? 'The lockfile resolves' : 'Declared ranges admit'} ${params.versions.join(', ')}. `

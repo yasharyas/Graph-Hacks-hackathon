@@ -82,8 +82,8 @@ describe('graph', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, ()
     const [fix] = T.rowsOf<{ overrides: Record<string, string>; steps: string[] }>(await T.draftRemediation(QIX, { repo: 'acme/checkout-web', versions: web.versions, at: QAT }));
     // version-qualified keys: a blanket "chalk": "5.6.0" forced ESM chalk 5 onto log-symbols' ^4 and crashed mocha
     assert.deepEqual(fix.overrides, { 'debug@4.4.2': '4.4.1', 'chalk@5.6.1': '5.6.0' });
-    assert.match(fix.steps[0], /^Your lockfile pins (debug@4\.4\.2, chalk@5\.6\.1|chalk@5\.6\.1, debug@4\.4\.2), which are malicious: add the overrides/);
-    assert.deepEqual(fix.steps.slice(-2).map((s) => s.split(' ')[0]), ['Rotate', 'Rebuild']);
+    assert.deepEqual(fix.steps.slice(0, 2).map((s) => s.split(' ')[0]), ['Rotate', 'Rebuild']); // the step that cannot wait comes first
+    assert.match(fix.steps[2], /^Your lockfile pins (debug@4\.4\.2, chalk@5\.6\.1|chalk@5\.6\.1, debug@4\.4\.2), which are malicious: add the overrides/);
   });
 
   test('a WOULD_PULL fix starts from what the lockfile pins: npm ci first, overrides only to re-resolve', async () => {
@@ -93,7 +93,7 @@ describe('graph', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, ()
     assert.ok(!cli.locked!.some((v) => cli.versions.includes(v)), 'a WOULD_PULL lockfile pins no malicious version');
     const [fix] = T.rowsOf<{ overrides: Record<string, string>; steps: string[] }>(await T.draftRemediation(QIX, { repo: 'npm/cli', versions: cli.versions, at: QAT }));
     assert.match(fix.steps[0], /^Keep installing from your committed lockfile \(npm ci\): it pins .*chalk@5\.4\.1.* \(safe\)$/);
-    assert.match(fix.steps[1], /^Only for a re-resolve during the window \(it closed when the malicious versions stopped resolving at 2025-09-08 15:15Z\): add the overrides "chalk@5\.6\.1": "5\.6\.0".* to package\.json; they pin every dependent whose range admits the malicious version to that release/);
+    assert.match(fix.steps[1], /^Only for a re-resolve during the window \(in hindsight, it closed at 2025-09-08 15:15Z\): add the overrides "chalk@5\.6\.1": "5\.6\.0".* to package\.json; they pin every dependent whose range admits the malicious version to that release/);
     assert.ok(Object.keys(fix.overrides).every((k) => cli.versions.includes(k)));
     assert.ok(!fix.steps.some((s) => /rotate/i.test(s)));
   });

@@ -278,8 +278,8 @@ export function devFacts(r: Report): string {
 
 // "If I can only fix three repos, which?": open exposures by urgency. LOCKED (secrets), then production repos whose own
 // package.json declares the range (the owner can pin it today), then production through a dependency, then dev-only.
-export function priorityFacts(r: Report, n = 3): string {
-  const open = bySeverity(r).filter((e) => exposedTier(e) && !e.remediated);
+export function priorityFacts(r: Report, n = 3, skip: string[] = []): string {
+  const open = bySeverity(r).filter((e) => exposedTier(e) && !e.remediated && !skip.includes(e.repo));
   if (!open.length) return 'Nothing is open: every exposed repo is marked remediated.';
   const own = (e: Exposure) => { const p = pathOf(r, e); return p?.kind === 'ADMITS' && p.hops === 0; };
   const rank = (e: Exposure) => (e.tier === 'LOCKED' ? 0 : !e.dev && own(e) ? 1 : !e.dev ? 2 : 3);
@@ -343,9 +343,14 @@ export function verdictText(r: Report): string {
   const who = r.incident.maintainer ? `the ${tk(r.incident.maintainer)} account compromise${project && project !== r.incident.maintainer ? ` (the ${project} maintainer)` : ''}` : `incident ${tk(r.incident.id)}`;
   const first = r.incident.firstExposureAt ?? null;
   const closed = r.at >= r.incident.removedAt; // as known at the scenario clock: the removal is in the past
-  const window = first === null ? 'in the window' : `between ${hm(first)} and ${hm(r.incident.removedAt)} on ${day(first)}`; // a replay: both ends are history
+  // As of the scenario clock (what an on-call engineer could say then); anything later is marked "in hindsight".
+  const window = first === null ? 'in the window' : closed ? `between ${hm(first)} and ${hm(r.incident.removedAt)} on ${day(first)}` : `since ${hm(first)} on ${day(first)} (still open at ${hm(r.at)})`;
+  const wholeWindow = first === null ? 'in the window' : `between ${hm(first)} and ${hm(r.incident.removedAt)} on ${day(first)}`; // a pasted repo asks about the past
+  const removedLater = ` npm removed the malicious versions around ${hm(r.incident.removedAt)}.`;
   const ahead = r.minutesAhead > 0 && first !== null && r.at >= first
-    ? ` The graph shows the exposure from ${hm(first)}; the first OSV record came at ${hm(r.incident.advisoryAt)}, ${r.minutesAhead} minutes later.`
+    ? r.at < r.incident.advisoryAt
+      ? ` No OSV record exists yet at ${hm(r.at)}. In hindsight: it came at ${hm(r.incident.advisoryAt)}, ${r.minutesAhead} minutes after the first exposure, and${removedLater}`
+      : ` The graph showed this ${r.minutesAhead} minutes before the first OSV record.${closed ? '' : ` In hindsight:${removedLater}`}`
     : '';
   const total = r.scope?.repos ?? Object.values(r.counts).reduce((a, b) => a + b, 0);
   const fixFor = (e: Exposure) => r.remediations.find((m) => m.repo === e.repo)?.overrides ?? {};
@@ -385,7 +390,7 @@ export function verdictText(r: Report): string {
       `Do: 1) ${fix.length ? `Replace ${and(fix)} with overrides, regenerate the lockfile with npm install and commit it.` : 'Remove the malicious versions and regenerate the lockfile.'} 2) Rotate secrets that builds and CI could read in the window, and rebuild anything built from this lockfile in it.`,
     ].join('\n');
     return [
-      `Verdict${counterfactual || lockfile}: ${tk(e.repo)} ${would} safe if installed from ${counterfactual ? 'that' : 'your committed'} lockfile${pins.length ? `, which pins ${and(pins.map(tk))}` : ''}. Only a fresh install ${window} would have fetched ${and(e.versions.slice(0, 3).map(tk))}${e.versions.length > 3 ? ` and ${e.versions.length - 3} more` : ''}, from ${who}.${ahead}`,
+      `Verdict${counterfactual || lockfile}: ${tk(e.repo)} ${would} safe if installed from ${counterfactual ? 'that' : 'your committed'} lockfile${pins.length ? `, which pins ${and(pins.map(tk))}` : ''}. Only a fresh install ${wholeWindow} would have fetched ${and(e.versions.slice(0, 3).map(tk))}${e.versions.length > 3 ? ` and ${e.versions.length - 3} more` : ''}, from ${who}.${ahead}`,
       `Why: ${why(r, e)}.`,
       `Do: 1) Keep installing from your committed lockfile (npm ci)${pins.length ? `; it pins ${and(pins.map(tk))} (safe)` : ''}.${fix.length ? ` 2) ${overrideStep(`overrides that replace ${and(fix)}`)}` : ''}`,
     ].join('\n');

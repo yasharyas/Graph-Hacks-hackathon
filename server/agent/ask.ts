@@ -131,8 +131,10 @@ const COUNT: Record<string, number> = { two: 2, three: 3, four: 4, five: 5, few:
 const named = (q: string, r: Report) => r.exposures.filter((e) => mentions(q, e.repo) || (e.repo.split('/')[1]!.length > 2 && mentions(q, e.repo.split('/')[1]!)));
 const NEXT = /\bnext (qix|target|compromise|account|maintainer)\b|\bconcentrat\w*|\bwhich maintainers?\b|\bpagerank\b|\bsingle points? of failure\b|\b(compromised|hijacked) next\b/i;
 export function graphAnswer(q: string, r: Report, repo?: string, list = false): string | null {
-  if (EXCEPT.test(q)) return null; // comparisons are the model's (with the filter result attached)
   const many = named(q, r);
+  // "riskiest after X": the urgency order without X; any other comparison is the model's (with the filter result attached)
+  if (EXCEPT.test(q)) return /\b(riskiest|most (urgent|at risk|exposed)|next|after)\b/i.test(q) && (PRIORITY.test(q) || /\b(riskiest|most (urgent|at risk))\b/i.test(q))
+    ? priorityFacts(r, 3, many.map((x) => x.repo)) : null;
   const e = repo ? r.exposures.find((x) => x.repo === repo) : undefined;
   const repos = many.length > 1 ? many.slice(0, 3) : e ? [e] : [];
   const priority = !repos.length && PRIORITY.test(q);
@@ -263,7 +265,7 @@ export async function* ask({ run, question, chatFn = pinned, signal }: { run: Ru
   }
   if (!text) {
     mode = 'template';
-    unanswered = !results.length;
+    unanswered = true; // no model wrote an answer: what follows is the graph's raw results at most
     text = results.length
       ? `No language model answered, so here is what the graph returned: ${results.map((r) => r.summary).join('; ')}.`
       : `No language model is available right now, and this question has no answer built from the graph. The graph answers these by itself: which repos are exposed (or prod-only, by team), is npm ci safe, how bad is it, what to do first, which team has the most work, who could be compromised next, and when it started. Every panel of the triage at ${utc(run.at)} comes straight from graph queries.`;

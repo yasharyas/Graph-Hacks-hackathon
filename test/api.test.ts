@@ -235,7 +235,7 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
       assert.deepEqual(repoEvs.filter((e) => e.type === 'tool_start').map((e) => (e as { tool: string }).tool), ['explain_path', 'draft_remediation']);
       const fix = of(repoEvs, 'narration');
       assert.match(fix.text, /^`acme\/checkout-web` \(owned by `Payments`, `#team-payments`\) is LOCKED: /);
-      assert.match(fix.text, /Do: 1\) Your lockfile pins .*Rotate secrets/);
+      assert.match(fix.text, /Do: 1\) Rotate secrets.*3\) Your lockfile pins/); // rotation first: it cannot wait
       assert.deepEqual(of(repoEvs, 'guard').flagged, []);
 
       // when: start, the OSV gap, and only what is known at the scenario clock
@@ -271,6 +271,10 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
       assert.match(three.text, /^Fix first, by urgency: 1\) `acme\/checkout-web`: its lockfile pins the malicious version.*; 2\) `[^`]+`: production.*; 3\) `[^`]+`: production/);
       assert.match(three.text, /The other 18 stay safe while they install from their committed lockfiles \(npm ci\)\.$/);
       for (const q of ['compare mocha and nodemon', 'If I can only fix three repos today, which three and why?']) assert.deepEqual(of(await askQ(q), 'guard').flagged, [], q);
+      // "riskiest after X": the urgency order without X, from the graph (the model was answering this with X's own facts)
+      const after = of(await askQ('which repo is riskiest after checkout-web?'), 'narration');
+      assert.match(after.text, /^Fix first, by urgency: 1\) `/);
+      assert.ok(!after.text.includes('`acme/checkout-web`'), after.text);
       assert.equal(asked, 0);
       // customers are not in the graph: the model answers (not the team roster)
       const cust = of(await askQ('do I need to notify customers?'), 'narration');
