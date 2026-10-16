@@ -82,3 +82,19 @@ Opus reviewer, read-only, against rules S1–S13: **fail** (3 high, 3 medium) �
 
   The notify intent no longer catches "tell" or "team", and questions about customers or regulators go to the model. The model's prompt now states the npm ci and rotate rules.
 - **CSP for the graph library:** `force-graph` and `float-tooltip` inject a fixed `<style>` each, appended empty and then filled. The CSP allows exactly those two hashes plus the empty one, not `'unsafe-inline'`. A test recomputes the hashes from `node_modules`, so a dependency bump that changes them fails.
+
+## QA rounds 4 and 5 — 2026-10-16
+
+- **As of the clock, with hindsight labelled (supersedes the round-3 "removal time is named"):** the AppSec persona role-plays being on call at 13:16, and the verdict told it things nobody knew then: the 15:15 removal, the 14:26 advisory, and "nothing to change today". The maintainer persona, asking today whether they were exposed, needs exactly those facts. So the verdict, the notices and the Slack text now speak as of the scenario clock ("still open at 13:30 UTC"). Anything later appears only in a sentence that starts "In hindsight:", or in the Fix tab's "Today, in hindsight" note. A pasted repo's verdict gives the whole window, because its question is about the past.
+- **What an override really pins:** npm applies a version-qualified override (`"debug@4.4.2": "4.4.1"`) to every dependent whose range admits the bad version. That pins `debug` at 4.4.1 even where today's resolve would give 4.4.3. The steps, the PR body and the Fix tab now say so. They call the override an in-window measure, and say that after removal no override is needed.
+- **The fix, read against today's package.json:** for a pasted GitHub repo judged on a pre-incident snapshot, the server also reads today's `package.json` (raw, no API quota). It notes each override that today's declared range no longer needs (it would hold the package back, e.g. uptime-kuma's `~0.33.0`), and each pin for a package no longer declared. It checks direct dependencies only.
+- **Rotate first:** a LOCKED repo's rotate-secrets and rebuild steps come first, in the verdict's Do line and in the repo's own steps.
+- **Whole-second minutes:** the lead time is computed on whole seconds, the precision every timestamp on screen shows. That makes axios 106 minutes (00:21:58 to 02:07:58; 105.997 to the millisecond). qix stays at 74.
+- **Guest GitHub lookups:** the commits lookup uses the server's read-only token, as the plan intended; anonymous is 60 requests an hour per IP, and that is shared on a hosting provider. It follows one same-host redirect, so renamed repos keep their history. When the history API is unavailable, the counterfactual says so instead of claiming no history exists. Raw files are fetched without the token. A test pins the token to `api.github.com`.
+- **Ask from the graph, more of it:**
+  - "am I affected", "who could be compromised next" (PageRank concentration), "if I can only fix three" (by urgency: LOCKED, then production repos that declare the range themselves, then production through a dependency, then dev-only) and "riskiest after X" now get graph answers.
+  - Several named repos are all answered.
+  - Routing no longer matches "removed", "riskiest" or a bare "safe" next to a named repo.
+  - With no model, the answer is labelled "Not answered".
+- **Alert clocks:** "1:16 PM", "13:16UTC" and ISO instants are read, and a time 30 days or more from the incident is ignored.
+- **S7, the range sanitizer (security round 5 H1):** the round-4 range filter ran a backtracking regex on the uncapped range: 160 KB took 15 s, and 5 MB would take hours. Every lockfile string is now cut to a few times its cap before any regex or semver call, the regexes are linear, and a test feeds 2 MB hostile ranges. A version that is not semver is dropped, not squashed.
