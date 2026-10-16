@@ -39,7 +39,7 @@ export const LIMITS = { entries: 6000, segments: 40, depsPerEntry: 1000, edges: 
 const safeName = (s: string) => s.slice(0, 214).replace(/[^A-Za-z0-9@/._~*-]/g, '');
 const safeVersion = (s: string) => semver.valid(s.slice(0, 64), { loose: true }) ?? ''; // not a version: nothing to match or quote
 const PROTOCOL = /^(file|link|workspace|portal|git(\+[a-z]+)?|https?|github|gitlab|bitbucket):/i; // not a semver range at all
-const safeRange = (s: string) => {
+export const safeRange = (s: string) => {
   const spec = s.slice(0, 4 * LIMITS.range).replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, ' ').replace(/^\s*npm:@?[^@\s]+@/, '').trim();
   if (PROTOCOL.test(spec)) return spec.replace(/[^A-Za-z0-9._~:/?#@!$&+,;=%*-]/g, '').slice(0, LIMITS.range); // a path or URL: one token
   return spec.replace(/(?<=[<>=~^])\s+/g, '').split(/\s+/)

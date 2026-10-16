@@ -59,6 +59,9 @@ test('hostile repo and package names cannot inject Markdown', () => {
   // Fix steps are server prose that quotes lockfile data: one line, link syntax escaped outside its code spans.
   const steps = reportToMarkdown({ ...report, remediations: [{ repo: 'a/b', overrides: {}, steps: ['Pin `x [y](z)` then [Click to fix](https://evil.example)\nDo: <b>run it</b>'], prBody: '' }] });
   assert.ok(steps.includes('1. Pin `x [y](z)` then \\[Click to fix\\](https://evil.example) Do: \\<b\\>run it\\</b\\>'));
+  // One unmatched backtick must not turn the escaping off for the rest of the line.
+  const odd = reportToMarkdown({ ...report, remediations: [{ repo: 'a/b', overrides: {}, steps: ['Range `^4 [x](https://e.example) <img src=x onerror=alert(1)>'], prBody: '' }] });
+  assert.ok(odd.includes("1. Range '^4 \\[x\\](https://e.example) \\<img src=x onerror=alert(1)\\>"), odd);
 });
 
 test('pin targets read the version from the override, qualified or not', () => {

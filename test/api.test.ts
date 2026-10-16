@@ -528,6 +528,33 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
     }
   });
 
+  test("S4 today's package.json: ranges keep only semver tokens; a broken one skips the check, not the analysis", async () => {
+    const realFetch = globalThis.fetch;
+    const sha = 'b'.repeat(40);
+    const hostile = JSON.stringify({ dependencies: { debug: '^3.2.7 [x](https://e.example) <img src=x onerror=alert(1)>' } });
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.startsWith('https://api.github.com/repos/octo/')) return new Response(JSON.stringify([{ sha }]));
+      if (url.endsWith(`/${sha}/package-lock.json`)) return new Response(tiny('today'));
+      if (url.endsWith('/octo/today/HEAD/package.json')) return new Response(hostile);
+      if (url.endsWith('/octo/broken/HEAD/package.json')) return new Response('{"dependencies": ');
+      return new Response('Not Found', { status: 404 });
+    }) as typeof fetch;
+    try {
+      const res = await post('/api/analyze', { url: 'https://github.com/octo/today', scenario: QIX });
+      const sid = cookie(res)!;
+      const ready = (await sse<AnalyzeEvent>(res)).at(-1) as Extract<AnalyzeEvent, { type: 'ready' }>;
+      assert.equal(ready.type, 'ready', JSON.stringify(ready));
+      const today = (await triageRun({ guest: ready.graph, scenario: QIX, at: QAT }, { cookie: sid })).report.remediations.flatMap((m) => m.today ?? []);
+      assert.ok(today.some((n) => n.includes('declares debug ^3.2.7, which')), JSON.stringify(today));
+      assert.ok(today.every((n) => !/e\.example|<img|\[x\]/.test(n)), JSON.stringify(today));
+      const broken = (await sse<AnalyzeEvent>(await post('/api/analyze', { url: 'https://github.com/octo/broken', scenario: QIX }))).at(-1)!;
+      assert.equal(broken.type, 'ready', JSON.stringify(broken));
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
   test('S7: at most 4 triage/ask streams at once, server-wide', async () => {
     const t = await triageRun({ scenario: QIX, at: QAT });
     const runId = of(t.evs, 'start').runId;

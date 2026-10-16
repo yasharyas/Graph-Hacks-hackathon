@@ -7,7 +7,7 @@ import type { AnalyzeEvent, LockSource, ScenarioId } from '../../shared/events.t
 import { db, guestGraph, registryGraph } from '../graph/client.ts';
 import { HttpError, MAX_LOCKFILE_BYTES, parseRepo, safeFetch, safeJson } from '../security.ts';
 import { badVersions, load, writeAdmits, writeMaintainers, writeRepos, type RepoIn } from './build.ts';
-import { parseLockfile } from './lockfile.ts';
+import { parseLockfile, safeRange } from './lockfile.ts';
 
 // Same words as the UI's own checks (web/src/components/PasteBox.tsx).
 export const UNSUPPORTED = 'yarn and pnpm lockfiles are not supported yet. Drop a package-lock.json (npm v2 or v3).';
@@ -67,10 +67,16 @@ export type Today = { deps: Record<string, string>; dev: Record<string, string> 
 async function fetchToday(owner: string, repo: string, signal: AbortSignal): Promise<Today | undefined> {
   const res = await get(`https://raw.githubusercontent.com/${owner}/${repo}/HEAD/package.json`, signal).catch(() => null);
   if (!res?.ok) return void res?.body?.cancel().catch(() => {});
-  const pkg = safeJson(await capped(res).catch(() => ''), 1_000_000) as { dependencies?: unknown; devDependencies?: unknown } | null;
+  let pkg: { dependencies?: unknown; devDependencies?: unknown } | null;
+  try {
+    pkg = safeJson(await capped(res).catch(() => ''), 1_000_000) as typeof pkg;
+  } catch {
+    return undefined; // a broken or huge package.json only skips the today check, never the analysis
+  }
+  // Ranges are quoted in the Fix tab and the export: the same semver-token filter as the lockfile (S4).
   const pick = (m: unknown) => Object.fromEntries(Object.entries(m && typeof m === 'object' ? m : {}).slice(0, 2000)
     .filter(([k, v]) => /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/i.test(k) && k.length <= 214 && typeof v === 'string')
-    .map(([k, v]) => [k, (v as string).replace(/[^\x20-\x7e]/g, '').slice(0, 128)]));
+    .map(([k, v]) => [k, safeRange(v as string)]).filter(([, v]) => v));
   return pkg ? { deps: pick(pkg.dependencies), dev: pick(pkg.devDependencies) } : undefined;
 }
 

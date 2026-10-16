@@ -10,8 +10,12 @@ import { readUrlState, shareUrl, type OpenTab } from './urlState.ts';
 export { scopeReport, viewLabel, type ReportView } from './reportView.ts';
 
 const code = (s: string) => `\`${s.replaceAll('`', "'").replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, ' ').replace(/\s+/g, ' ')}\``;
-// Server prose quotes lockfile data: one line, and outside its `code` spans no Markdown link or HTML syntax.
-const prose = (s: string) => s.replace(/[\r\n]+/g, ' ').split('`').map((x, i) => (i % 2 ? x : x.replace(/[\\[\]<>]/g, '\\$&'))).join('`');
+// Server prose quotes lockfile data: one line, and outside its `code` spans no Markdown link or HTML syntax. An odd
+// backtick would flip which parts count as code, so then every backtick goes.
+const prose = (s: string) => {
+  const t = s.replace(/[\r\n]+/g, ' ');
+  return (t.split('`').length % 2 ? t : t.replaceAll('`', "'")).split('`').map((x, i) => (i % 2 ? x : x.replace(/[\\[\]<>]/g, '\\$&'))).join('`');
+};
 const fence = (s: string) => `\`\`\`\n${s.replaceAll('```', "'''")}\n\`\`\``;
 const oneLine = (s: string) => s.replace(/\s+/g, ' ');
 const word = (s: string) => (/^[A-Z_]{1,16}$/.test(s) ? s : code(s));
