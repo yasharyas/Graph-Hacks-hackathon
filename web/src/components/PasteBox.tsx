@@ -3,8 +3,12 @@
  * Back close it, focus is trapped and returned. Progress and errors come AFTER both fields (sticky to the foot of the
  * scrolling area: right under the fields when there is room, on screen at the bottom when there is not), so no field moves
  * when they appear: the repo field keeps its place from the tap to the verdict, and a dead end costs no layout shift. A
- * long server message (yarn, pnpm, no lockfile) opens with one line (data/pasteError.ts lead); the versions to check by hand
- * and the longer instruction sit behind a disclosure, and the Copy-command button stays outside it.
+ * long server message (yarn, pnpm, no lockfile) opens with one line (data/pasteError.ts lead). For yarn and pnpm the versions
+ * to check by hand ARE the answer, so they stay open under it, and the npm command (Copy beside it) is the demoted second
+ * option, "only if the project also installs with npm"; the no-lockfile instruction sits behind a disclosure, with its
+ * Copy-command button outside it. The address a typed repo will be sent as, and an inline error, share one slot under the repo
+ * field that is two lines tall from the first frame, so the lockfile field below it never moves while someone types; the
+ * address is one line, cut at its end with the whole of it in the title.
  * Props:
  *   open      whether the sheet is showing (it stays mounted, so typed text survives closing)
  *   analyze   AnalyzeState from useAnalyze() (status, stage, repo, error), drives progress and errors
@@ -99,6 +103,9 @@ export function PasteBox({
     return () => clearInterval(t);
   }, [rateLimited, wait]);
   const blocked = busy || retryIn > 0;
+  // yarn / pnpm: the versions to search for by hand are the answer (the npm command only suits a project that also installs with npm),
+  // so they are shown, not folded; the server's closing sentence about npm is the lead-in of the command below them.
+  const byHand = problem?.detailsLabel === 'How to check it by hand' && problem.details ? problem.details.replace(/\s*If the project also installs with npm[\s\S]*$/, '').trim() || null : null;
 
   const repo = repoFromInput(url);
   const urlError = urlTouched && 'error' in repo ? repo.error : null;
@@ -216,7 +223,7 @@ export function PasteBox({
                   value={url}
                   placeholder="owner/name or github.com/owner/name"
                   aria-invalid={urlError ? true : undefined}
-                  aria-describedby={`${id}-url-help${urlError ? ` ${id}-url-err` : ''}`}
+                  aria-describedby={`${id}-url-help${urlNote ? ` ${id}-url-note` : ''}${urlError ? ` ${id}-url-err` : ''}`}
                   onChange={(e) => (setUrl(e.target.value), e.target.value.trim() || setUrlTouched(false))}
                   onPaste={onPasteUrl}
                   onBlur={() => url.trim() && setUrlTouched(true)}
@@ -226,14 +233,26 @@ export function PasteBox({
                 </Button>
               </div>
               <p id={`${id}-url-help`} className="mt-1.5 text-xs text-fg-2">
-                {urlNote ? (
-                  <>
-                    Will analyze <span className="font-mono text-fg-1">{urlNote}</span>.{' '}
-                  </>
-                ) : null}
                 Public repos only; nothing is stored beyond one hour. If no pre-incident snapshot exists, the current lockfile is used and labelled as such.
               </p>
-              {urlError && <Problem id={`${id}-url-err`}>{urlError}</Problem>}
+              {/* What changes while a person types (the address as it will be sent) or after Analyze (why it cannot be) has its own slot,
+                  two lines tall from the first frame, so the lockfile field below never moves for it. The address is one line, cut at the
+                  end with the whole of it in the title: a long repo name used to run past the panel and the window's edge. */}
+              <div className="flow-root min-h-[46px]">
+                {urlError ? (
+                  <Problem id={`${id}-url-err`}>{urlError}</Problem>
+                ) : urlNote ? (
+                  <p id={`${id}-url-note`} className="mt-1.5 flex items-baseline gap-1 text-xs text-fg-2">
+                    <span className="shrink-0">Will analyze</span>
+                    <span className="flex min-w-0 items-baseline">
+                      <span className="min-w-0 truncate font-mono text-fg-1" title={urlNote}>
+                        {urlNote}
+                      </span>
+                      <span className="shrink-0">.</span>
+                    </span>
+                  </p>
+                ) : null}
+              </div>
             </form>
 
             <div>
@@ -306,18 +325,25 @@ export function PasteBox({
                     {problem.lead}
                   </p>
                   {problem.hint && <p className="pl-6 text-fg-1">{problem.hint}</p>}
+                  {/* yarn / pnpm: the by-hand check is the answer, so it leads and stays open; the npm command is for a project that also uses npm */}
+                  {byHand && <p className="pl-6 text-fg-1">{byHand}</p>}
                   {problem.command && (
-                    <p className="flex flex-wrap items-center gap-2 pl-6 max-sm:pl-0">
-                      <code className="rounded-xs bg-bg-3 px-2 py-1 font-mono text-xs text-fg-0 select-all">{problem.command}</code>
-                      <Button className="px-2.5" icon={<Copy size={14} />} aria-label="Copy command" onClick={() => void copyCommand(problem.command!)}>
-                        Copy
-                      </Button>
-                      <span role="status" className="text-xs text-fg-1">
-                        {copied ? 'Copied' : ''}
-                      </span>
-                    </p>
+                    <div className="flex flex-col gap-1.5 pl-6 max-sm:pl-0">
+                      <p className="text-xs text-fg-1">
+                        {byHand ? 'Only if the project also installs with npm, with no workspace: or catalog: dependencies (add --legacy-peer-deps if npm reports ERESOLVE), generate one in a checkout:' : 'In a checkout, run:'}
+                      </p>
+                      <p className="flex flex-wrap items-center gap-2">
+                        <code className="rounded-xs bg-bg-3 px-2 py-1 font-mono text-xs text-fg-0 select-all">{problem.command}</code>
+                        <Button className="px-2.5" icon={<Copy size={14} />} aria-label="Copy command" onClick={() => void copyCommand(problem.command!)}>
+                          Copy
+                        </Button>
+                        <span role="status" className="text-xs text-fg-1">
+                          {copied ? 'Copied' : ''}
+                        </span>
+                      </p>
+                    </div>
                   )}
-                  {problem.details && (
+                  {problem.details && !byHand && (
                     <details key={problem.message} className="group pl-6">
                       <summary className="inline-flex min-h-(--control-h) cursor-pointer list-none items-center gap-1.5 rounded-xs text-link underline underline-offset-2 [&::-webkit-details-marker]:hidden">
                         {problem.detailsLabel}

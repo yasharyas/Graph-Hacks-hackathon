@@ -26,9 +26,17 @@ test('only the scope gives way: first to its two letters, then to the ellipsis a
   assert.equal(scopeFit('@cucumber/cucumber', '8.11.1', 20), 'short');
 });
 
+test('when even the ellipsis does not fit, the scope goes whole and the name stays: apidom-reference@1.7.0', () => {
+  // "…/apidom-reference@1.7.0" is 24 characters, "apidom-reference@1.7.0" is 22: the longest name in the axios data
+  assert.equal(scopeFit('@swagger-api/apidom-reference', '1.7.0', 24), 'tiny');
+  assert.equal(scopeFit('@swagger-api/apidom-reference', '1.7.0', 23), 'name');
+  assert.equal(scopeFit('@swagger-api/apidom-reference', '1.7.0', 12), 'name', 'and below that the name is cut at its end by the cell, never the version');
+  assert.equal(scopeFit('@typescript-eslint/eslint-plugin', '6.21.0', 21), 'name'); // …/eslint-plugin@6.21.0 = 22
+});
+
 test('the same ref and the same width always give the same fit, and a narrower cell never shows more', () => {
-  const rank = { whole: 2, short: 1, tiny: 0 };
-  let last = 2;
+  const rank = { whole: 3, short: 2, tiny: 1, name: 0 };
+  let last = 3;
   for (let max = 60; max >= 12; max--) {
     const fit = rank[scopeFit('@typescript-eslint/eslint-plugin', '6.21.0', max)];
     assert.ok(fit <= last, `max ${max}`);

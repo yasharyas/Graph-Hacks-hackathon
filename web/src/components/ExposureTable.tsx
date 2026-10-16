@@ -17,8 +17,14 @@
  * the path as parent then `-> bad version`, and Fix. Identifiers never wrap: they are one line, truncated, with the whole
  * name in `title` (a package name keeps its @version visible: the name gives way, never the version). Type is 12px or more.
  * The repo column follows the same rule for the repo (data/repoFit.ts): the OWNER gives way, never the name
- * ("nightwatchjs/nightwatch" -> "ni…/nightwatch" -> "…/nightwatch" -> "nightwatch"), by the cell's measured width; the button's
- * name and title are the whole id. The repo column is 152px at 1440px (it was 132): 3% from the path column from 1440px up, 4px from the Fix column and 4px of padding.
+ * ("nightwatchjs/nightwatch" -> "ni…/nightwatch" -> "…/nightwatch"), by the cell's measured width at the button's own 13px (the canvas
+ * measure was 14px and clipped ids that fit); the button's name and title are the whole id. The level is decided ONCE per column:
+ * an id that fits is whole, every other id gives way the same way (the narrowest one's), and never down to the bare name, so a
+ * column has at most two shapes ("acme/checkout-web" or "…/checkout-web", never also "checkout-web"). The repo column is 152px at
+ * 1440px (it was 132): 3% from the path column from 1440px up, 4px from the Fix column and 4px of padding; from 1280px to 1365px
+ * the Fix column is 44px (fine pointers) for the repo. A package's scope in the path column goes the same way and one step
+ * further: "…/parser" -> "parser" when even the ellipsis does not fit, so "apidom-reference@1.7.0" stays whole (data/refName.ts).
+ * Below 768px the filter row is sticky: the page scrolls there, not the pane, so the pane stops being a scroll container (an effect below).
  * Keyboard: the rows are ONE tab stop (roving tabindex). Tab lands on the current row's repo button; Up / Down / Home /
  * End move between rows (the same kind of button: repo to repo, Fix to Fix); Enter selects the row (the parent announces
  * it once and draws the path); Tab then reaches that row's Fix and leaves the table. Selected rows stay distinguishable in
@@ -31,11 +37,10 @@
  * Untrusted strings (repo, team, package names) render as text only.
  */
 import { Fragment, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
-import { localStamp, localTime } from '../data/clock.ts';
-import { plural } from '../data/format.ts';
+import { plural, utcLabel, utcStamp } from '../data/format.ts';
 import { lockNote, realTeam, repoLabel, repoParts } from '../data/repoLabel.ts';
 import { charsIn, scopeFit } from '../data/refName.ts';
-import { OWNER_KEEP, repoFit } from '../data/repoFit.ts';
+import { OWNER_KEEP, repoFit, type RepoFit } from '../data/repoFit.ts';
 import { viewLabel, type ReportView } from '../data/reportView.ts';
 import { emptyCopy, filterRows, sortStatus, whyEmpty } from '../data/tableEmpty.ts';
 import type { Exposure, ExposurePath, Tier } from '../data/types.ts';
@@ -81,9 +86,10 @@ export interface ExposureTableProps {
 /**
  * `name@1.2.3` on one line. The text in the DOM is always the whole ref (it is read aloud as "@tapjs/run", copied whole and
  * found by the browser's search); when it does not fit, only the scope is clipped for the eye, by a rule that depends on the
- * cell's width in characters (data/refName.ts): "@typescript-eslint/parser" -> "@ty…/parser" -> "…/parser". The package name
- * stays whole and the version always shows; only a long unscoped name in a narrow cell is ever cut, at its end. The whole ref
- * is in the path's title. `max`: characters this line holds.
+ * cell's width in characters (data/refName.ts): "@typescript-eslint/parser" -> "@ty…/parser" -> "…/parser" -> "parser" (the last
+ * only when even "…/" does not fit: "apidom-reference@1.7.0" stays whole). The package name stays whole and the version
+ * always shows; only a long unscoped name in a narrow cell is ever cut, at its end. The whole ref is in the path's title.
+ * `max`: characters this line holds.
  */
 function Ref({ item, badVersions, max, dim = false }: { item: string; badVersions: ReadonlySet<string>; max: number; dim?: boolean }) {
   const [name, version] = splitRef(item);
@@ -96,6 +102,12 @@ function Ref({ item, badVersions, max, dim = false }: { item: string; badVersion
       <span className={`min-w-0 truncate ${dim ? 'text-fg-1' : 'text-fg-0'}`}>
         {fit === 'whole' ? (
           name
+        ) : fit === 'name' ? (
+          <>
+            {/* not even "…/" fits: the scope and its slash give way whole, with no sign, and "apidom-reference@1.7.0" stays whole; they stay in the text */}
+            <span className="inline-block max-w-0 overflow-hidden align-top">{name.slice(0, slash + 1)}</span>
+            {name.slice(slash + 1)}
+          </>
         ) : (
           <>
             {/* the scope's first three characters (none, when even that does not fit) with a drawn ellipsis; the rest of it stays in the text */}
@@ -180,7 +192,7 @@ function TierHelp() {
           {(['LOCKED', 'WOULD_PULL', 'MAINTAINER'] as Tier[]).map((t) => (
             <div key={t} className="flex flex-col items-start gap-1">
               <dt>
-                <TierChip tier={t} />
+                <TierChip tier={t} define={false} />
               </dt>
               <dd className="text-fg-0">{TIER_SUBTITLE[t]}</dd>
             </div>
@@ -291,7 +303,9 @@ function useRepoColumn(root: RefObject<HTMLElement | null>, mounted: boolean): {
   }, []);
   const width = useMemo(() => {
     const ctx = document.createElement('canvas').getContext('2d');
-    if (ctx) ctx.font = `14px ${root.current ? getComputedStyle(root.current).fontFamily : 'sans-serif'}`; // the repo button is text-sm
+    // The repo button is text-sm (13px, --text-sm): measuring at 14px over-counts by 8% and clips ids that fit.
+    const sm = root.current ? parseFloat(getComputedStyle(root.current).getPropertyValue('--text-sm')) * parseFloat(getComputedStyle(document.documentElement).fontSize) : NaN;
+    if (ctx) ctx.font = `${sm > 0 ? sm : 13}px ${root.current ? getComputedStyle(root.current).fontFamily : 'sans-serif'}`;
     const cache = new Map<string, number>();
     return (text: string) => {
       let w = cache.get(text);
@@ -324,8 +338,37 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
     };
     return filterRows(exposures, { prodOnly, tier, query }).sort(cmp);
   }, [exposures, prodOnly, tier, query, sort]);
+  // On a phone the page scrolls, not the pane, but the pane (`.scroll-pane`, overflow: auto) is still a scroll container that
+  // never scrolls, and a sticky filter row sticks to the nearest one: it would never stick. Below 768px the pane lets the page
+  // be the scroller: `overflow-x: clip` (not a scroll container, so still no sideways scrolling inside it) and `overflow-y:
+  // visible`, with `min-width: 0` because a grid item that is not a scroll container is as wide as its widest content
+  // (what App.tsx's `max-md:overflow-x-clip max-md:overflow-y-visible max-md:min-w-0` on the pane would say in classes; then this goes).
+  useEffect(() => {
+    const pane = root.current?.closest<HTMLElement>('.scroll-pane');
+    const phone = matchMedia('(max-width: 767px)');
+    if (!pane) return;
+    const apply = () => {
+      pane.style.overflowX = phone.matches ? 'clip' : '';
+      pane.style.overflowY = phone.matches ? 'visible' : '';
+      pane.style.minWidth = phone.matches ? '0' : '';
+    };
+    apply();
+    phone.addEventListener('change', apply);
+    return () => (phone.removeEventListener('change', apply), void (pane.style.overflowX = pane.style.overflowY = pane.style.minWidth = ''));
+  }, []);
   const chars = usePathChars(root, rows.length > 0);
   const { px: repoPx, width: textWidth } = useRepoColumn(root, rows.length > 0);
+  // One clip shape for the column: a row whose id fits shows it whole (so `acme/checkout-web` keeps its owner wherever it fits);
+  // the others all give way the same way, as far as the narrowest of them needs ("ni…/nightwatch", or "…/nightwatch" for all if
+  // one owner is long enough to need it). Never the bare name (a column of `ap…/appium`, `…/insomnia` and `uptime-kuma` has
+  // three shapes): if even "…/" + name is too wide, the name is cut at its end after the "…/".
+  const repoFits = useMemo(() => {
+    const rank: Record<RepoFit, number> = { whole: 0, short: 1, tiny: 2, name: 3 };
+    const own = new Map(rows.map((e) => [e.repo, repoFit(repoParts(e.repo), repoPx, textWidth)] as const));
+    const worst = [...own.values()].reduce<RepoFit>((a, f) => (rank[f] > rank[a] ? f : a), 'whole');
+    const clip: RepoFit = worst === 'name' ? 'tiny' : worst;
+    return new Map([...own].map(([repo, f]) => [repo, f === 'whole' ? f : clip] as const));
+  }, [rows, repoPx, textWidth]);
   const filtered = rows.length !== exposures.length;
   const shown = filtered ? `${rows.length} of ${exposures.length} shown` : plural(exposures.length, 'repo');
   // What a screen reader hears: one sentence about the filter, spoken once the typing pauses (a word typed recounts two or three
@@ -437,8 +480,8 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
     const lock = lockNote(undefined, e.repo); // only a pasted repo (today's or pasted lockfile) is a counterfactual
     const parts = repoParts(e.repo);
     const label = repoLabel(e.repo);
-    // A phone card has the whole width; the table's cell is narrow, and only its OWNER gives way (data/repoFit.ts).
-    const fit = showTeam ? 'whole' : repoFit(parts, repoPx, textWidth);
+    // A phone card has the whole width; the table's cell is narrow, and only its OWNER gives way (data/repoFit.ts), the same way for the whole column.
+    const fit = showTeam ? 'whole' : (repoFits.get(e.repo) ?? 'whole');
     // What is drawn when the owner gives way (the same texts data/repoFit.ts measured). It is drawn from an attribute, not written as
     // text, so the page's text stays the whole id (below, as screen-reader text) and the button's name is the whole id too.
     const keep = parts.owner?.slice(0, OWNER_KEEP) ?? '';
@@ -458,7 +501,7 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
           aria-label={label}
           aria-current={selectedRepo === e.repo ? 'true' : undefined}
           onClick={(ev) => (ev.stopPropagation(), onSelect(e.repo))}
-          className={`flex max-w-full min-w-0 scroll-mt-10 rounded-xs text-left text-sm leading-[18px] whitespace-nowrap pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:py-2 ${done ? 'text-fg-1 line-through' : 'text-link'} hov:text-fg-0`}
+          className={`flex max-w-full min-w-0 scroll-mt-10 max-md:scroll-mt-32 rounded-xs text-left text-sm leading-[18px] whitespace-nowrap pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:py-2 ${done ? 'text-fg-1 line-through' : 'text-link'} hov:text-fg-0`}
         >
           {fit === 'whole' ? (
             <span className="min-w-0 truncate">{label}</span>
@@ -503,7 +546,7 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
     return (
       <span className="inline-flex flex-wrap items-center gap-2 text-xs text-tier-clean">
         <Check size={14} />
-        <span title={`Marked remediated ${localStamp(done)}`}>remediated {localTime(done)}</span>
+        <span title={`Marked remediated ${utcStamp(done)}`}>remediated {utcLabel(done)}</span>
         {undoable.has(e.repo) && (
           <button
             type="button"
@@ -548,7 +591,7 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
         title={fixable && !fixable.has(e.repo) ? 'The triage run did not cover this repo at this clock. Run the triage at this time first.' : undefined}
         onClick={(ev) => (ev.stopPropagation(), onOpenFix(e.repo))}
         aria-label={`Fix ${repoLabel(e.repo)}`}
-        className="scroll-mt-10 border-transparent px-2.5 max-md:min-w-11 max-md:border-line-3 pointer-coarse:min-w-11 pointer-coarse:border-line-3 hov:border-line-3"
+        className="scroll-mt-10 max-md:scroll-mt-32 border-transparent px-2.5 pointer-fine:min-[1280px]:max-[1365px]:px-1.5 max-md:min-w-11 max-md:border-line-3 pointer-coarse:min-w-11 pointer-coarse:border-line-3 hov:border-line-3"
       >
         Fix
       </Button>
@@ -575,7 +618,9 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
 
   return (
     <section ref={root} aria-label="Exposed repos" className="flex flex-col" onFocus={follow} onKeyDown={arrows}>
-      <div className="flex flex-wrap items-center gap-2 border-b border-line-1 px-3 py-2">
+      {/* On a phone the page scrolls (not this pane): the filters stay at the top while the 21 cards go by, and end with the table. The pane
+          around it stops being a scroll container there (the effect above), or sticky would have nothing to stick to. */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-line-1 bg-bg-1 px-3 py-2 max-md:sticky max-md:top-0 max-md:z-(--z-sticky)">
         <Button
           aria-pressed={prodOnly}
           icon={prodOnly ? <Check size={14} /> : undefined}
@@ -643,16 +688,18 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
               <col />
               <col className="w-28" />
               {/* the path gets the width the Fix button does not need: 22 characters of mono text at 1366px, so "…/type-utils@8.39.1" fits;
-                  from 1440px it has 30px to spare, which go to the repo column (the owner clips there, never the name) */}
+                  from 1440px it has 30px to spare, which go to the repo column (the owner clips there, never the name). The pane is 460px from 1280px
+                  to 1365px: the tier chip needs its 112px, so the Fix column takes 8px less (44px, a Fix button with 6px sides, fine pointers) for the repo, and the
+                  path cell drops its right padding (8px more: 22 characters, so "apidom-reference@1.7.0" and "azure-kusto-data@7.0.4" stay whole). */}
               <col className="w-[42%] min-[1440px]:w-[39%]" />
               {hasTeams && <col className="hidden w-24 md:table-column xl:hidden" />}
-              <col className="w-13 pointer-coarse:w-16" />
+              <col className="w-13 pointer-fine:min-[1280px]:max-[1365px]:w-11 pointer-coarse:w-16" />
             </colgroup>
             <thead>
               <tr>
                 {sortTh('repo', 'Repo', 'pl-3')}
                 {sortTh('tier', 'Tier', '', <TierHelp />)}
-                <th scope="col" className="sticky top-0 z-(--z-sticky) bg-bg-2 px-2 py-1 text-left">
+                <th scope="col" className="sticky top-0 z-(--z-sticky) bg-bg-2 px-2 py-1 text-left min-[1280px]:max-[1365px]:pr-0">
                   <span className="label-caps text-xs">Path</span>
                 </th>
                 {hasTeams && sortTh('team', 'Team', 'hidden md:table-cell xl:hidden')}
@@ -669,7 +716,7 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
                     <tr data-repo={e.repo} onClick={() => onSelect(e.repo)} className={`cursor-pointer ${selected ? 'max-lg:border-b-0' : ''} border-b border-line-1 hov:bg-bg-3 ${selected ? `bg-bg-3 ${FORCED_ROW}` : ''}`}>
                       <td className={`py-[3px] pr-1 pl-3 align-top ${selected ? `${BAR[e.tier]} ${FORCED_EDGE}` : ''}`}>{repoCell(e, false)}</td>
                       <td className="px-2 py-[3px] align-top">{tierCell(e, true)}</td>
-                      <td className="px-2 py-[3px] align-top">{hopCell(e, true)}</td>
+                      <td className="px-2 py-[3px] align-top min-[1280px]:max-[1365px]:pr-0">{hopCell(e, true)}</td>
                       {hasTeams && (
                         <td className="hidden px-2 py-[3px] align-top text-fg-1 md:table-cell xl:hidden">
                           <span className={`block truncate ${LINE}`} title={realTeam(e.team) ?? undefined}>
@@ -702,7 +749,7 @@ export function ExposureTable({ exposures, paths, badVersions, selectedRepo, rem
                   <div key={t} className="flex flex-col items-start gap-1">
                     <dt>
                       <span aria-hidden>
-                        <TierChip tier={t} />
+                        <TierChip tier={t} define={false} />
                       </span>
                       <span className="sr-only">{t}</span>
                     </dt>
