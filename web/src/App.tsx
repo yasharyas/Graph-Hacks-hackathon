@@ -858,7 +858,14 @@ export function App() {
       <footer className="shrink-0 border-t border-line-1 px-(--gutter) py-1.5 text-xs text-fg-2">
         LOCKED: the lockfile pins a malicious version. WOULD_PULL: only a fresh install in the window would have fetched it; npm ci from a lockfile that never pinned it was safe.
         Counts are true at the scenario clock.
-        {isMock && ' Mock mode: fixture replay, not live results.'}
+        {isMock && ' Mock mode: fixture replay, not live results.'}{' '}
+        <a className="text-link underline underline-offset-2" href="https://github.com/yasharyas/Graph-Hacks-hackathon">
+          Code, MIT
+        </a>
+        {' · '}
+        <a className="text-link underline underline-offset-2" href="https://dev.to/yasharyas/74-minutes-before-the-advisory-graph-triage-for-npm-account-hijacks-20j9">
+          Write-up
+        </a>
       </footer>
 
       <nav id="panels" aria-label="Panels" className="fixed inset-x-0 bottom-0 z-(--z-drawer) flex h-(--tabbar-h) border-t border-line-1 bg-bg-1 lg:hidden">

@@ -45,7 +45,7 @@ Built with Claude Code under the author's direction, with AI-run QA and security
 
 ## Placeholders to fill before submitting
 
-- [ ] `<video-url>`: `README.md` (links row), this file
-- [x] Live URL (https://patient-zero-rayp.onrender.com): `README.md` (links row), `blog/74-minutes-before-the-advisory.md` (twice), `video/script.md` (end card), `docs/launch-posts.md`, this file
+- [ ] Video URL: `README.md` (links row, replace "Video (2:30): coming 18 Oct" with `[Video (2:30)](<url>)`), this file
+- [x] Live URL (https://patient-zero-rayp.onrender.com): `README.md` (links row), `blog/74-minutes-before-the-advisory.md` and the dev.to post (twice), `web/index.html` (og tags), `deploy/README.md`, the GitHub website field, `video/script.md` (end card), `docs/launch-posts.md`, this file
 - [x] Blog URL: `docs/launch-posts.md`, this file
 - [x] Blog published on dev.to (2026-10-16, marked AI-assisted)

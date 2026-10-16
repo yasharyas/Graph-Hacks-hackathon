@@ -6,6 +6,6 @@
 
 **Render (free):** push to GitHub, then New > Blueprint, pick the repo (reads `render.yaml`). Passwords are generated. Set `GROQ_API_KEY`, `GEMINI_API_KEY` and `GH_TOKEN` in the dashboard only. Deploys build from the Dockerfile and fetch the Fontshare fonts at build time.
 
-**Keep warm:** the free service sleeps after 15 min idle. UptimeRobot: HTTP monitor on `https://<service>.onrender.com/api/health`, every 5 minutes.
+**Keep warm:** the free service sleeps after 15 min idle. UptimeRobot: HTTP monitor on `https://patient-zero-rayp.onrender.com/api/health`, every 5 minutes.
 
 **Test the Render limits:** `docker build -t pz . && docker run --memory=512m --cpus=0.1 -p 10000:10000 -e REDIS_PASSWORD=x -e PZ_RO_PASSWORD=y -e PZ_RW_PASSWORD=z pz`

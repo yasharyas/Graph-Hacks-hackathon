@@ -5,7 +5,7 @@ canonical_url: https://dev.to/yasharyas/74-minutes-before-the-advisory-graph-tri
 tags: falkordb, security, npm, graphdatabase
 ---
 
-*Patient Zero is my entry to FalkorDB Graph Hacks, Track 1 (Agents That Act on Connected Data). Live demo: https://patient-zero-rayp.onrender.com. Code, MIT, with every Cypher query in the README, and a one-command local run (`docker compose up --build`): https://github.com/yasharyas/Graph-Hacks-hackathon.*
+*Patient Zero is my entry to FalkorDB Graph Hacks, Track 1 (Agents That Act on Connected Data). [Live demo](https://patient-zero-rayp.onrender.com). [Code](https://github.com/yasharyas/Graph-Hacks-hackathon), MIT, with [every Cypher query in the README](https://github.com/yasharyas/Graph-Hacks-hackathon#every-cypher-query) and a one-command local run (`docker compose up --build`).*
 
 ## Two incidents, one gap
 
@@ -47,7 +47,7 @@ RETURN p.repo AS repo, bad.id AS version, min(p.depth) AS depth, collect(DISTINC
   collect(DISTINCT a.range)[0..3] AS ranges, min(a.fromT) AS since, collect(DISTINCT l.name + '@' + l.version) AS locked
 ```
 
-The `REQUIRES` hop to the locked entry lets the UI say "your lockfile pins chalk@5.4.1: safe" next to the range that would have pulled 5.6.1. The same edges drive the timeline: the server collects every instant a tier can change (publishes, window starts and ends, advisory times) and re-runs the exposure query only between them.
+The `REQUIRES` hop to the locked entry lets the UI say "your lockfile pins `chalk@5.4.1`: safe" next to the range that would have pulled 5.6.1. The same edges drive the timeline: the server collects every instant a tier can change (publishes, window starts and ends, advisory times) and re-runs the exposure query only between them.
 
 ## shortestPath as the explanation
 
@@ -92,7 +92,7 @@ Zero rows for the whole 74-minute window, and zero for 106 minutes on the axios 
 
 ## The name grep, in the wild
 
-About four and a half hours after this repo was created, a stranger opened an issue on it. A GitHub code search for `plain-crypto-js` in committed `package-lock.json` files had turned it up. They were right that the string is there: it sits in `fixtures/synthetic/billing-api.package-lock.json`, the synthetic repo that exists to show what `LOCKED` looks like. That search is the contrast card's middle row, the name grep. It finds the string, but it cannot tell a test fixture from a real dependency, and it gives no path, no tier and no owner.
+About four and a half hours after this repo was created, a stranger [opened an issue](https://github.com/yasharyas/Graph-Hacks-hackathon/issues/1) on it. A GitHub code search for `plain-crypto-js` in committed `package-lock.json` files had turned it up. They were right that the string is there: it sits in `fixtures/synthetic/billing-api.package-lock.json`, the synthetic repo that exists to show what `LOCKED` looks like. That search is the contrast card's middle row, the name grep. It finds the string, but it cannot tell a test fixture from a real dependency, and it gives no path, no tier and no owner.
 
 So I pasted the repo into Patient Zero. It read the root lockfile, the one `npm ci` uses (193 entries), against both incidents: 0 `LOCKED`, 0 `WOULD_PULL`, and no declared range that would have fetched a malicious version in either window. I replied with that and closed the issue. It also showed me a limit: Patient Zero reads only the root `package-lock.json`. That was the right call here, but in a monorepo with lockfiles in subfolders it would miss them.
 
@@ -103,10 +103,10 @@ The whole thing runs for $0: Render's free single container, Groq and Gemini fre
 - Cold boot to healthy in about 28–30 s; the baked 11.6 MB RDB loads in about 12.6 s. Memory in use about 219 MB of 512 MB.
 - A qix triage at the default clock: 2.3 s end to end, first tool result in about 0.2 s. The cards say "cached" when a path or fix lookup came from the warmed memo. At a scrubbed clock the queries run live: about 20 s on 0.1 CPU, about 3 s on a laptop.
 
-Every tenant and scenario is its own graph via `GRAPH.COPY` of a registry template, which is also how a pasted repo gets a private graph (LRU 4, TTL 1 h). The same read-only tools are exposed over MCP, so Claude Code can call `incident_exposure` and `explain_path` and get the rows and the Cypher back.
+Every tenant and scenario is its own graph via `GRAPH.COPY` of a registry template, which is also how a pasted repo gets a private graph (LRU 4, TTL 1 h). The same read-only tools are [exposed over MCP](https://github.com/yasharyas/Graph-Hacks-hackathon/blob/main/docs/mcp.md), so Claude Code can call `incident_exposure` and `explain_path` and get the rows and the Cypher back.
 
 ## What it is not
 
 Not a detector. Not proof that any of the 20 repos was compromised: `WOULD_PULL` is exposure surface on a fresh resolve, and `npm ci` was safe. Not yarn, pnpm or PyPI yet, and only the root `package-lock.json`. `latest` is modelled as "highest stable", not a moving dist-tag, and removal times are approximate because the registry keeps none. Teams and channels are synthetic; the repos and lockfiles are real.
 
-What it is: a graph that answers the on-call question before the advisory exists, with the query attached. Try it at https://patient-zero-rayp.onrender.com (the free instance can take a minute to wake), run it with `docker compose up --build`, and read every Cypher query at https://github.com/yasharyas/Graph-Hacks-hackathon.
+What it is: a graph that answers the on-call question before the advisory exists, with the query attached. Try it at [patient-zero-rayp.onrender.com](https://patient-zero-rayp.onrender.com) (the free instance can take a minute to wake), run it with `docker compose up --build`, and read every Cypher query in the [README](https://github.com/yasharyas/Graph-Hacks-hackathon#every-cypher-query).

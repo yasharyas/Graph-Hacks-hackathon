@@ -4,7 +4,7 @@
 
 ![The landing screen at 14:30 UTC on 2025-09-08: 21 repos one install from malware (1 LOCKED, 20 WOULD_PULL) next to 1 OSV advisory, and the circled figure "74 min before the OSV record existed"](web/public/og-card.png)
 
-**[Live demo](https://patient-zero-rayp.onrender.com)** · **[Video (2:30)](https://<video-url>)** · [Run locally](#run-it-locally) · [Data model](#graph-data-model) · [Cypher](#every-cypher-query) · [MCP](#mcp-transcript) · [AI use](#ai-use-disclosure) · [Blog](https://dev.to/yasharyas/74-minutes-before-the-advisory-graph-triage-for-npm-account-hijacks-20j9)
+**[Live demo](https://patient-zero-rayp.onrender.com)** · **Video (2:30): coming 18 Oct** · [Run locally](#run-it-locally) · [Data model](#graph-data-model) · [Cypher](#every-cypher-query) · [MCP](#mcp-transcript) · [AI use](#ai-use-disclosure) · [Blog](https://dev.to/yasharyas/74-minutes-before-the-advisory-graph-triage-for-npm-account-hijacks-20j9)
 
 Built for **FalkorDB Graph Hacks** (WeMakeDevs), **Track 1: Agents That Act on Connected Data**. The live demo needs no sign-up: it opens on a seeded demo org, or you paste your own repo. MIT licensed. Runs on free tiers only.
 
