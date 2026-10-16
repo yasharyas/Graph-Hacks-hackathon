@@ -780,9 +780,10 @@ export function App() {
                   <AskBox
                     disabled={running}
                     asking={triage.asking}
-                    rounds={triage.followUps.filter((f) => f.status !== 'error').length}
+                    rounds={triage.rounds}
+                    suggestions={lastFollowUp?.narration?.suggestions}
                     error={lastFollowUp?.status === 'error' ? triage.error : null}
-                    onAsk={triage.ask}
+                    onAsk={(q) => triage.ask(q, Object.keys(remediated))}
                   />
                 )
               }

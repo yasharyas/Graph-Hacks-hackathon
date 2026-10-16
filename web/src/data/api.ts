@@ -104,7 +104,7 @@ export async function* streamTriage(body: TriageRequest, signal: AbortSignal): A
 }
 
 export async function* streamAsk(
-  body: { runId: string; question: string },
+  body: { runId: string; question: string; remediated?: string[] },
   signal: AbortSignal,
 ): AsyncGenerator<TriageEvent> {
   if (isMock) yield* (await mock()).mockAsk(signal);
