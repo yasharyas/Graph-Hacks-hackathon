@@ -50,7 +50,7 @@ Node server: triage playbook, deterministic, 49 read-only tool calls
 ## What it found (verified numbers, see `docs/proof-points.md`)
 
 - **qix at 13:30 UTC:** 20 of 20 real public repos would fetch at least one malicious version on a fresh resolve (13 through production dependencies), plus the synthetic `acme/checkout-web` (LOCKED). `npm/cli`, `mochajs/mocha`, `remy/nodemon` and `github/docs` declare a hijacked package directly in their own `package.json`.
-- **axios at 01:30 UTC:** 9 of 20 repos; `louislam/uptime-kuma` declares `axios ~0.30.3`, which resolved to the malicious 0.30.4. The app shows **105 min** ahead of the campaign's first OSV record (MAL-2026-2306).
+- **axios at 01:30 UTC:** 9 of 20 repos; `louislam/uptime-kuma` declares `axios ~0.30.3`, which resolved to the malicious 0.30.4. The app shows **106 min** ahead of the campaign's first OSV record (MAL-2026-2306).
 - **Scanner view:** 0 hits at both clocks, until the first advisory lands.
 - **Graph size:** `pz_acme_qix` holds 46,810 nodes and 123,426 edges (24 MB), built in about 3.3 s; the baked RDB is 11.6 MB.
 - Repos are real public projects, analysed as of their lockfiles just before each incident (`data/cache/lockfiles/manifest.json` pins every SHA).

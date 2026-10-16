@@ -41,7 +41,8 @@ export async function incidentHeader(g: Graph, incident: string) {
   return { incident: meta, snapshotAt: (h.snapshotAt ?? null) as number | null, org: (h.org ?? null) as string | null };
 }
 // The one definition of "minutes ahead of the advisory": landing, report and narration all read it.
-export const minutesAhead = (i: IncidentMeta) => (i.firstExposureAt == null ? 0 : Math.floor((i.advisoryAt - i.firstExposureAt) / 60_000));
+// whole seconds, as every timestamp on screen reads (axios: 00:21:58 -> 02:07:58 is 106 min; to the millisecond 105.997)
+export const minutesAhead = (i: IncidentMeta) => (i.firstExposureAt == null ? 0 : Math.floor((Math.floor(i.advisoryAt / 1000) - Math.floor(i.firstExposureAt / 1000)) / 60));
 
 // One tool call: runs queries, records each distinct Cypher verbatim, sums FalkorDB's internal time.
 // On a 0.1-CPU host the 21 shortestPath walks and 21 safe-version picks are most of a triage, and on the read-only demo
@@ -268,11 +269,11 @@ export async function draftRemediation(g: Graph, p: { repo: unknown; versions: u
       `Keep installing from your committed lockfile (npm ci): ${safeLocked.length ? `it pins ${safeLocked.join(', ')} (safe)` : 'it never resolved the malicious version'}`,
       !pairs ? ''
         : Number.isFinite(until) && until <= params.at ? `The malicious versions stopped resolving at ${utc(until)}, so a fresh resolve now gets a clean release and no override is needed (the overrides ${pairs} were the fix during the window)`
-          : `Only if you must re-resolve dependencies while the malicious versions are live${Number.isFinite(until) ? ` (they stopped resolving at ${utc(until)})` : ''}, add the overrides ${pairs} to package.json: they pin every dependent whose range admits the malicious version to that release, other majors untouched; remove them once it is gone`,
+          : `Only for a re-resolve during the window${Number.isFinite(until) ? ` (it closed when the malicious versions stopped resolving at ${utc(until)})` : ''}: add the overrides ${pairs} to package.json; they pin every dependent whose range admits the malicious version to that release, other majors untouched, and can come out once the window has closed`,
       ...notes,
     ]).filter(Boolean);
   const prBody = `${isLocked ? 'The lockfile resolves' : 'Declared ranges admit'} ${params.versions.join(', ')}. `
-    + (pairs ? `This adds version-qualified overrides (${pairs}): every dependent whose range admits a malicious version is pinned to the clean release, other majors untouched. Remove them once the malicious versions are gone from npm.` : 'No clean version to pin yet.')
+    + (pairs ? `This adds version-qualified overrides (${pairs}): every dependent whose range admits a malicious version is pinned to the clean release, other majors untouched. They only matter while the malicious versions are on npm.` : 'No clean version to pin yet.')
     + (Object.keys({ ...direct, ...devDirect }).length ? ` It also sets the direct ${Object.entries({ ...direct, ...devDirect }).map(([n, v]) => `${n} to ${v}`).join(', ')}, which npm requires next to an override of a direct dependency.` : '');
   const row: Remediation = { repo: params.repo, overrides, ...(Object.keys(direct).length && { direct }), ...(Object.keys(devDirect).length && { devDirect }), steps: uniq(steps), prBody };
   const summary = `${params.repo}: lockfile pins ${isLocked ? `${badLocked.join(', ')} (malicious)` : safeLocked.length ? `${safeLocked.join(', ')} (safe)` : 'no malicious version'}; `

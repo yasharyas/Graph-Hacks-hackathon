@@ -9,7 +9,7 @@ import { graph } from '../graph/client.ts';
 import { forPrompt } from '../security.ts';
 import { filterExposures, plural, TOOLS, utc } from '../tools/registry.ts';
 import { chat, type ChatReq, type ChatRes, type Msg } from './llm.ts';
-import { concentrationFacts, devFacts, evidenceBlock, evidenceSet, firstFacts, notifyFacts, repoFacts, rotateFacts, summaryFacts, teamFacts, whenFacts } from './narrate.ts';
+import { concentrationFacts, devFacts, evidenceBlock, evidenceSet, firstFacts, notifyFacts, priorityFacts, repoFacts, rotateFacts, summaryFacts, teamFacts, whenFacts } from './narrate.ts';
 import { guardEvent } from './replay.ts';
 
 export type Run = { runId: string; session: string; graph: string; scenario: ScenarioId; at: number; report: Report };
@@ -125,13 +125,22 @@ const SUMMARY = /\b(how bad|summar\w*|status|overview|impact|ciso|my (lead|manag
 const DEV = /\bdev(-|\s)?(only|dependenc\w*|deps?)\b|\bdevDependencies\b/i;
 const FIRST = /\b(first|next hour|priorit\w*|next steps?|action plan)\b|\bwhat (should|do|must) (i|we) do\b/i;
 const TEAMS = /\b(which|what) team\b|\bmost (work|exposed|repos)\b|\bper team\b|\bby team\b/i;
+const PRIORITY = /\bif (i|we) (can|could) only\b|\bprioriti[sz]\w*\b|\b(which|what) (\d+|two|three|four|five|few) (repos?|first)\b|\bfix (\d+|two|three|four|five) (repos? )?(first|today)\b/i;
+const COUNT: Record<string, number> = { two: 2, three: 3, four: 4, five: 5, few: 3 };
+// Every repo a question names (full or bare name): "compare mocha and nodemon" answers both, not the first one only.
+const named = (q: string, r: Report) => r.exposures.filter((e) => mentions(q, e.repo) || (e.repo.split('/')[1]!.length > 2 && mentions(q, e.repo.split('/')[1]!)));
 const NEXT = /\bnext (qix|target|compromise|account|maintainer)\b|\bconcentrat\w*|\bwhich maintainers?\b|\bpagerank\b|\bsingle points? of failure\b|\b(compromised|hijacked) next\b/i;
 export function graphAnswer(q: string, r: Report, repo?: string, list = false): string | null {
   if (EXCEPT.test(q)) return null; // comparisons are the model's (with the filter result attached)
+  const many = named(q, r);
   const e = repo ? r.exposures.find((x) => x.repo === repo) : undefined;
-  const first = !e && FIRST.test(q);
+  const repos = many.length > 1 ? many.slice(0, 3) : e ? [e] : [];
+  const priority = !repos.length && PRIORITY.test(q);
+  const first = !repos.length && !priority && FIRST.test(q);
+  const n = /\b(\d+|two|three|four|five|few)\b/i.exec(q)?.[1]?.toLowerCase();
   const parts = [
-    e ? repoFacts(r, e) : '',
+    ...repos.map((x) => repoFacts(r, x)),
+    priority ? priorityFacts(r, Math.min(10, Math.max(1, Number(n) || COUNT[n ?? ''] || 3))) : '',
     !e && SUMMARY.test(q) ? summaryFacts(r) : '',
     first ? firstFacts(r) : '', // its Do line already says who rotates and who keeps npm ci
     !first && (ROTATE.test(q) || (!e && SAFE.test(q))) ? rotateFacts(r) : '',

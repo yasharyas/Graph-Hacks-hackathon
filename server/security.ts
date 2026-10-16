@@ -78,11 +78,27 @@ const OUTBOUND = new Set([
   'generativelanguage.googleapis.com',
 ]);
 
-export function safeFetch(url: string, init: RequestInit = {}): Promise<Response> {
+function outbound(url: string): URL {
   const u = new URL(url);
   if (u.protocol !== 'https:' || u.port !== '' || u.username || u.password) throw new Error('Outbound URL must be plain https');
   if (!OUTBOUND.has(u.hostname)) throw new Error(`Outbound host not allowed: ${u.hostname}`);
-  return fetch(url, { ...init, redirect: 'error', signal: init.signal ?? AbortSignal.timeout(20_000) });
+  return u;
+}
+/** `sameHost`: follow one redirect, only to the same allowlisted host (checked again); otherwise any redirect fails. */
+export function safeFetch(url: string, init: RequestInit & { sameHost?: boolean } = {}): Promise<Response> {
+  const u = outbound(url);
+  const { sameHost, ...rest } = init;
+  const signal = rest.signal ?? AbortSignal.timeout(20_000);
+  if (!sameHost) return fetch(url, { ...rest, redirect: 'error', signal });
+  return (async () => {
+    const res = await fetch(url, { ...rest, redirect: 'manual', signal });
+    const loc = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
+    if (!loc) return res;
+    void res.body?.cancel().catch(() => {});
+    const next = outbound(new URL(loc, url).href);
+    if (next.hostname !== u.hostname) throw new Error(`Cross-host redirect refused: ${next.hostname}`);
+    return fetch(next.href, { ...rest, redirect: 'error', signal });
+  })();
 }
 
 // S12: generic message to the client, details only in server logs.

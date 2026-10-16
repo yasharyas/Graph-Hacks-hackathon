@@ -145,7 +145,7 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
       // one "minutes ahead", stamped on start and report alike; scope; a path and a fix for every exposed repo
       const start = of(evs, 'start');
       assert.equal(start.incident.firstExposureAt, report.incident.firstExposureAt);
-      assert.equal(report.minutesAhead, Math.floor((report.incident.advisoryAt - report.incident.firstExposureAt!) / 60_000));
+      assert.equal(report.minutesAhead, Math.floor((Math.floor(report.incident.advisoryAt / 1000) - Math.floor(report.incident.firstExposureAt! / 1000)) / 60)); // whole seconds
       assert.deepEqual(report.scope, { kind: 'org', label: 'Acme demo org', repos: Object.values(report.counts).reduce((a, b) => a + b, 0) });
       const exposed = report.exposures.filter((e) => e.tier === 'LOCKED' || e.tier === 'WOULD_PULL').map((e) => e.repo).sort();
       assert.deepEqual([...new Set(report.paths.map((p) => p.repo))].sort(), exposed);
@@ -264,6 +264,13 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
       const next = of(await askQ('which maintainer is the next qix and why?'), 'narration');
       assert.match(next.text, /^The accounts whose compromise would reach the most here, by PageRank over package dependencies: `[^`]+`, \d+ packages?, reaching \d+ of 21 repos/);
       for (const q of ['how bad is this?', 'can I ignore the dev-only ones?', 'which team has the most work?', 'which maintainer is the next qix and why?']) assert.deepEqual(of(await askQ(q), 'guard').flagged, [], q);
+      // two repos named: both answered; "if I can only fix three": by urgency, the LOCKED repo first
+      const both = of(await askQ('compare mocha and nodemon'), 'narration');
+      assert.ok(both.text.includes('`mochajs/mocha`') && both.text.includes('`remy/nodemon`'), both.text);
+      const three = of(await askQ('If I can only fix three repos today, which three and why?'), 'narration');
+      assert.match(three.text, /^Fix first, by urgency: 1\) `acme\/checkout-web`: its lockfile pins the malicious version.*; 2\) `[^`]+`: production.*; 3\) `[^`]+`: production/);
+      assert.match(three.text, /The other 18 stay safe while they install from their committed lockfiles \(npm ci\)\.$/);
+      for (const q of ['compare mocha and nodemon', 'If I can only fix three repos today, which three and why?']) assert.deepEqual(of(await askQ(q), 'guard').flagged, [], q);
       assert.equal(asked, 0);
       // customers are not in the graph: the model answers (not the team roster)
       const cust = of(await askQ('do I need to notify customers?'), 'narration');
@@ -380,7 +387,7 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
     assert.deepEqual([n.mode, n.note], ['template', null]); // no recording describes a guest graph
     assert.deepEqual(t.report.scope, { kind: 'guest', label: 'pasted/mocha', repos: 1, source: { kind: 'pasted' } });
     assert.deepEqual(t.report.notices, []);
-    assert.match(n.text, /^Verdict \(counterfactual: this checks the lockfile you pasted as if it had been committed on 2025-09-08\): `pasted\/mocha` would have been exposed to the `qix` account compromise only on a fresh install since \d\d:\d\d UTC on \d{4}-\d\d-\d\d \(still live at 13:30 UTC; npm removed them around \d\d:\d\d UTC\)\. Installing from that lockfile would have been safe: it pins .*`debug@4\.3\.5`/);
+    assert.match(n.text, /^Verdict \(counterfactual: this checks the lockfile you pasted as if it had been committed on 2025-09-08\): `pasted\/mocha` would have been safe if installed from that lockfile, which pins .*`debug@4\.3\.5`.*\. Only a fresh install between \d\d:\d\d UTC and \d\d:\d\d UTC on \d{4}-\d\d-\d\d would have fetched `debug@4\.4\.2`.*, from the `qix` account compromise\./);
     assert.doesNotMatch(n.text, /Notify|#your-team/);
     assert.ok(e.locked!.length > 0 && e.locked!.every((v) => !e.versions.includes(v)), 'a WOULD_PULL lockfile pins only safe versions');
     assert.equal(t.report.minutesAhead, Math.floor((t.report.incident.advisoryAt - t.report.incident.firstExposureAt!) / 60_000)); // its own first exposure
@@ -472,7 +479,7 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
     }
   });
 
-  test('S7/S2 guest fetch: one ingest at a time, streamed and cut at 5 MB, no GH_TOKEN, no npm, HEAD fallback labelled', async () => {
+  test('S7/S2 guest fetch: one ingest at a time, streamed and cut at 5 MB, GH_TOKEN only to api.github.com, no npm, HEAD fallback labelled', async () => {
     const realFetch = globalThis.fetch;
     const seen: { url: string; auth: string | null }[] = [];
     let pulled = 0;
@@ -505,7 +512,10 @@ describe('api', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, () =
       const small = (await sse<AnalyzeEvent>(await post('/api/analyze', { url: 'https://github.com/octo/small', scenario: QIX }))).at(-1)!;
       assert.equal(small.type, 'ready', JSON.stringify(small));
       assert.equal((small as Extract<AnalyzeEvent, { type: 'ready' }>).repo, 'octo/small@HEAD');
-      assert.ok(seen.every((s) => s.auth === null), 'GH_TOKEN must never leave on the guest path');
+      // the read-only token goes to the commits API only (its quota is the point); raw files and any other host never see it
+      assert.ok(seen.every((s) => s.auth === null || (s.url.startsWith('https://api.github.com/') && s.auth === 'Bearer ghp_test_SECRET_never_sent')), 'GH_TOKEN only to api.github.com');
+      assert.ok(seen.some((s) => s.url.startsWith('https://api.github.com/') && s.auth !== null));
+      assert.ok(seen.filter((s) => s.url.startsWith('https://raw.githubusercontent.com/')).every((s) => s.auth === null));
       assert.ok(seen.every((s) => /^https:\/\/(api\.github\.com|raw\.githubusercontent\.com)\//.test(s.url)), 'no npm registry calls');
     } finally {
       globalThis.fetch = realFetch;

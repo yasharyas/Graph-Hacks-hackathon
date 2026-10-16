@@ -276,6 +276,19 @@ export function devFacts(r: Report): string {
     + (locked.length ? ` ${and(locked.map((e) => tk(e.repo)))} ${locked.length === 1 ? 'is' : 'are'} LOCKED: every npm ci there installs it, so rotate secrets.` : ' Installing from the committed lockfile (npm ci) stays safe for them, as for every WOULD_PULL repo.');
 }
 
+// "If I can only fix three repos, which?": open exposures by urgency. LOCKED (secrets), then production repos whose own
+// package.json declares the range (the owner can pin it today), then production through a dependency, then dev-only.
+export function priorityFacts(r: Report, n = 3): string {
+  const open = bySeverity(r).filter((e) => exposedTier(e) && !e.remediated);
+  if (!open.length) return 'Nothing is open: every exposed repo is marked remediated.';
+  const own = (e: Exposure) => { const p = pathOf(r, e); return p?.kind === 'ADMITS' && p.hops === 0; };
+  const rank = (e: Exposure) => (e.tier === 'LOCKED' ? 0 : !e.dev && own(e) ? 1 : !e.dev ? 2 : 3);
+  const reason = ['its lockfile pins the malicious version, so rotate secrets and rebuild', 'production, and its own package.json declares the range, so its owner can pin it directly', 'production, through a dependency', 'dev-only'];
+  const pick = [...open].sort((a, b) => rank(a) - rank(b)).slice(0, n);
+  return `Fix first, by urgency: ${pick.map((e, i) => `${i + 1}) ${tk(e.repo)}: ${reason[rank(e)]}`).join('; ')}.`
+    + (open.length > pick.length ? ` The other ${open.length - pick.length} stay safe while they install from their committed lockfiles (npm ci).` : '');
+}
+
 // "What do I do first?": the verdict's own Notify and Do lines, in its order (rotate LOCKED first).
 export function firstFacts(r: Report): string {
   const lines = verdictText(r).split('\n');
@@ -303,7 +316,7 @@ const ACCOUNT_NOTES: Record<string, string> = { types: 'the account that publish
 export function concentrationFacts(r: Report): string {
   if (!r.concentration.length) return 'No maintainer concentration was computed for this run.';
   const total = r.scope?.repos ?? Object.values(r.counts).reduce((a, b) => a + b, 0);
-  return `The accounts whose compromise would reach the most here, by PageRank over package dependencies: ${r.concentration.map((c) => `${tk(c.maintainer)}${ACCOUNT_NOTES[c.maintainer] ? ` (${ACCOUNT_NOTES[c.maintainer]})` : ''}, ${plural(c.packages, 'package')}, reaching ${c.reposReached} of ${plural(total, 'repo')}`).join('; ')}. A hijack of any of them would spread the same way, so they are the ones to watch.`;
+  return `The accounts whose compromise would reach the most here, by PageRank over package dependencies: ${r.concentration.map((c) => `${tk(c.maintainer)}${Object.hasOwn(ACCOUNT_NOTES, c.maintainer) ? ` (${ACCOUNT_NOTES[c.maintainer]})` : ''}, ${plural(c.packages, 'package')}, reaching ${c.reposReached} of ${plural(total, 'repo')}`).join('; ')}. A hijack of any of them would spread the same way, so they are the ones to watch.`;
 }
 
 // When it started, when the record came, whether it is over (only what is known at the scenario clock, plus the OSV gap).
@@ -330,11 +343,9 @@ export function verdictText(r: Report): string {
   const who = r.incident.maintainer ? `the ${tk(r.incident.maintainer)} account compromise${project && project !== r.incident.maintainer ? ` (the ${project} maintainer)` : ''}` : `incident ${tk(r.incident.id)}`;
   const first = r.incident.firstExposureAt ?? null;
   const closed = r.at >= r.incident.removedAt; // as known at the scenario clock: the removal is in the past
-  const window = first === null ? 'in the window' : closed ? `between ${hm(first)} and ${hm(r.incident.removedAt)} on ${day(first)}` : `since ${hm(first)} on ${day(first)} (still live at ${hm(r.at)}; npm removed them around ${hm(r.incident.removedAt)})`;
+  const window = first === null ? 'in the window' : `between ${hm(first)} and ${hm(r.incident.removedAt)} on ${day(first)}`; // a replay: both ends are history
   const ahead = r.minutesAhead > 0 && first !== null && r.at >= first
-    ? r.at < r.incident.advisoryAt
-      ? ` No advisory exists yet at this clock: the first OSV record came at ${hm(r.incident.advisoryAt)}, ${r.minutesAhead} minutes after the first exposure.`
-      : ` The graph showed this ${r.minutesAhead} minutes before the first OSV record.`
+    ? ` The graph shows the exposure from ${hm(first)}; the first OSV record came at ${hm(r.incident.advisoryAt)}, ${r.minutesAhead} minutes later.`
     : '';
   const total = r.scope?.repos ?? Object.values(r.counts).reduce((a, b) => a + b, 0);
   const fixFor = (e: Exposure) => r.remediations.find((m) => m.repo === e.repo)?.overrides ?? {};
@@ -342,19 +353,26 @@ export function verdictText(r: Report): string {
   // the malicious versions it only holds packages back.
   const overrideStep = (what: string) => closed
     ? 'The malicious versions are gone from npm, so a fresh resolve now gets a clean release: no override is needed.'
-    : `Only if you must re-resolve before npm removes the malicious versions, add ${what}: they pin every dependent whose range admits the malicious version to that release (other majors untouched), so remove them once it is gone.`;
+    : `Only for a re-resolve during the window, add ${what}: they pin every dependent whose range admits the malicious version to that release (other majors untouched) and can come out once npm removed it.`;
 
   // ----- a pasted repo: one plain answer, no team routing -----
   if (r.scope?.kind === 'guest') {
     const e = exposed[0];
     const src = r.scope.source;
     const counterfactual = src?.kind === 'pasted' ? ` (counterfactual: this checks the lockfile you pasted as if it had been committed on ${day(r.at)})`
-      : src?.kind === 'head' || (e ?? r.exposures[0])?.repo.endsWith('@HEAD') ? ' (counterfactual: no lockfile from before the incident was available, so this checks today\'s lockfile)' : '';
+      : src?.kind === 'head' || (e ?? r.exposures[0])?.repo.endsWith('@HEAD')
+        ? src?.reason === 'unavailable'
+          ? ' (counterfactual: GitHub\'s commit history could not be read just now, so this checks today\'s lockfile; try again later for the lockfile as it was)'
+          : ' (counterfactual: no lockfile from before the incident was available, so this checks today\'s lockfile)'
+        : '';
     // The repo's real state at the time: the last lockfile commit before the incident.
     const lockfile = !counterfactual && src?.sha ? ` (its package-lock.json at commit ${src.sha.slice(0, 7)}${src.date ? ` from ${day(src.date)}` : ''}, the last change before the incident)` : '';
     if (!e) {
       const name = r.scope.label;
-      return `Verdict${counterfactual || lockfile}: ${tk(name)} ${counterfactual ? 'would not have been' : 'is not'} exposed to ${who} at ${hm(r.at)} on ${day(r.at)}: no malicious version is in its lockfile or admitted by its declared ranges.`
+      // a clock outside the window answers "not now", which is not "never": say how to check the window itself
+      const when = r.at >= r.incident.removedAt ? ` The malicious versions were removed around ${hm(r.incident.removedAt)}; to check the window itself, run at a clock between ${hm(r.incident.firstPublishAt)} and ${hm(r.incident.removedAt)}.`
+        : r.at < r.incident.firstPublishAt ? ` No malicious version was published yet at ${hm(r.at)}.` : '';
+      return `Verdict${counterfactual || lockfile}: ${tk(name)} ${counterfactual ? 'would not have been' : 'is not'} exposed to ${who} at ${hm(r.at)} on ${day(r.at)}: no malicious version is in its lockfile or admitted by its declared ranges.${when}`
         + (maint.length ? ' It does depend on packages from the compromised account, so watch their next releases.' : '');
     }
     const would = counterfactual ? 'would have been' : 'was';
@@ -367,7 +385,7 @@ export function verdictText(r: Report): string {
       `Do: 1) ${fix.length ? `Replace ${and(fix)} with overrides, regenerate the lockfile with npm install and commit it.` : 'Remove the malicious versions and regenerate the lockfile.'} 2) Rotate secrets that builds and CI could read in the window, and rebuild anything built from this lockfile in it.`,
     ].join('\n');
     return [
-      `Verdict${counterfactual || lockfile}: ${tk(e.repo)} ${would} exposed to ${who} only on a fresh install ${window}. Installing from ${counterfactual ? 'that' : 'your committed'} lockfile ${counterfactual ? 'would have been' : 'was'} safe${pins.length ? `: it pins ${and(pins.map(tk))}` : ''}.${ahead}`,
+      `Verdict${counterfactual || lockfile}: ${tk(e.repo)} ${would} safe if installed from ${counterfactual ? 'that' : 'your committed'} lockfile${pins.length ? `, which pins ${and(pins.map(tk))}` : ''}. Only a fresh install ${window} would have fetched ${and(e.versions.slice(0, 3).map(tk))}${e.versions.length > 3 ? ` and ${e.versions.length - 3} more` : ''}, from ${who}.${ahead}`,
       `Why: ${why(r, e)}.`,
       `Do: 1) Keep installing from your committed lockfile (npm ci)${pins.length ? `; it pins ${and(pins.map(tk))} (safe)` : ''}.${fix.length ? ` 2) ${overrideStep(`overrides that replace ${and(fix)}`)}` : ''}`,
     ].join('\n');

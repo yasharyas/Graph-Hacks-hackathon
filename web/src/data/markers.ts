@@ -18,6 +18,9 @@ export interface Marker {
  * 00:21 UTC" (axios: 00:21:58), so the label arithmetic can exceed the floored figure by one (105.997 min reads 105).
  * An alert that came after the OSV record (axios) says so in its long label.
  */
+/** Whole minutes from `a` to `b`, on whole seconds (the precision the timestamps on screen show), like the server's minutesAhead. */
+export const minutesBetween = (a: number, b: number) => Math.floor((Math.floor(b / 1000) - Math.floor(a / 1000)) / 60);
+
 export function markersOf(i: IncidentMeta): Marker[] {
   const first = i.firstExposureAt ?? null;
   return [
@@ -64,7 +67,7 @@ export function autoplayCaption(i: IncidentMeta, at: number, short = false): str
   const [f, osv] = [hhmm(first), hhmm(i.advisoryAt)];
   if (at < first) return short ? `Before ${f}: nothing malicious yet` : `Before ${f} UTC: no malicious version published yet`;
   if (at < i.advisoryAt) return short ? `${f} malware out · no advisory until ${osv}` : `${f} malicious versions out · exposed repos climb · no advisory until ${osv}`;
-  const ahead = Math.floor((i.advisoryAt - first) / MIN); // the figure's own definition (App: advisory minus first exposure)
+  const ahead = minutesBetween(first, i.advisoryAt); // the figure's own definition (App: advisory minus first exposure)
   return short ? `${osv} first OSV record · ${ahead} min late` : `${osv} first OSV record: scanners can flag it only now, ${ahead} min late`;
 }
 

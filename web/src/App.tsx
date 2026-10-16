@@ -39,6 +39,7 @@ import { flushSync } from 'react-dom';
 import { isMock } from './data/api.ts';
 import { DEFAULT_AT, hasClock } from './data/clock.ts';
 import { downloadReport } from './data/export.ts';
+import { minutesBetween } from './data/markers.ts';
 import { nextStep, requestIdFor } from './data/failure.ts';
 import { isHead, plural, utcLabel } from './data/format.ts';
 import { lockSourceLabel, repoLabel } from './data/repoLabel.ts';
@@ -101,7 +102,7 @@ const readHint = () => {
 };
 const desktop = () => matchMedia('(min-width: 1024px)').matches;
 /** Advisory minus the first moment any repo was exposed: the one definition of "minutes ahead" (server-provided when it knows). */
-const aheadOf = (i: IncidentMeta | null) => (i?.firstExposureAt ? Math.floor((i.advisoryAt - i.firstExposureAt) / MIN) : null);
+const aheadOf = (i: IncidentMeta | null) => (i?.firstExposureAt ? minutesBetween(i.firstExposureAt, i.advisoryAt) : null);
 /** The bad package names the name grep looks for: "ansi-styles, debug +17". */
 const grepNames = (i: IncidentMeta | null) => {
   if (!i) return null;
@@ -192,7 +193,7 @@ export function App() {
   // One definition of "minutes ahead": a pasted repo's own, else advisory minus first exposure, else the server's figure.
   const minutesAhead = isGuest
     ? (report?.minutesAhead ?? null)
-    : (aheadOf(report?.incident ?? null) ?? report?.minutesAhead ?? aheadOf(timeline.incident) ?? (timeline.incident ? Math.floor((timeline.incident.advisoryAt - timeline.incident.firstPublishAt) / MIN) : null));
+    : (aheadOf(report?.incident ?? null) ?? report?.minutesAhead ?? aheadOf(timeline.incident) ?? (timeline.incident ? minutesBetween(timeline.incident.firstPublishAt, timeline.incident.advisoryAt) : null));
   const view = report && { ...report, ...scrubbed, paths: scrubbed ? [] : report.paths, minutesAhead: minutesAhead ?? report.minutesAhead }; // paths describe the run's clock only
   const liveError = live.error && live.error.at === wantAt ? { message: live.error.message, fix: nextStep(live.error, 'exposure'), requestId: requestIdFor(live.error) } : null;
   // The report clock strip is a live region: it is fed the resting clock only, so a scrub changes it once, when it stops.

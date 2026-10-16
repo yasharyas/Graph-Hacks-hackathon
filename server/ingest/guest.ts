@@ -1,6 +1,6 @@
 // Guest ingest: one public GitHub repo, or a pasted package-lock.json, into its own graph: GRAPH.COPY of the registry
 // plus the same write stages as the org graphs (build.ts). Maintainers come from the committed cache only: no npm
-// calls, no GitHub token and no disk cache on this path. The graph name is a server-side hash of the input, never user
+// calls and no disk cache on this path; the server's read-only GitHub token is used for the one commits lookup only. The graph name is a server-side hash of the input, never user
 // text (S3). LRU 4 + TTL 1 h with GRAPH.DELETE on eviction, one ingest at a time, each graph usable only by the
 // sessions that analyzed it (S10).
 import type { AnalyzeEvent, LockSource, ScenarioId } from '../../shared/events.ts';
@@ -48,14 +48,30 @@ export function prepare(b: { url?: unknown; lockfile?: unknown }): Input {
   return { key: `lockfile:${b.lockfile}`, repo: `pasted/${/^[A-Za-z0-9._-]{1,100}$/.test(base) && !/^\.+$/.test(base) ? base : 'lockfile'}`, parsed, source: { kind: 'pasted' } };
 }
 
-// ---------- GitHub (no token: the guest path must not spend or expose ours) ----------
+// ---------- GitHub ----------
 
-async function get(url: string, signal: AbortSignal) {
+// `api`: the commits API, with the server's read-only token when set (unauthenticated is 60 an hour per IP, shared on a
+// hosting provider) and one same-host redirect (a renamed repo). Raw files need neither: raw.githubusercontent follows renames.
+async function get(url: string, signal: AbortSignal, api = false) {
+  const headers: Record<string, string> = { 'user-agent': 'patient-zero' };
+  if (api && process.env.GH_TOKEN) headers.authorization = `Bearer ${process.env.GH_TOKEN}`;
   try {
-    return await safeFetch(url, { headers: { 'user-agent': 'patient-zero' }, signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)]) });
+    return await safeFetch(url, { headers, sameHost: api, signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)]) });
   } catch {
-    throw new HttpError(502, GITHUB_DOWN); // also a redirect (renamed repo), which safeFetch refuses
+    throw new HttpError(502, GITHUB_DOWN);
   }
+}
+
+export type Today = { deps: Record<string, string>; dev: Record<string, string> };
+// Today's package.json (raw, no API quota): only its direct dependency names and ranges, sanitized and capped.
+async function fetchToday(owner: string, repo: string, signal: AbortSignal): Promise<Today | undefined> {
+  const res = await get(`https://raw.githubusercontent.com/${owner}/${repo}/HEAD/package.json`, signal).catch(() => null);
+  if (!res?.ok) return void res?.body?.cancel().catch(() => {});
+  const pkg = safeJson(await capped(res).catch(() => ''), 1_000_000) as { dependencies?: unknown; devDependencies?: unknown } | null;
+  const pick = (m: unknown) => Object.fromEntries(Object.entries(m && typeof m === 'object' ? m : {}).slice(0, 2000)
+    .filter(([k, v]) => /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/i.test(k) && k.length <= 214 && typeof v === 'string')
+    .map(([k, v]) => [k, (v as string).replace(/[^\x20-\x7e]/g, '').slice(0, 128)]));
+  return pkg ? { deps: pick(pkg.dependencies), dev: pick(pkg.devDependencies) } : undefined;
 }
 
 // Streams the body and stops at 5 MB: never buffers an unbounded response.
@@ -75,11 +91,10 @@ async function capped(res: Response): Promise<string> {
   return Buffer.concat(chunks).toString('utf8');
 }
 
-// The lockfile as of the scenario snapshot (commits API, unauthenticated: 60 requests an hour per server IP). Without
-// a historical commit (rate-limited, or the lockfile is newer) it falls back to today's lockfile, labelled in the repo id.
+// The lockfile as of the scenario snapshot (commits API). Without a historical commit (none before the incident, or the
+// API unavailable) it falls back to today's lockfile, labelled in the repo id and with the reason in `source`.
 async function fetchLock({ owner, repo }: { owner: string; repo: string }, snapshotAt: number, signal: AbortSignal, bad: string[] = []) {
-  // A redirect (GitHub answers some repos with a 301 to /repositories/<id>) or a 403 rate limit: no history, use HEAD.
-  const commits = await get(`https://api.github.com/repos/${owner}/${repo}/commits?path=package-lock.json&until=${new Date(snapshotAt).toISOString()}&per_page=1`, signal).catch(() => null);
+  const commits = await get(`https://api.github.com/repos/${owner}/${repo}/commits?path=package-lock.json&until=${new Date(snapshotAt).toISOString()}&per_page=1`, signal, true).catch(() => null);
   if (commits?.status === 404) throw new HttpError(404, `github.com/${owner}/${repo} is not a public repo.`);
   let sha: unknown;
   let date: unknown;
@@ -94,8 +109,9 @@ async function fetchLock({ owner, repo }: { owner: string; repo: string }, snaps
   if (res.status === 404) throw new HttpError(404, await noLockfile(owner, repo, signal, bad));
   if (!res.ok) throw new HttpError(502, GITHUB_DOWN);
   const { name: _name, ...parsed } = checkLock(await capped(res));
-  const source: LockSource = ref ? { kind: 'snapshot', sha: ref, ...(Number.isFinite(when) && { date: when }) } : { kind: 'head' };
-  return { parsed, sha: ref, source, repo: ref ? `${owner}/${repo}` : `${owner}/${repo}@HEAD` }; // @HEAD: today's lockfile, a counterfactual
+  const source: LockSource = ref ? { kind: 'snapshot', sha: ref, ...(Number.isFinite(when) && { date: when }) } : { kind: 'head', reason: commits?.ok ? 'no-history' : 'unavailable' };
+  const today = ref ? await fetchToday(owner, repo, signal) : undefined; // only a snapshot can differ from today
+  return { parsed, sha: ref, source, today, repo: ref ? `${owner}/${repo}` : `${owner}/${repo}@HEAD` }; // @HEAD: today's lockfile, a counterfactual
 }
 
 // Which lockfile the repo uses instead, so the error says what to do (HEAD requests only: nothing is downloaded).
@@ -110,7 +126,7 @@ async function noLockfile(owner: string, repo: string, signal: AbortSignal, bad:
 
 // ---------- graphs ----------
 
-type Entry = { graph: string; scenario: ScenarioId; repo: string; entries: number; used: number; sessions: Set<string>; source: LockSource };
+type Entry = { graph: string; scenario: ScenarioId; repo: string; entries: number; used: number; sessions: Set<string>; source: LockSource; today?: Today };
 const guests = new Map<string, Entry>(); // insertion order = LRU order: a touch re-inserts
 const inflight = new Map<string, Promise<void>>();
 let data: ReturnType<typeof load> | undefined;
@@ -167,9 +183,10 @@ export async function* analyze(input: Input, scenario: ScenarioId, session: stri
     let { parsed, repo } = input;
     let sha: string | null = null;
     let source: LockSource = input.source ?? { kind: 'pasted' };
+    let today: Today | undefined;
     if (input.github) {
       yield progress('fetch', 0);
-      ({ parsed, repo, sha, source } = await fetchLock(input.github, snapshotAt, signal, inc.versions.map((v) => v.id)));
+      ({ parsed, repo, sha, source, today } = await fetchLock(input.github, snapshotAt, signal, inc.versions.map((v) => v.id)));
       yield progress('fetch', 1);
     }
     yield progress('parse', 1);
@@ -178,7 +195,13 @@ export async function* analyze(input: Input, scenario: ScenarioId, session: stri
     yield progress('write', 0);
     const fdb = await db();
     if ((await fdb.list()).includes(name)) await fdb.selectGraph(name).delete(); // orphan from a restart
-    await fdb.selectGraph(registryGraph(prefix)).copy(name);
+    // GRAPH.COPY forks; a fork that collides with another (a background save) fails once in a while: retry once
+    const copy = () => fdb.selectGraph(registryGraph(prefix)).copy(name);
+    await copy().catch(async (err: unknown) => {
+      if (!/could not fork/i.test(String((err as Error)?.message))) throw err;
+      await new Promise((r) => setTimeout(r, 300));
+      return copy();
+    });
     await writeRepos(name, GUEST_ORG, scenario, snapshotAt, repos);
     yield progress('write', 1);
     yield progress('enrich', 0);
@@ -188,7 +211,7 @@ export async function* analyze(input: Input, scenario: ScenarioId, session: stri
     await writeAdmits(name, repos, badVersions(inc, data.packuments), Date.parse(inc.removedAt));
     yield progress('admits', 1);
 
-    guests.set(name, (e = { graph: name, scenario, repo, entries: parsed!.deps.length, used: Date.now(), sessions: new Set([session]), source }));
+    guests.set(name, (e = { graph: name, scenario, repo, entries: parsed!.deps.length, used: Date.now(), sessions: new Set([session]), source, today }));
     built = true;
     await sweep();
     yield { type: 'ready', graph: name, repo, entries: e.entries };

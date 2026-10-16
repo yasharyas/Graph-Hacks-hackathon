@@ -2,6 +2,7 @@
 // graph returned. The narration text is built from the report (narrate.ts); one LLM call picks an analyst observation
 // that the guard must pass in full. CLI: node --env-file-if-exists=.env server/agent/triage.ts qix-2025-09-08 2025-09-08T13:30:00Z
 import { randomUUID } from 'node:crypto';
+import semver from 'semver';
 import type {
   Concentration, Exposure, ExposurePath, IncidentMeta, LlmMode, LockSource, Notice, OwnerGroup, Remediation, Report, ScannerHit, ScenarioId, Tier, ToolName, ToolResult, TriageEvent,
 } from '../../shared/events.ts';
@@ -16,7 +17,7 @@ const DAY = 86_400_000;
 // Most severe first: LOCKED, WOULD_PULL prod, WOULD_PULL dev, MAINTAINER, CLEAN; then shallowest.
 const rank = (e: Exposure) => ({ LOCKED: 0, WOULD_PULL: e.dev ? 2 : 1, MAINTAINER: 3, CLEAN: 4 })[e.tier];
 
-export async function* triage({ graph: g, scenario, at, alert, session, source, signal }: { graph: Graph; scenario: ScenarioId; at: number; alert?: string; session?: string; source?: LockSource; signal?: AbortSignal }): AsyncGenerator<TriageEvent> {
+export async function* triage({ graph: g, scenario, at, alert, session, source, today, signal }: { graph: Graph; scenario: ScenarioId; at: number; alert?: string; session?: string; source?: LockSource; today?: Today; signal?: AbortSignal }): AsyncGenerator<TriageEvent> {
   const t0 = performance.now();
   const runId = randomUUID();
   let n = 0;
@@ -91,6 +92,7 @@ export async function* triage({ graph: g, scenario, at, alert, session, source, 
       const p = { repo: e.repo, versions: e.versions, at };
       remediations.push(...T.rowsOf<Remediation>(yield* step('draft_remediation', p, () => T.draftRemediation(g, p))));
     }
+    if (today) for (const m of remediations) m.today = todayNotes(m, today);
     const concentration = T.rowsOf<Concentration>(yield* step('concentration_risk', { top: 3 }, () => T.concentrationRisk(g, { top: 3 })));
     const scan = yield* step('scanner_view', { incident: incident.id, at }, () => T.scannerView(g, { incident: incident.id, at }));
 
@@ -139,6 +141,30 @@ export async function* triage({ graph: g, scenario, at, alert, session, source, 
 // One plain-text notice per owning team (synthetic team channels only).
 // One plain-text notice per owning team (synthetic team channels only): each repo with its tier in words, what it
 // reaches, and its own fix, so the message stands on its own in Slack.
+export type Today = { deps: Record<string, string>; dev: Record<string, string> };
+// A fix drafted from a pre-incident snapshot, read against today's package.json (direct dependencies only): an override
+// that today's declared range no longer needs would hold the package back, and a pin for a package no longer declared
+// would add it.
+export function todayNotes(m: Remediation, today: Today): string[] {
+  const declared = (n: string) => today.deps[n] ?? today.dev[n];
+  const notes: string[] = [];
+  for (const [key, pin] of Object.entries(m.overrides)) {
+    const at = key.lastIndexOf('@');
+    const [name, bad] = at > 0 ? [key.slice(0, at), key.slice(at + 1)] : [key, ''];
+    const range = declared(name);
+    if (range && bad && semver.validRange(range, { loose: true }) && !semver.satisfies(bad, range, { loose: true }))
+      notes.push(`Today's package.json declares ${name} ${range}, which no longer admits ${bad}: skip the ${key} override (it would hold ${name} at ${pin}).`);
+  }
+  for (const [name, block, other] of [...Object.keys(m.direct ?? {}).map((n) => [n, 'dependencies', 'devDependencies'] as const), ...Object.keys(m.devDirect ?? {}).map((n) => [n, 'devDependencies', 'dependencies'] as const)]) {
+    const here = block === 'dependencies' ? today.deps : today.dev;
+    if (name in here) continue;
+    notes.push((block === 'dependencies' ? today.dev : today.deps)[name] !== undefined
+      ? `Today's package.json declares ${name} in ${other}, not ${block}: move its pin there.`
+      : `Today's package.json no longer declares ${name}: skip its pin.`);
+  }
+  return notes.length ? notes : ["Checked against today's package.json: its direct dependencies still match this fix."];
+}
+
 function notices(incident: IncidentMeta, exposures: Exposure[], owners: OwnerGroup[], remediations: Remediation[], paths: ExposurePath[]): Notice[] {
   // The overrides, plus the root dependencies npm needs set to the same version (EOVERRIDE otherwise).
   const fix = (repo: string) => {

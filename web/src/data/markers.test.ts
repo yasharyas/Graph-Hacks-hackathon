@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { autoplayCaption, clampCentre, markersOf, placeLabels } from './markers.ts';
+import { autoplayCaption, clampCentre, markersOf, minutesBetween, placeLabels } from './markers.ts';
 import { utc } from './format.ts';
 import type { IncidentMeta } from './types.ts';
 
@@ -13,13 +13,13 @@ const inc = (x: Spec): IncidentMeta => ({ title: '', maintainer: null, versions:
 const minutes = (hhmm: string) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3));
 
 test('the first marker is the first exposure, labelled with its own minute (as the verdict says it)', () => {
-  for (const [i, ahead, first] of [[QIX, 74, '13:12'], [AXIOS, 105, '00:21']] as const) {
+  for (const [i, ahead, first] of [[QIX, 74, '13:12'], [AXIOS, 106, '00:21']] as const) {
     const [exposed, alert, osv] = markersOf(inc(i));
     assert.equal(exposed!.key, 'exposed');
     assert.ok(minutes(utc(osv!.shown)) - minutes(utc(exposed!.shown)) - ahead <= 1); // floored figure, truncated labels
     assert.equal(utc(exposed!.shown), first);
     assert.equal(alert!.long.endsWith('after OSV'), i.alertAt > i.advisoryAt);
-    assert.equal(Math.floor((i.advisoryAt - i.firstExposureAt!) / 60_000), ahead); // the App's figure
+    assert.equal(minutesBetween(i.firstExposureAt!, i.advisoryAt), ahead); // the App's figure, on whole seconds
   }
   assert.equal(markersOf(inc(AXIOS))[0]!.t, AXIOS.firstExposureAt); // the tick sits at the true instant, not the 23:59 publish
 });
@@ -76,7 +76,7 @@ test('the autoplay caption has three states, keyed to the first exposure and the
   assert.equal(autoplayCaption(q, at('13:13')), '13:12 malicious versions out · exposed repos climb · no advisory until 14:26');
   assert.equal(autoplayCaption(q, at('14:26')), autoplayCaption(q, at('13:40'))); // 14:26:00 is before 14:26:51: one caption all the way
   assert.equal(autoplayCaption(q, at('14:30')), '14:26 first OSV record: scanners can flag it only now, 74 min late');
-  assert.equal(autoplayCaption(inc(AXIOS), D('2026-03-31T02:10:00Z'), true), '02:07 first OSV record · 105 min late'); // the figure's 105, not 02:07 − 00:21
+  assert.equal(autoplayCaption(inc(AXIOS), D('2026-03-31T02:10:00Z'), true), '02:07 first OSV record · 106 min late'); // the figure's 105, not 02:07 − 00:21
   for (const t of ['13:05', '13:40', '14:30']) assert.ok(autoplayCaption(q, at(t), true).length <= 44, autoplayCaption(q, at(t), true));
 });
 

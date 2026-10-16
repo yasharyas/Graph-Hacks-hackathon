@@ -33,9 +33,9 @@ test('org verdict: complete, plain-language, cited, guard-clean, no markdown', (
   clean(r, t);
   assert.ok(guard(t, evidenceSet(r)).total > 15);
   const [verdict, why, notify, todo] = t.split('\n');
-  assert.match(verdict, /^Verdict: 5 of 17 repos are exposed to the `qix` account compromise at 13:30 UTC on 2025-09-08\. No advisory exists yet at this clock: the first OSV record came at 14:26 UTC, 74 minutes after the first exposure\./);
+  assert.match(verdict, /^Verdict: 5 of 17 repos are exposed to the `qix` account compromise at 13:30 UTC on 2025-09-08\. The graph shows the exposure from 13:12 UTC; the first OSV record came at 14:26 UTC, 74 minutes later\./);
   assert.match(verdict, /LOCKED, 1 repo \(`acme\/checkout-web`\): the lockfile itself pins the malicious version, so rotate secrets and rebuild\./);
-  assert.match(verdict, /WOULD_PULL, 4 repos \(4 prod, 0 dev-only\): exposed only on a fresh install since 13:12 UTC on 2025-09-08 \(still live at 13:30 UTC; npm removed them around 15:15 UTC\); installing from the committed lockfile was safe\./);
+  assert.match(verdict, /WOULD_PULL, 4 repos \(4 prod, 0 dev-only\): exposed only on a fresh install between 13:12 UTC and 15:15 UTC on 2025-09-08; installing from the committed lockfile was safe\./);
   assert.match(verdict, /1 more repo depends on packages from the compromised account/); // MAINTAINER is counted, never listed as exposed
   assert.match(why, /^Why: `acme\/checkout-web` locks `debug@4\.4\.2` through `express@5\.1\.0` \[E1\], and also `chalk@5\.6\.1`; /);
   assert.match(why, /`mochajs\/mocha` declares `\^4\.3\.5`, which admits `debug@4\.4\.2` \[E2\]/);
@@ -45,7 +45,7 @@ test('org verdict: complete, plain-language, cited, guard-clean, no markdown', (
   assert.ok(!notify.includes('http-party/http-server'));
   assert.match(notify, /^Notify: `Payments` \(`#team-payments`\): `acme\/checkout-web` \(LOCKED\); /);
   assert.match(todo, /^Do: 1\) For `acme\/checkout-web` \[E1\]: rotate secrets/); // the step that cannot wait comes first
-  assert.match(todo, /2\) Keep installing the 4 WOULD_PULL repos from their committed lockfiles \(npm ci\): none pins a malicious version\. 3\) Only if you must re-resolve/);
+  assert.match(todo, /2\) Keep installing the 4 WOULD_PULL repos from their committed lockfiles \(npm ci\): none pins a malicious version\. 3\) Only for a re-resolve during the window/);
   assert.match(todo, /replace `chalk@5\.6\.1` with `chalk@5\.6\.0`|replace `debug@4\.4\.2` with `debug@4\.4\.1`/);
   assert.doesNotMatch(t, /\*\*|#your-team|Your team/);
 });
@@ -104,15 +104,15 @@ test('a pasted repo gets one plain answer: what its lockfile pins, no Notify, co
   r.notices = [];
   let t = verdictText(r);
   clean(r, t);
-  assert.match(t, /^Verdict: `mochajs\/mocha` was exposed to the `qix` account compromise only on a fresh install since 13:12 UTC on 2025-09-08 \(still live at 13:30 UTC; npm removed them around 15:15 UTC\)\. Installing from your committed lockfile was safe: it pins `debug@4\.3\.7`\./);
+  assert.match(t, /^Verdict: `mochajs\/mocha` was safe if installed from your committed lockfile, which pins `debug@4\.3\.7`\. Only a fresh install between 13:12 UTC and 15:15 UTC on 2025-09-08 would have fetched `debug@4\.4\.2`, from the `qix` account compromise\./);
   // which lockfile was judged: the last commit before the incident, or a pasted file (a counterfactual)
   r.scope = { ...r.scope, source: { kind: 'snapshot', sha: '5f8e8a8'.padEnd(40, '0'), date: Date.parse('2025-09-01T10:00:00Z') } };
-  assert.match(verdictText(r), /^Verdict \(its package-lock\.json at commit 5f8e8a8 from 2025-09-01, the last change before the incident\): `mochajs\/mocha` was exposed/);
+  assert.match(verdictText(r), /^Verdict \(its package-lock\.json at commit 5f8e8a8 from 2025-09-01, the last change before the incident\): `mochajs\/mocha` was safe if installed/);
   clean(r, verdictText(r));
   r.scope = { ...r.scope, source: { kind: 'pasted' } };
   assert.match(verdictText(r), /^Verdict \(counterfactual: this checks the lockfile you pasted as if it had been committed on 2025-09-08\): /);
   r.scope = { kind: 'guest', label: 'mochajs/mocha', repos: 1 };
-  assert.match(t, /Do: 1\) Keep installing from your committed lockfile \(npm ci\); it pins `debug@4\.3\.7` \(safe\)\. 2\) Only if you must re-resolve before npm removes the malicious versions, add overrides that replace `debug@4\.4\.2` with `debug@4\.4\.1`: they pin every dependent whose range admits the malicious version to that release/);
+  assert.match(t, /Do: 1\) Keep installing from your committed lockfile \(npm ci\); it pins `debug@4\.3\.7` \(safe\)\. 2\) Only for a re-resolve during the window, add overrides that replace `debug@4\.4\.2` with `debug@4\.4\.1`: they pin every dependent whose range admits the malicious version to that release/);
   assert.doesNotMatch(t, /Notify|#your-team|Your team/);
 
   const head = 'mochajs/mocha@HEAD';
@@ -122,7 +122,7 @@ test('a pasted repo gets one plain answer: what its lockfile pins, no Notify, co
   r.scope.label = head;
   t = verdictText(r);
   clean(r, t);
-  assert.match(t, /^Verdict \(counterfactual: no lockfile from before the incident was available, so this checks today's lockfile\): `mochajs\/mocha@HEAD` would have been exposed to the `qix` account compromise only on a fresh install .*\. Installing from that lockfile would have been safe/);
+  assert.match(t, /^Verdict \(counterfactual: no lockfile from before the incident was available, so this checks today's lockfile\): `mochajs\/mocha@HEAD` would have been safe if installed from that lockfile.*\. Only a fresh install between .* would have fetched `debug@4\.4\.2`, from the `qix` account compromise\./);
 
   r.exposures = [exposure('pasted/app', 'LOCKED', { versions: ['debug@4.4.2'], locked: ['debug@4.4.2'] })];
   r.scope.label = 'pasted/app';

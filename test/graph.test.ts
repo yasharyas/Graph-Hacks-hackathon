@@ -93,16 +93,16 @@ describe('graph', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, ()
     assert.ok(!cli.locked!.some((v) => cli.versions.includes(v)), 'a WOULD_PULL lockfile pins no malicious version');
     const [fix] = T.rowsOf<{ overrides: Record<string, string>; steps: string[] }>(await T.draftRemediation(QIX, { repo: 'npm/cli', versions: cli.versions, at: QAT }));
     assert.match(fix.steps[0], /^Keep installing from your committed lockfile \(npm ci\): it pins .*chalk@5\.4\.1.* \(safe\)$/);
-    assert.match(fix.steps[1], /^Only if you must re-resolve dependencies while the malicious versions are live \(they stopped resolving at 2025-09-08 15:15Z\), add the overrides "chalk@5\.6\.1": "5\.6\.0".* to package\.json: they pin every dependent whose range admits the malicious version to that release/);
+    assert.match(fix.steps[1], /^Only for a re-resolve during the window \(it closed when the malicious versions stopped resolving at 2025-09-08 15:15Z\): add the overrides "chalk@5\.6\.1": "5\.6\.0".* to package\.json; they pin every dependent whose range admits the malicious version to that release/);
     assert.ok(Object.keys(fix.overrides).every((k) => cli.versions.includes(k)));
     assert.ok(!fix.steps.some((s) => /rotate/i.test(s)));
   });
 
-  test('firstExposureAt per graph: qix 13:12:10 (74 min ahead), axios 00:21:58 (105 min); a locked repo is not exposed before its lockfile could exist', async () => {
+  test('firstExposureAt per graph: qix 13:12:10 (74 min ahead), axios 00:21:58 (106 min); a locked repo is not exposed before its lockfile could exist', async () => {
     const q = (await T.incidentHeader(QIX, 'qix-2025-09-08'))!;
     const a = (await T.incidentHeader(AX, 'axios-2026-03-31'))!;
     assert.deepEqual([q.incident.firstExposureAt, T.minutesAhead(q.incident), q.org], [Date.parse('2025-09-08T13:12:10.343Z'), 74, 'acme']);
-    assert.deepEqual([a.incident.firstExposureAt, T.minutesAhead(a.incident)], [Date.parse('2026-03-31T00:21:58.168Z'), 105]);
+    assert.deepEqual([a.incident.firstExposureAt, T.minutesAhead(a.incident)], [Date.parse('2026-03-31T00:21:58.168Z'), 106]);
     // acme/billing-api locks axios@1.14.1 (00:21:58) and plain-crypto-js@4.2.1 (23:59:12): it can't be exposed at 00:00
     const billing = async (at: number) => (await exposure(AX, 'axios-2026-03-31', at)).find((e) => e.repo === 'acme/billing-api')!.tier;
     assert.notEqual(await billing(Date.parse('2026-03-31T00:00:00Z')), 'LOCKED');
@@ -213,7 +213,7 @@ describe('graph', { skip: !up && `FalkorDB unreachable at ${host}:${port}` }, ()
     const ax: TriageEvent[] = [];
     for await (const e of triage({ graph: AX, scenario: 'axios-2026-03-31', at: AAT })) ax.push(e);
     const ar = (ax.find((e) => e.type === 'report') as Extract<TriageEvent, { type: 'report' }>).report;
-    // axios@1.14.1 at 00:21:58.168Z -> first OSV record (MAL-2026-2306) at 02:07:58Z: 105 min 59.8 s, floored like qix's 74
-    assert.deepEqual([ar.counts.LOCKED, ar.counts.WOULD_PULL, ar.minutesAhead], [1, 9, 105]);
+    // axios@1.14.1 at 00:21:58.168Z -> first OSV record (MAL-2026-2306) at 02:07:58Z: 106 min on whole seconds (105.997 to the millisecond), floored like qix's 74
+    assert.deepEqual([ar.counts.LOCKED, ar.counts.WOULD_PULL, ar.minutesAhead], [1, 9, 106]);
   });
 });
