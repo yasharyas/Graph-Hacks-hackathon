@@ -5,7 +5,7 @@ canonical_url: https://dev.to/yasharyas/74-minutes-before-the-advisory-graph-tri
 tags: falkordb, security, npm, graphdatabase
 ---
 
-*Patient Zero is my entry to FalkorDB Graph Hacks, Track 1 (Agents That Act on Connected Data). [Live demo](https://patient-zero-rayp.onrender.com). [Code](https://github.com/yasharyas/Graph-Hacks-hackathon), MIT, with [every Cypher query in the README](https://github.com/yasharyas/Graph-Hacks-hackathon#every-cypher-query) and a one-command local run (`docker compose up --build`).*
+*I built Patient Zero for FalkorDB Graph Hacks, Track 1 (Agents That Act on Connected Data). [Demo video](https://youtu.be/5kTCJAjpPiw). [Live demo](https://patient-zero-rayp.onrender.com). [Code](https://github.com/yasharyas/Graph-Hacks-hackathon), MIT, with [every Cypher query in the README](https://github.com/yasharyas/Graph-Hacks-hackathon#every-cypher-query) and a one-command local run (`docker compose up --build`).*
 
 ## Two incidents, one gap
 

@@ -4,11 +4,11 @@
 
 ![The landing screen at 14:30 UTC on 2025-09-08: 21 repos one install from malware (1 LOCKED, 20 WOULD_PULL) next to 1 OSV advisory, and the circled figure "74 min before the OSV record existed"](web/public/og-card.png)
 
-**[Live demo](https://patient-zero-rayp.onrender.com)** · **Video (2:30): coming 18 Oct** · [Run locally](#run-it-locally) · [Data model](#graph-data-model) · [Cypher](#every-cypher-query) · [MCP](#mcp-transcript) · [AI use](#ai-use-disclosure) · [Blog](https://dev.to/yasharyas/74-minutes-before-the-advisory-graph-triage-for-npm-account-hijacks-20j9)
+**[Live demo](https://patient-zero-rayp.onrender.com)** · **[Video (2:23)](https://youtu.be/5kTCJAjpPiw)** · [Run locally](#run-it-locally) · [Data model](#graph-data-model) · [Cypher](#every-cypher-query) · [MCP](#mcp-transcript) · [AI use](#ai-use-disclosure) · [Blog](https://dev.to/yasharyas/74-minutes-before-the-advisory-graph-triage-for-npm-account-hijacks-20j9)
 
 Built for **FalkorDB Graph Hacks** (WeMakeDevs), **Track 1: Agents That Act on Connected Data**. The live demo needs no sign-up: it opens on a seeded demo org, or you paste your own repo. MIT licensed. Runs on free tiers only.
 
-## Judges: verify it in 60 seconds
+## Verify it in 60 seconds
 
 1. **Land and watch.** The timeline autoplays the qix incident from 13:05 to 14:30 UTC in about 12 s. From about 2 s the hero reads "21 repos one install from malware" (1 `LOCKED`, 20 `WOULD_PULL`) next to "Advisory scanner 0", and the caption reads "no advisory for 74 min, until 14:26". Only the circle around the "74 min" figure waits until the playhead passes 14:26.
 2. **Run triage.** Click **Run triage at 13:30 UTC**. 49 read-only graph calls stream in as tool cards, each with its rows, its Cypher and FalkorDB's time in ms. The verdict, the notify list and the fix steps are built from those rows.

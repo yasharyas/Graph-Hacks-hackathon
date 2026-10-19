@@ -1,5 +1,7 @@
 # Submission form copy
 
+> The Graph Hacks deadline (October 18, 23:59 IST) was missed by a few hours. This copy is kept for reference and for the late-entry request sent to the organizers on 2026-10-19.
+
 Paste-ready text for the Graph Hacks form. The numbers come from `docs/proof-points.md`.
 
 ## Title
@@ -34,7 +36,7 @@ Built with Claude Code under the author's direction, with AI-run QA and security
 
 ## Links (in judge order)
 
-1. Video: `https://<video-url>`
+1. Video: https://youtu.be/5kTCJAjpPiw
 2. Live demo: https://patient-zero-rayp.onrender.com
 3. Repo: https://github.com/yasharyas/Graph-Hacks-hackathon
 4. Blog: https://dev.to/yasharyas/74-minutes-before-the-advisory-graph-triage-for-npm-account-hijacks-20j9
@@ -45,7 +47,7 @@ Built with Claude Code under the author's direction, with AI-run QA and security
 
 ## Placeholders to fill before submitting
 
-- [ ] Video URL: `README.md` (links row, replace "Video (2:30): coming 18 Oct" with `[Video (2:30)](<url>)`), this file
+- [x] Video URL: `README.md` (links row, replace "Video (2:30): coming 18 Oct" with `[Video (2:30)](<url>)`), this file
 - [x] Live URL (https://patient-zero-rayp.onrender.com): `README.md` (links row), `blog/74-minutes-before-the-advisory.md` and the dev.to post (twice), `web/index.html` (og tags), `deploy/README.md`, the GitHub website field, `video/script.md` (end card), `docs/launch-posts.md`, this file
 - [x] Blog URL: `docs/launch-posts.md`, this file
 - [x] Blog published on dev.to (2026-10-16, marked AI-assisted)
