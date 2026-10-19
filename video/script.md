@@ -119,7 +119,7 @@ Each beat gives the screen, the clicks and the lines. The lines themselves (text
 | U6 | 1:53.7–2:00.2 | 6.5 | Terminal | OC-12 | S6 |
 | U7 | 2:00.2–2:09 | 8.9 | UI | OC-13, LG-08 | S7 |
 | P1 | 2:09–2:16.6 | 7.5 | UI + brush arrow | LG-09, OC-14 | S8 |
-| END | 2:16.6–2:22.6 | 6.0 | Card + brush underline | AU-01 (optional), LG-10 | end |
+| END | 2:16.6–2:22.6 | 6.0 | Card + brush underline | AU-01 (optional) | end |
 
 The sum is 142.6 s.
 
@@ -327,7 +327,7 @@ Everything is left-aligned on `#0A0A0B`; only the "74 min" figure is ever centre
 
 **Cues:**
 - "Claude" (AU-01): the AI-use line underlines.
-- "Voices" (LG-10): the disclosure brightens.
+- The disclosure brightens at 1.4 s. (The spoken "Voices: ElevenLabs, A-I." line was cut at the author's request on 2026-10-19; the written disclosure stays on the card.)
 
 **Audio:** SFX-13 end tone on the title. M4 resolves on an open fifth, and its tail ends 1 s after the last frame.
 
@@ -368,8 +368,7 @@ Everything is left-aligned on `#0A0A0B`; only the "74 min" figure is ever centre
 {"id":"LG-08","speaker":"ledger","beat":"U7","tts":"[satisfied] Triage complete. Nine tools.","cues":[["Nine","status line"]],"cap":"Triage complete: 9 tools · npm ci is safe"},
 {"id":"LG-09","speaker":"ledger","beat":"P1","tts":"[dramatic] First advisory: fourteen twenty-six.","cues":[["fourteen","arrow starts at the 14:26 mark"]],"cap":"First OSV record: 14:26"},
 {"id":"OC-14","speaker":"oncall","beat":"P1","tts":"[triumphant] The graph needed no advisory. Only the alarm.","cues":[["alarm","arrowhead lands on 13:16"]],"cap":"No advisory needed · only the alarm"},
-{"id":"AU-01","speaker":"author","beat":"END","optional":true,"tts":"I built this with Claude Code. Every query is in the read-me, and I can explain each one.","cues":[["Claude","AI-use line underlines"]],"cap":"Built with Claude Code · every query is in the README"},
-{"id":"LG-10","speaker":"ledger","beat":"END","tts":"Voices: ElevenLabs, A-I.","cues":[["Voices","disclosure brightens"]],"cap":"Voices: ElevenLabs (AI)"}
+{"id":"AU-01","speaker":"author","beat":"END","optional":true,"tts":"I built this with Claude Code. Every query is in the read-me, and I can explain each one.","cues":[["Claude","AI-use line underlines"]],"cap":"Built with Claude Code · every query is in the README"}
 ]
 ```
 
@@ -549,7 +548,7 @@ These counts are verified by script against the JSON above; see `docs/decisions.
 ## AI disclosure
 
 - **End card** (24 px or larger, held at least 4 s): "Voices: ElevenLabs (AI) · Built with Claude Code under the author's direction · docs/AI_USE.md"
-- **Spoken:** LG-10, "Voices: ElevenLabs, A-I."
+- **Spoken:** none. The spoken line was cut on 2026-10-19 at the author's request; the end card and the description carry the disclosure.
 - **Video description:**
 
 > Voices: ElevenLabs (AI): "Ledger" (Alice) reads only what is on screen; "On-call" (Viraj) is the engineer. Sound effects: ElevenLabs (AI). Music: synthesized locally from code (no AI model). Patient Zero was built with Claude Code (Anthropic) under the author's direction; the author reviewed every Cypher query (docs/AI_USE.md). The pixel and brush scenes are rendered from code (p5.brush 2.2.3). The UI footage is the production build in replay mode (`LLM_CHAIN=replay`), so the analyst pick is a recorded observation id and every take is identical. Every number on screen is in docs/proof-points.md. The demo org is 20 real public repos plus one badged sample repo, with lockfiles as of 2025-09-08. WOULD_PULL is exposure surface, not compromise: a fresh install in the window would have fetched the malicious version, and npm ci from the committed lockfile was safe throughout.
